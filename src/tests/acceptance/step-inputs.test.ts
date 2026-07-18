@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, userText, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
 
-describe.skip("a step reading its predecessor's output via context.inputs", () => {
+describe("a step reading its predecessor's output via context.inputs", () => {
   const pipeline = defineGraph("pipeline", (flow) => {
     const first = flow.step(outputs(() => ({ value: 42 })));
     const second = flow.step(outputs((context) => context.inputs[0]));
