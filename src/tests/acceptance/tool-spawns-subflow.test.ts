@@ -1,0 +1,72 @@
+import { describe, it, expect } from "vitest";
+import { defineGraph, runFlow, runtime, provide, tool, userText, adapters } from "../../index.js";
+import { neverCalled, textOf, loggedEventTypes } from "./support.js";
+
+describe.skip("a tool handler spawning a child flow", () => {
+  // Deferred to a factory, not built at describe-scope: `tool()` isn't real
+  // yet, and a describe body runs even when its `it`s are skipped.
+  function fixture() {
+    const child = defineGraph("child", (flow) => {
+      const step = flow.step((context) =>
+        Promise.resolve(context.output(`answered: ${textOf(context.thread.messages.at(-1))}`)),
+      );
+      flow.entry(step);
+      step.then(flow.finish);
+    });
+
+    const research = tool<{ question: string }, unknown>(
+      "research",
+      "Spawn a child flow to answer a question.",
+    );
+
+    const parent = defineGraph("parent", (flow) => {
+      const ask = flow.step(async (context) =>
+        context.output(await context.call(research, { question: "what is x" })),
+      );
+      flow.entry(ask);
+      ask.then(flow.finish);
+    });
+
+    return { parent, research, child };
+  }
+
+  it("returns the child flow's result as the tool's output", async () => {
+    // given a tool whose handler spawns a child flow and returns its result
+    const { parent, research, child } = fixture();
+    const ready = await runtime({
+      models: neverCalled,
+      bindings: [
+        provide(research, (input, context) => context.runFlow(child, userText(input.question))),
+      ],
+      store: adapters.stores.memoryStore(),
+    });
+
+    // when the flow runs
+    const result = await runFlow(parent, userText("go"), ready);
+
+    // then the tool's output is the child flow's result
+    expect(result).toBe("answered: what is x");
+  });
+
+  it("appends the child flow's messages to the same session log", async () => {
+    // given the same fixture, and a store we can inspect after the run
+    const { parent, research, child } = fixture();
+    const store = adapters.stores.memoryStore();
+    const ready = await runtime({
+      models: neverCalled,
+      bindings: [
+        provide(research, (input, context) => context.runFlow(child, userText(input.question))),
+      ],
+      store,
+    });
+
+    // when the flow runs
+    await runFlow(parent, userText("go"), ready);
+
+    // then the log holds both the parent's and the child's messages
+    // (loose on exact shape — confirm against reference.md's parentThreadId/spawn
+    // behaviour when this slice is active)
+    const types = loggedEventTypes(store);
+    expect(types.filter((type) => type === "message").length).toBeGreaterThanOrEqual(2);
+  });
+});
