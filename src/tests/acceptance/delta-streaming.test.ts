@@ -1,12 +1,28 @@
 import { describe, it, expect } from "vitest";
 import { adapters } from "../../index.js";
-import { loggedEnvelopes } from "./support.js";
 import type { ThreadId } from "../../index.js";
+import { loggedEnvelopes } from "./support.js";
 
-describe.skip("the delta stream: store.open/commit/abort, store.changes()", () => {
+describe.skip("streaming partial content before it's committed to the log", () => {
   // Every scenario here needs memoryStore's open()/changes() to be real — both
   // currently throw/no-op. Written now so the shape is pinned down before that
   // slice starts; each `it` names the reference.md passage it verifies.
+
+  // Guards a `for await` loop against hanging forever if `changes()` never
+  // yields — a real risk while the implementation underneath is still a stub.
+  async function firstEnvelope(store: ReturnType<typeof adapters.stores.memoryStore>) {
+    return Promise.race([
+      (async () => {
+        for await (const envelope of store.changes()) return envelope;
+        throw new Error("changes() completed without yielding an envelope");
+      })(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error("changes() did not yield within 1000ms"));
+        }, 1000);
+      }),
+    ]);
+  }
 
   it("does not persist partial content — delta() alone leaves the log untouched", () => {
     // ref: "Deltas live in the store, not the log. Partial content streams
@@ -38,7 +54,8 @@ describe.skip("the delta stream: store.open/commit/abort, store.changes()", () =
 
     const [envelope] = loggedEnvelopes(store);
     expect(loggedEnvelopes(store)).toHaveLength(1);
-    expect(envelope?.aborted).toBeFalsy();
+    // not-aborted may read as `false` or simply absent — both are "not aborted"
+    expect(envelope?.aborted).not.toBe(true);
   });
 
   it("commits an aborted envelope when the stream is aborted", () => {
@@ -58,16 +75,10 @@ describe.skip("the delta stream: store.open/commit/abort, store.changes()", () =
     expect(envelope?.aborted).toBe(true);
   });
 
-  it("yields delta-form envelopes to an active changes() subscriber", async () => {
+  it("yields a delta-form envelope to an active changes() subscriber", async () => {
     // ref: "changes(): AsyncIterable<Envelope> // yields envelopes of every form"
     const store = adapters.stores.memoryStore();
-    const received: string[] = [];
-    const subscription = (async () => {
-      for await (const envelope of store.changes()) {
-        received.push(envelope.form);
-        if (received.length >= 1) break;
-      }
-    })();
+    const received = firstEnvelope(store);
 
     const stream = store.open({
       correlationId: "1",
@@ -77,26 +88,25 @@ describe.skip("the delta stream: store.open/commit/abort, store.changes()", () =
     });
     stream.delta({ correlationId: "1", text: "partial" });
 
-    await subscription;
-
-    expect(received).toContain("delta");
+    expect((await received).form).toBe("delta");
   });
 
-  it("yields committed envelopes to an active changes() subscriber", async () => {
+  it("yields a committed-form envelope when a stream is committed", async () => {
     // ref: "changes(): AsyncIterable<Envelope> // yields envelopes of every form"
+    // deliberately drives this through store.open()/stream.commit(), not
+    // store.append() directly — the two paths could otherwise diverge
+    // (commit() failing to notify changes() subscribers) with no test to catch it
     const store = adapters.stores.memoryStore();
-    const received: string[] = [];
-    const subscription = (async () => {
-      for await (const envelope of store.changes()) {
-        received.push(envelope.form);
-        if (received.length >= 1) break;
-      }
-    })();
+    const received = firstEnvelope(store);
 
-    store.append({ value: "done" }, { type: "output" });
+    const stream = store.open({
+      correlationId: "1",
+      type: "output",
+      stepId: "step-1",
+      threadId: "thread-1" as ThreadId,
+    });
+    stream.commit({ value: "done" });
 
-    await subscription;
-
-    expect(received).toContain("committed");
+    expect((await received).form).toBe("committed");
   });
 });

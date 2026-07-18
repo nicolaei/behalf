@@ -3,6 +3,8 @@ import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../.
 import { neverCalled } from "./support.js";
 
 describe.skip("the inbox reflects pending and consumed input", () => {
+  // Deliberately store-level, no graph: this is SessionStore's own contract
+  // (submit/inbox), not something that needs a flow to observe.
   it("holds a submitted message until a step consumes it", () => {
     const store = adapters.stores.memoryStore();
     const message = userText("hello");

@@ -3,7 +3,7 @@ import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../.
 import { neverCalled, loggedEnvelopes } from "./support.js";
 
 describe.skip("a late reader replays the full committed log", () => {
-  const graph = defineGraph("three-events", (flow) => {
+  const graph = defineGraph("two-events", (flow) => {
     const step = flow.step(outputs(() => "done"));
     flow.entry(step);
     step.then(flow.finish);
@@ -18,6 +18,13 @@ describe.skip("a late reader replays the full committed log", () => {
     // a "late reader" — connects only now, after the flow has already finished
     const replay = loggedEnvelopes(store);
     expect(replay).toHaveLength(2); // message, output
-    expect(replay.map((envelope) => envelope.sequence)).toEqual([1, 2]);
+
+    // the spec calls `sequence` a "per-session ordinal" without pinning down a
+    // starting value — only strict ordering is certain
+    const sequences = replay.map((envelope) => envelope.sequence);
+    for (let i = 1; i < sequences.length; i += 1) {
+      const previous = sequences[i - 1] ?? 0;
+      expect(sequences[i]).toBeGreaterThan(previous);
+    }
   });
 });

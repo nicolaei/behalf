@@ -1,5 +1,6 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeEach } from "vitest";
 import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
+import type { SessionStore } from "../../index.js";
 import { neverCalled, loggedEventTypes } from "./support.js";
 
 describe.skip("interrupt fires wherever the graph currently is", () => {
@@ -17,24 +18,24 @@ describe.skip("interrupt fires wherever the graph currently is", () => {
     cancelled.then(flow.finish);
   });
 
-  it("bypasses the waiting path when the interrupt's kind arrives instead of the waited-for kind", async () => {
-    // parked at `waitFor("resume")`; a "cancel" message (the interrupt's kind) arrives instead
-    // NOTE: submit timing is the same known open concern as waitFor's own test.
-    const store = adapters.stores.memoryStore();
+  let store: SessionStore;
+  let done: Promise<unknown>;
+
+  beforeEach(async () => {
+    store = adapters.stores.memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
-    const done = runFlow(withInterrupt, userText("go"), ready);
+    // parked at `waitFor("resume")`; a "cancel" message (the interrupt's kind) arrives instead
+    // NOTE: submit timing is the same known open concern as waitFor's own test.
+    done = runFlow(withInterrupt, userText("go"), ready);
     store.submit({ role: "user", intent: "standard", kind: "cancel", content: [] });
+  });
 
+  it("bypasses the waiting path when the interrupt's kind arrives instead of the waited-for kind", async () => {
     expect(await done).toBe("cancelled");
   });
 
   it("appends the interrupt's output to the session log", async () => {
-    const store = adapters.stores.memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
-
-    const done = runFlow(withInterrupt, userText("go"), ready);
-    store.submit({ role: "user", intent: "standard", kind: "cancel", content: [] });
     await done;
 
     // loose on exact shape — confirm against reference.md's interrupt behaviour

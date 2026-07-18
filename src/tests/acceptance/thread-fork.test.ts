@@ -26,5 +26,6 @@ describe.skip("forking a thread on an edge", () => {
 
     expect(result.forkedThreadId).not.toBe(result.startThreadId);
     expect(result.forkedFrom?.thread).toBe(result.startThreadId);
+    expect(typeof result.forkedFrom?.at).toBe("number");
   });
 });

@@ -5,6 +5,7 @@
     "lib": ["ES2025"],
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
+    "types": ["node"],
     "verbatimModuleSyntax": true,
 
     // Strictness — this is a types-first project, so the type checker is the
