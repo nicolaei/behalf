@@ -46,16 +46,7 @@ export function memoryStore(): SessionStore {
     },
 
     changes(): AsyncIterable<Envelope> {
-      // Minimal placeholder — no test yet exercises live streaming.
-      return {
-        [Symbol.asyncIterator]() {
-          return {
-            next(): Promise<IteratorResult<Envelope>> {
-              return Promise.resolve({ done: true, value: undefined });
-            },
-          };
-        },
-      };
+      throw new Error("not implemented");
     },
   };
 }

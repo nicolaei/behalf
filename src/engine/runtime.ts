@@ -2,7 +2,7 @@
 
 import type { Model } from "../flow/model.js";
 import type { Message } from "../flow/message.js";
-import type { Graph, NodeId } from "../flow/graph.js";
+import type { Graph, NodeId, EdgeDefinition } from "../flow/graph.js";
 import type { Binding } from "../flow/tool.js";
 import type { ThreadId } from "../flow/thread.js";
 import type { StepContext, Emit, ModelCallResult, StepError } from "../flow/step.js";
@@ -38,6 +38,25 @@ function notImplemented(name: string): never {
 }
 
 /**
+ * Picks the edge a node's output should follow: the first matching `when`,
+ * else the `otherwise` edge, else the unconditional `then` edge.
+ */
+function selectEdge(
+  edges: readonly EdgeDefinition[],
+  from: NodeId,
+  output: unknown,
+): EdgeDefinition | undefined {
+  const outgoing = edges.filter((candidate) => candidate.from === from);
+  const when = outgoing.find(
+    (candidate) => candidate.edge === "when" && candidate.condition?.(output),
+  );
+  if (when) return when;
+  const otherwise = outgoing.find((candidate) => candidate.edge === "otherwise");
+  if (otherwise) return otherwise;
+  return outgoing.find((candidate) => candidate.edge === "then");
+}
+
+/**
  * Seeds a new session with a user message, drives it to completion, and
  * resolves with the terminal output. A `parentThreadId` makes it a child —
  * how a tool spawns a sub-agent.
@@ -45,10 +64,12 @@ function notImplemented(name: string): never {
 export async function runFlow(
   flow: Graph,
   initialPrompt: Message,
-  _runtime: Runtime,
+  runtime: Runtime,
   options?: { parentThreadId?: ThreadId },
 ): Promise<unknown> {
   const threadId = "thread-0" as ThreadId;
+
+  runtime.store.append({ message: initialPrompt }, { type: "message", threadId });
 
   const context: StepContext = {
     thread: {
@@ -98,8 +119,9 @@ export async function runFlow(
     const emit = await node.run(stepContext);
     if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
     input = emit.output;
+    runtime.store.append({ value: emit.output }, { type: "output", threadId });
 
-    const edge = flow.edges.find((candidate) => candidate.from === current);
+    const edge = selectEdge(flow.edges, current, input);
     if (!edge) throw new Error(`node "${current}" has no outgoing edge`);
     current = edge.to;
   }
