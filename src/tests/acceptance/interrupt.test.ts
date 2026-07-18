@@ -3,7 +3,7 @@ import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../.
 import type { SessionStore } from "../../index.js";
 import { neverCalled, loggedEventTypes } from "./support.js";
 
-describe.skip("interrupt fires wherever the graph currently is", () => {
+describe("interrupt fires wherever the graph currently is", () => {
   const withInterrupt = defineGraph("with-interrupt", (flow) => {
     const wait = flow.waitFor("resume");
     const afterWait = flow.step(outputs(() => "resumed"));
