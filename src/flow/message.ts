@@ -34,3 +34,8 @@ export interface Usage {
   cacheWrite?: number;
   cost?: number; // 0 for free/local, absent when unknown
 }
+
+/** Builds a standard user message from plain text — the common case. */
+export function userText(text: string): UserMessage {
+  return { role: "user", intent: "standard", content: [{ type: "text", text }] };
+}

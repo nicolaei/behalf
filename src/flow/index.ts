@@ -9,6 +9,7 @@ export type {
   AssistantMessage,
   Usage,
 } from "./message.js";
+export { userText } from "./message.js";
 export type { ReasoningLevel, Model } from "./model.js";
 export type { ThreadId, ThreadAction } from "./thread.js";
 export type { Tool, Toolset, ToolContext, ToolHandler, Binding } from "./tool.js";
