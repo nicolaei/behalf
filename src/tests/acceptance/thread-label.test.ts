@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, userText, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
 
-describe.skip("a step's thread label", () => {
+describe("a step's thread label", () => {
   const labeled = defineGraph("labeled-step", (flow) => {
     const coder = flow.step(
       outputs((context) => context.thread.label),
