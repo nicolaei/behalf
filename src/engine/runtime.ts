@@ -5,7 +5,7 @@ import type { Message, MessageKind, UserMessage } from "../flow/message.js";
 import type { Graph, NodeId, EdgeDefinition } from "../flow/graph.js";
 import type { Binding } from "../flow/tool.js";
 import type { ThreadId, ThreadAction } from "../flow/thread.js";
-import type { StepContext, Emit, ModelCallResult, StepError } from "../flow/step.js";
+import type { StepContext, Emit, ModelCallResult, StepError, Step } from "../flow/step.js";
 import type { Tool, ToolContext } from "../flow/tool.js";
 import type { Profile } from "../flow/profile.js";
 import type { ContentBlock } from "../flow/message.js";
@@ -70,12 +70,33 @@ function advance(edges: readonly EdgeDefinition[], from: NodeId, output: unknown
  * timer tick so a synchronous `store.submit()` racing this call — before
  * or after it starts — is never missed.
  */
-async function waitForMessage(store: SessionStore, messageKind: MessageKind): Promise<UserMessage> {
+async function waitForMessage(
+  store: SessionStore,
+  kinds: readonly MessageKind[],
+): Promise<UserMessage> {
   for (;;) {
-    const message = store.consume((candidate) => candidate.kind === messageKind);
+    const message = store.consume(
+      (candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind),
+    );
     if (message) return message;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
+}
+
+interface InterruptNode {
+  id: NodeId;
+  messageKind: MessageKind;
+  run: Step;
+}
+
+/** Every `interrupt` node in the graph — armed for the whole run, not just one node. */
+function findInterruptNodes(flow: Graph): InterruptNode[] {
+  const interrupts: InterruptNode[] = [];
+  for (const [id, node] of flow.nodes) {
+    if (node.kind === "interrupt")
+      interrupts.push({ id, messageKind: node.messageKind, run: node.run });
+  }
+  return interrupts;
 }
 
 function isToolCall(block: ContentBlock): block is Extract<ContentBlock, { type: "toolCall" }> {
@@ -268,7 +289,27 @@ export async function runFlow(
     if (node.kind === "finish") return input;
 
     if (node.kind === "waitFor") {
-      const message = await waitForMessage(runtime.store, node.messageKind);
+      const interrupts = findInterruptNodes(flow);
+      const message = await waitForMessage(runtime.store, [
+        node.messageKind,
+        ...interrupts.map((interrupt) => interrupt.messageKind),
+      ]);
+
+      const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
+      if (interrupt) {
+        const stepContext: StepContext = { ...context, inputs: [message] };
+        const emit = await interrupt.run(stepContext);
+        if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
+        input = emit.output;
+        runtime.store.append(
+          { value: emit.output },
+          { type: "output", threadId: currentThread.id },
+        );
+
+        current = advance(flow.edges, interrupt.id, input);
+        continue;
+      }
+
       runtime.store.append({ message }, { type: "message", threadId: currentThread.id });
       currentThread.messages.push(message);
       currentThread.history.push(message);
