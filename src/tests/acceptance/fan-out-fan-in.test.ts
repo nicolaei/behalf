@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
 import { storeOnlyRuntime, neverCalled, loggedEventTypes } from "./support.js";
 
-describe.skip("fan-out and fan-in", () => {
+describe("fan-out and fan-in", () => {
   const fanOut = defineGraph("fan-out", (flow) => {
     const start = flow.step(outputs(() => "go"));
     const a = flow.step(outputs(() => "a"));
