@@ -69,7 +69,7 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
   let entry: NodeId | undefined;
 
   function makeHandle(id: NodeId): Handle {
-    return {
+    const handle = {
       id,
       when(condition, to, options) {
         edges.push({
@@ -79,11 +79,11 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
           condition,
           ...(options ? { options } : {}),
         });
-        return to;
+        return handle;
       },
       otherwise(to, options) {
         edges.push({ from: id, to: to.id, edge: "otherwise", ...(options ? { options } : {}) });
-        return to;
+        return handle;
       },
       then(to: Handle | Handle[], options?: EdgeOptions): Group | undefined {
         if (Array.isArray(to)) {
@@ -107,6 +107,7 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
         return undefined;
       },
     } as Handle;
+    return handle;
   }
 
   const finishId = freshNodeId();
