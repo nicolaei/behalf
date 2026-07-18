@@ -1,0 +1,6 @@
+dist
+coverage
+node_modules
+
+# Hand-authored prose — curated manually, not auto-formatted.
+*.md
