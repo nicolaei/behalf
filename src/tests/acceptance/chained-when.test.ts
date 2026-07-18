@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, userText, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
 
-describe.skip("chained `when` conditions before `otherwise`", () => {
+describe("chained `when` conditions before `otherwise`", () => {
   function classifyTo(value: number) {
     return defineGraph(`classify-${String(value)}`, (flow) => {
       const classify = flow.step(outputs(() => value));
