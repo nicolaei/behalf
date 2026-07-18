@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters } from "../../index.js";
+import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
 import { storeOnlyRuntime, neverCalled, loggedEventTypes, loggedEventAt } from "./support.js";
 
 describe("a graph with a single step", () => {
   const echo = defineGraph("echo", (flow) => {
-    const respond = flow.step((context) => Promise.resolve(context.output("done")));
+    const respond = flow.step(outputs(() => "done"));
     flow.entry(respond);
     respond.then(flow.finish);
   });

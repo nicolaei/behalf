@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters } from "../../index.js";
+import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
 import { storeOnlyRuntime, neverCalled, loggedEventTypes } from "./support.js";
 
 describe.skip("branching on a step's output", () => {
   const branch = defineGraph("branch", (flow) => {
-    const classify = flow.step((context) => Promise.resolve(context.output(true)));
-    const onTrue = flow.step((context) => Promise.resolve(context.output("yes")));
-    const onFalse = flow.step((context) => Promise.resolve(context.output("no")));
+    const classify = flow.step(outputs(() => true));
+    const onTrue = flow.step(outputs(() => "yes"));
+    const onFalse = flow.step(outputs(() => "no"));
 
     flow.entry(classify);
     classify.when((value) => value === true, onTrue).otherwise(onFalse);

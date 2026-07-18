@@ -18,3 +18,4 @@ export type { Profile } from "./profile.js";
 export type { NodeId, Graph, EdgeOptions, Handle, Group, Flow } from "./graph.js";
 export { defineGraph } from "./graph.js";
 export type { ModelCallResult, StepError, Emit, StepContext, Step, PersonaStep } from "./step.js";
+export { outputs, compacts } from "./step.js";

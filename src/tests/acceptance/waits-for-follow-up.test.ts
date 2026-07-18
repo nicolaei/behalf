@@ -1,17 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters } from "../../index.js";
+import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
 import { neverCalled, textOf, loggedEventTypes } from "./support.js";
 
 describe.skip("a graph that waits for the next prompt", () => {
   function twoTurnGraph() {
     return defineGraph("two-turns", (flow) => {
-      const first = flow.step((context) =>
-        Promise.resolve(context.output(textOf(context.thread.messages.at(-1)))),
-      );
+      const first = flow.step(outputs((context) => textOf(context.thread.messages.at(-1))));
       const wait = flow.waitFor("follow-up");
-      const second = flow.step((context) =>
-        Promise.resolve(context.output(textOf(context.thread.messages.at(-1)))),
-      );
+      const second = flow.step(outputs((context) => textOf(context.thread.messages.at(-1))));
       flow.entry(first);
       first.then(wait);
       wait.then(second);

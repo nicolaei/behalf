@@ -55,3 +55,24 @@ export type Step<Result = unknown> = (context: StepContext) => Promise<Emit<Resu
 
 /** A step that uses a model — carries its `persona` so the graph sees it with no separate registration. */
 export type PersonaStep<Result = unknown> = Step<Result> & { persona: Profile };
+
+/**
+ * A step that computes a value from context and outputs it — for steps with no
+ * model call and no async work of their own. Reads better than the raw
+ * `(context) => Promise.resolve(context.output(compute(context)))` it wraps.
+ */
+export function outputs<Result>(compute: (context: StepContext) => Result): Step<Result> {
+  return (context) => Promise.resolve(context.output(compute(context)));
+}
+
+/**
+ * A step that replaces the thread's messages and nothing else — for
+ * compaction steps with no async work of their own.
+ */
+export function compacts(
+  replace: (messages: Message[]) => Message[],
+  meta?: unknown,
+): Step<Message[]> {
+  return (context) =>
+    Promise.resolve(context.compact((messages) => Promise.resolve(replace(messages)), meta));
+}

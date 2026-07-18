@@ -1,14 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters } from "../../index.js";
+import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
 import { storeOnlyRuntime, neverCalled, loggedEventTypes } from "./support.js";
 
 describe.skip("fan-out and fan-in", () => {
   const fanOut = defineGraph("fan-out", (flow) => {
-    const start = flow.step((context) => Promise.resolve(context.output("go")));
-    const a = flow.step((context) => Promise.resolve(context.output("a")));
-    const b = flow.step((context) => Promise.resolve(context.output("b")));
-    const c = flow.step((context) => Promise.resolve(context.output("c")));
-    const join = flow.step((context) => Promise.resolve(context.output(context.inputs)));
+    const start = flow.step(outputs(() => "go"));
+    const a = flow.step(outputs(() => "a"));
+    const b = flow.step(outputs(() => "b"));
+    const c = flow.step(outputs(() => "c"));
+    const join = flow.step(outputs((context) => context.inputs));
 
     flow.entry(start);
     start.then([a, b, c]).join(join);
