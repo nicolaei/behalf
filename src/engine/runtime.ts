@@ -18,7 +18,6 @@ export declare function runtime(config: {
   models: (model: Model) => ModelPort;
   bindings: Binding[];
   store: SessionStore;
-  concurrency: number;
   errorHandlers?: ErrorHandler[]; // consulted on a step error; a default retry handler runs last
 }): Promise<Runtime>;
 

@@ -687,8 +687,8 @@ if (missing.length) throw new Error(JSON.stringify(missing));
 
 ### runtime / runFlow
 
-`runtime` builds what a flow runs against — model resolution, bindings, store,
-concurrency — expanding toolsets once. `runFlow` seeds a new session with a user
+`runtime` builds what a flow runs against — model resolution, bindings, and
+store — expanding toolsets once. `runFlow` seeds a new session with a user
 message, drives it to completion, and resolves with the terminal output; a
 `parentThreadId` makes it a child, which is how a tool spawns a sub-agent. There
 is no separate `schedule` or `spawn`.
@@ -698,7 +698,6 @@ async function runtime(config: {
   models: (model: Model) => ModelPort;
   bindings: Binding[];
   store: SessionStore;
-  concurrency: number;
   errorHandlers?: ErrorHandler[]; // consulted on a step error; a default retry handler runs last
 }): Promise<Runtime>;
 
@@ -711,7 +710,7 @@ function runFlow(
 ```
 
 ```ts
-const ready = await runtime({ models: resolveModel, bindings, store, concurrency: 8 });
+const ready = await runtime({ models: resolveModel, bindings, store });
 await runFlow(feature, userText("Add rate limiting to the API."), ready);
 ```
 
@@ -761,7 +760,6 @@ const ready = await runtime({
   models: () => fakePort,
   bindings: [provide(ask, async () => ({ answer: "42" }))],
   store,
-  concurrency: 1,
 });
 await runFlow(chat, userText("hi"), ready);
 ```
@@ -771,7 +769,7 @@ await runFlow(chat, userText("hi"), ready);
 const bindings = [...standardBindings, ...authorBindings];
 const missing = satisfiesFlows([feature, chat], resolveModel, bindings);
 if (missing.length) throw new Error("unfilled: " + JSON.stringify(missing));
-const ready = await runtime({ models: resolveModel, bindings, store, concurrency: 8 });
+const ready = await runtime({ models: resolveModel, bindings, store });
 ```
 
 ---
