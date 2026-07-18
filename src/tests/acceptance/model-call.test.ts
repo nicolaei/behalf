@@ -3,7 +3,7 @@ import { defineGraph, runFlow, runtime, userText, adapters } from "../../index.j
 import type { Message, ModelCallResult, Profile } from "../../index.js";
 import { fakePortRuntime, loggedEventTypes, loggedEventAt } from "./support.js";
 
-describe.skip("a step that calls the model", () => {
+describe("a step that calls the model", () => {
   // Deferred to a factory, not built at describe-scope: `fakePort` isn't real
   // yet, and a describe body runs even when its `it`s are skipped.
   function respondOnceGraph() {
