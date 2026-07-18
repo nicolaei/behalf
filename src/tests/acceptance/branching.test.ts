@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
 import { storeOnlyRuntime, neverCalled, loggedEventTypes } from "./support.js";
 
-describe.skip("branching on a step's output", () => {
+describe("branching on a step's output", () => {
   function branchOn(classifyValue: boolean) {
     return defineGraph(`branch-${String(classifyValue)}`, (flow) => {
       const classify = flow.step(outputs(() => classifyValue));
