@@ -65,6 +65,11 @@ function advance(edges: readonly EdgeDefinition[], from: NodeId, output: unknown
   return edge.to;
 }
 
+/** Appends a node's output event to the log — shared by every path that produces one. */
+function appendOutput(runtime: Runtime, threadId: ThreadId, output: unknown): void {
+  runtime.store.append({ value: output }, { type: "output", threadId });
+}
+
 /** Logs a step's output and follows the resulting edge — the shared tail of every node that emits one. */
 function commitOutput(
   runtime: Runtime,
@@ -73,7 +78,7 @@ function commitOutput(
   from: NodeId,
   output: unknown,
 ): NodeId {
-  runtime.store.append({ value: output }, { type: "output", threadId });
+  appendOutput(runtime, threadId, output);
   return advance(edges, from, output);
 }
 
@@ -231,6 +236,72 @@ function applyThreadAction(
   return current;
 }
 
+/** The `then` edges leaving a node, in declared order — more than one means a fan-out. */
+function thenEdges(edges: readonly EdgeDefinition[], from: NodeId): EdgeDefinition[] {
+  return edges.filter((candidate) => candidate.from === from && candidate.edge === "then");
+}
+
+/**
+ * Runs one fan-out branch to completion on its own forked thread. For this
+ * slice a branch is exactly one step whose outgoing edge is a `join` — no
+ * waitFor/interrupt/invalidate/further fan-out inside a branch, that's out
+ * of scope here. Returns the branch's output and the join node its edge
+ * points to (every branch in a group points to the same join node).
+ */
+async function runBranch(
+  node: NodeId,
+  branchThread: Thread,
+  flow: Graph,
+  runtime: Runtime,
+  input: unknown,
+): Promise<{ output: unknown; joinTo: NodeId }> {
+  const nodeDef = flow.nodes.get(node);
+  if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${node}"`);
+  if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
+
+  const branchContext: StepContext = {
+    get thread() {
+      return branchThread;
+    },
+    inputs: [input],
+    stream: { delta: () => notImplemented("stream") },
+
+    modelCall(profile): Promise<ModelCallResult> {
+      return runModelCall(profile, branchContext, runtime);
+    },
+    call<Input, Output>(tool: Tool<Input, Output>, toolInput: Input): Promise<Output> {
+      void tool;
+      void toolInput;
+      return notImplemented("call");
+    },
+
+    output<Result>(value: Result): Emit<Result> {
+      return { output: value };
+    },
+    compact(): Emit<Message[]> {
+      return notImplemented("compact");
+    },
+    invalidate(): Emit<never> {
+      return notImplemented("invalidate in a fan-out branch");
+    },
+    fail(error: StepError): Emit<never> {
+      return notImplemented("fail: " + error.message);
+    },
+  };
+
+  const emit = await nodeDef.run(branchContext);
+  if (!("output" in emit)) {
+    notImplemented(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
+  }
+
+  appendOutput(runtime, branchThread.id, emit.output);
+
+  const joinEdge = flow.edges.find((edge) => edge.from === node && edge.edge === "join");
+  if (!joinEdge) throw new Error(`fan-out branch "${node}" has no join edge`);
+
+  return { output: emit.output, joinTo: joinEdge.to };
+}
+
 /**
  * Seeds a new session with a user message, drives it to completion, and
  * resolves with the terminal output. A `parentThreadId` makes it a child —
@@ -294,6 +365,10 @@ export async function runFlow(
   const interrupts = findInterruptNodes(flow);
   let current: NodeId | undefined = flow.entry;
   let input: unknown = initialPrompt;
+  // Set only when the previous step joined a fan-out group — one entry per
+  // branch, in declared order — so the next step's `inputs` isn't wrapped a
+  // second time around a single `input`.
+  let pendingInputs: unknown[] | undefined;
 
   while (current) {
     const node = flow.nodes.get(current);
@@ -332,7 +407,8 @@ export async function runFlow(
 
     if (node.kind !== "step") notImplemented(`node kind "${node.kind}"`);
 
-    const stepContext: StepContext = { ...context, inputs: [input] };
+    const stepContext: StepContext = { ...context, inputs: pendingInputs ?? [input] };
+    pendingInputs = undefined;
     const emit = await node.run(stepContext);
 
     if ("invalidate" in emit) {
@@ -352,6 +428,29 @@ export async function runFlow(
     }
 
     if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
+
+    const branchTargets: NodeId[] = thenEdges(flow.edges, current).map((edge) => edge.to);
+    if (branchTargets.length > 1) {
+      appendOutput(runtime, currentThread.id, emit.output);
+      const results: { output: unknown; joinTo: NodeId }[] = await Promise.all(
+        branchTargets.map((branch: NodeId) =>
+          runBranch(
+            branch,
+            applyThreadAction(currentThread, "fork", undefined),
+            flow,
+            runtime,
+            emit.output,
+          ),
+        ),
+      );
+      const joinTo: NodeId | undefined = results[0]?.joinTo;
+      if (joinTo === undefined) throw new Error(`fan-out from "${current}" produced no branches`);
+      current = joinTo;
+      pendingInputs = results.map((result: { output: unknown }) => result.output);
+      input = undefined;
+      continue;
+    }
+
     input = emit.output;
     current = commitOutput(runtime, currentThread.id, flow.edges, current, emit.output);
   }
