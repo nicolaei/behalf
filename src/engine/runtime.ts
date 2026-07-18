@@ -1,7 +1,7 @@
 // Systems running flows — runtime / runFlow. See docs/reference.md.
 
 import type { Model } from "../flow/model.js";
-import type { Message } from "../flow/message.js";
+import type { Message, MessageKind, UserMessage } from "../flow/message.js";
 import type { Graph, NodeId, EdgeDefinition } from "../flow/graph.js";
 import type { Binding } from "../flow/tool.js";
 import type { ThreadId } from "../flow/thread.js";
@@ -56,6 +56,19 @@ function selectEdge(
   const otherwise = outgoing.find((candidate) => candidate.edge === "otherwise");
   if (otherwise) return otherwise;
   return outgoing.find((candidate) => candidate.edge === "then");
+}
+
+/**
+ * Parks until the inbox has a message of the given kind, polling on a
+ * timer tick so a synchronous `store.submit()` racing this call — before
+ * or after it starts — is never missed.
+ */
+async function waitForMessage(store: SessionStore, messageKind: MessageKind): Promise<UserMessage> {
+  for (;;) {
+    const message = store.consume((candidate) => candidate.kind === messageKind);
+    if (message) return message;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
 }
 
 function isToolCall(block: ContentBlock): block is Extract<ContentBlock, { type: "toolCall" }> {
@@ -186,6 +199,19 @@ export async function runFlow(
     if (!node) throw new Error(`graph "${flow.name}" has no node "${current}"`);
 
     if (node.kind === "finish") return input;
+
+    if (node.kind === "waitFor") {
+      const message = await waitForMessage(runtime.store, node.messageKind);
+      runtime.store.append({ message }, { type: "message", threadId });
+      context.thread.messages.push(message);
+      context.thread.history.push(message);
+      input = message;
+
+      const edge = selectEdge(flow.edges, current, input);
+      if (!edge) throw new Error(`node "${current}" has no outgoing edge`);
+      current = edge.to;
+      continue;
+    }
 
     if (node.kind !== "step") notImplemented(`node kind "${node.kind}"`);
 

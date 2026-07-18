@@ -23,6 +23,12 @@ export function memoryStore(): SessionStore {
       pending.push(message);
     },
 
+    consume(matches: (message: UserMessage) => boolean): UserMessage | undefined {
+      const index = pending.findIndex(matches);
+      if (index === -1) return undefined;
+      return pending.splice(index, 1)[0];
+    },
+
     append(
       event: Event[EventType],
       meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId },

@@ -856,15 +856,18 @@ type Delta =
 ### SessionStore
 
 The log, the inbox, and the delta stream. `submit` adds an input to the inbox;
-`append` commits an event (the store stamps sequence, time, session); `open`
-begins a streaming event that broadcasts deltas and commits (or aborts) at the
-end; `changes` yields envelopes of every form.
+`consume` atomically finds and removes a pending message — how the engine
+drains the inbox at a `waitFor` node; `append` commits an event (the store
+stamps sequence, time, session); `open` begins a streaming event that
+broadcasts deltas and commits (or aborts) at the end; `changes` yields
+envelopes of every form.
 
 ```ts
 interface SessionStore {
   events(): Envelope[]; // committed envelopes
   inbox(): UserMessage[]; // pending input, not yet applied
   submit(message: UserMessage): void;
+  consume(matches: (message: UserMessage) => boolean): UserMessage | undefined; // find-and-remove a pending message
   append(event: Event[EventType], meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId }): void;
   open(pending: { correlationId: string; type: EventType; stepId: string; stepName?: string; threadId: ThreadId }): Stream;
   changes(): AsyncIterable<Envelope>;
