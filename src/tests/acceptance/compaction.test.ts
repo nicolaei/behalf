@@ -10,7 +10,7 @@ import {
 } from "../../index.js";
 import { storeOnlyRuntime, neverCalled, loggedEventTypes } from "./support.js";
 
-describe.skip("compacting the thread replaces the assembled view", () => {
+describe("compacting the thread replaces the assembled view", () => {
   const compactThenRead = defineGraph("compact-then-read", (flow) => {
     const compact = flow.step(
       compacts(() => [{ role: "system", content: [{ type: "text", text: "summary" }] }]),
