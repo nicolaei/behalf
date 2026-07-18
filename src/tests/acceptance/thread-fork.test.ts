@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, userText, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
 
-describe.skip("forking a thread on an edge", () => {
+describe("forking a thread on an edge", () => {
   const forkGraph = defineGraph("fork-edge", (flow) => {
     const start = flow.step(outputs((context) => context.thread.id));
     const forked = flow.step(
