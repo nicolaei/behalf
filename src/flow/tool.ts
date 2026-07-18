@@ -44,10 +44,10 @@ export type Binding =
   | { kind: "toolset"; toolset: Toolset; discover: () => Promise<Record<string, ToolHandler>> };
 
 export function provide<Input, Output>(
-  tool: Tool<Input, Output>,
+  ref: Tool<Input, Output>,
   handler: ToolHandler<Input, Output>,
 ): Binding {
-  return { kind: "tool", tool, handler: handler as ToolHandler };
+  return { kind: "tool", tool: ref, handler: handler as ToolHandler };
 }
 
 export declare function expand(

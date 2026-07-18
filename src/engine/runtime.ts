@@ -7,6 +7,7 @@ import type { Binding } from "../flow/tool.js";
 import type { ThreadId } from "../flow/thread.js";
 import type { StepContext, Emit, ModelCallResult, StepError } from "../flow/step.js";
 import type { Tool, ToolContext } from "../flow/tool.js";
+import type { Profile } from "../flow/profile.js";
 import type { ContentBlock } from "../flow/message.js";
 import type { ModelPort } from "./model-port.js";
 import type { SessionStore } from "./session-store.js";
@@ -57,6 +58,78 @@ function selectEdge(
   return outgoing.find((candidate) => candidate.edge === "then");
 }
 
+function isToolCall(block: ContentBlock): block is Extract<ContentBlock, { type: "toolCall" }> {
+  return block.type === "toolCall";
+}
+
+/**
+ * Runs one tool call: logs it, invokes its bound handler, logs the result,
+ * and folds the result into the thread as a tool message so the next model
+ * call sees it.
+ */
+async function runToolCall(
+  call: Extract<ContentBlock, { type: "toolCall" }>,
+  context: StepContext,
+  runtime: Runtime,
+): Promise<void> {
+  const binding = runtime.bindings.find(
+    (candidate) => candidate.kind === "tool" && candidate.tool.name === call.name,
+  );
+  if (binding?.kind !== "tool") {
+    throw new Error(`no tool binding for "${call.name}"`);
+  }
+
+  runtime.store.append(
+    { correlationId: call.correlationId, name: call.name, input: call.input },
+    { type: "toolCall", threadId: context.thread.id },
+  );
+
+  const toolContext: ToolContext = {
+    thread: context.thread.id,
+    stream: context.stream,
+    runFlow: (flow, initialPrompt) =>
+      runFlow(flow, initialPrompt, runtime, { parentThreadId: context.thread.id }),
+  };
+  const output = await binding.handler(call.input, toolContext);
+
+  runtime.store.append(
+    { correlationId: call.correlationId, output },
+    { type: "toolResult", threadId: context.thread.id },
+  );
+
+  const toolMessage: Message = {
+    role: "tool",
+    content: [{ type: "toolResult", correlationId: call.correlationId, output }],
+  };
+  context.thread.messages.push(toolMessage);
+  context.thread.history.push(toolMessage);
+}
+
+/**
+ * Makes one model request and runs every tool the reply asks for, appending
+ * all of it — the reply, each tool call, each tool result — to the log.
+ * Does not call the model again itself: a graph loops by routing a step's
+ * output back to itself, same as any other edge.
+ */
+async function runModelCall(
+  profile: Profile,
+  context: StepContext,
+  runtime: Runtime,
+): Promise<ModelCallResult> {
+  const port = runtime.models(profile.model);
+  const reply = await port.respond(profile, context.thread.messages, context.stream);
+  context.thread.messages.push(reply);
+  context.thread.history.push(reply);
+  runtime.store.append({ message: reply }, { type: "message", threadId: context.thread.id });
+
+  const toolCalls = reply.content.filter(isToolCall);
+  for (const call of toolCalls) {
+    await runToolCall(call, context, runtime);
+  }
+
+  return { usedTools: toolCalls.length > 0, usage: reply.usage };
+}
+
 /**
  * Seeds a new session with a user message, drives it to completion, and
  * resolves with the terminal output. A `parentThreadId` makes it a child —
@@ -82,52 +155,8 @@ export async function runFlow(
     inputs: [],
     stream: { delta: () => notImplemented("stream") },
 
-    async modelCall(profile): Promise<ModelCallResult> {
-      const port = runtime.models(profile.model);
-      const reply = await port.respond(profile, context.thread.messages, context.stream);
-      context.thread.messages.push(reply);
-      context.thread.history.push(reply);
-      runtime.store.append({ message: reply }, { type: "message", threadId: context.thread.id });
-
-      const toolCalls = reply.content.filter(
-        (block): block is Extract<ContentBlock, { type: "toolCall" }> => block.type === "toolCall",
-      );
-
-      for (const call of toolCalls) {
-        const binding = runtime.bindings.find(
-          (candidate) => candidate.kind === "tool" && candidate.tool.name === call.name,
-        );
-        if (binding?.kind !== "tool") {
-          throw new Error(`no tool binding for "${call.name}"`);
-        }
-
-        runtime.store.append(
-          { correlationId: call.correlationId, name: call.name, input: call.input },
-          { type: "toolCall", threadId: context.thread.id },
-        );
-
-        const toolContext: ToolContext = {
-          thread: context.thread.id,
-          stream: context.stream,
-          runFlow: (flow, initialPrompt) =>
-            runFlow(flow, initialPrompt, runtime, { parentThreadId: context.thread.id }),
-        };
-        const output = await binding.handler(call.input, toolContext);
-
-        runtime.store.append(
-          { correlationId: call.correlationId, output },
-          { type: "toolResult", threadId: context.thread.id },
-        );
-
-        const toolMessage: Message = {
-          role: "tool",
-          content: [{ type: "toolResult", correlationId: call.correlationId, output }],
-        };
-        context.thread.messages.push(toolMessage);
-        context.thread.history.push(toolMessage);
-      }
-
-      return { usedTools: toolCalls.length > 0, usage: reply.usage };
+    modelCall(profile): Promise<ModelCallResult> {
+      return runModelCall(profile, context, runtime);
     },
     call<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
       void tool;
