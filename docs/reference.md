@@ -403,8 +403,8 @@ type EdgeOptions = { threadAction?: ThreadAction; prompt?: (output: unknown) => 
 
 interface Handle {
   readonly id: NodeId; // the node this handle addresses — target for `invalidate`
-  when(condition: (output: any) => boolean, to: Handle, options?: EdgeOptions): Handle;
-  otherwise(to: Handle, options?: EdgeOptions): Handle;
+  when(condition: (output: any) => boolean, to: Handle, options?: EdgeOptions): Handle; // returns this handle (the source), for chaining more `when`/`otherwise`
+  otherwise(to: Handle, options?: EdgeOptions): Handle; // returns this handle (the source), same reason
   then(to: Handle, options?: EdgeOptions): void; // continue to one node
   then(to: Handle[], options?: EdgeOptions): Group; // fan out — each on its own thread
 }
