@@ -165,7 +165,7 @@ type Thread = StepContext["thread"];
  * linked back by `forkedFrom`; `new` starts a blank thread whose only message
  * is `reason`, if given.
  */
-function threadForInvalidate(
+function applyThreadAction(
   current: Thread,
   threadAction: ThreadAction,
   reason: Message | undefined,
@@ -190,7 +190,7 @@ function threadForInvalidate(
     };
   }
 
-  // "same"
+  // "same": no new thread — push the reason onto the one already running.
   if (reason) {
     current.messages.push(reason);
     current.history.push(reason);
@@ -284,14 +284,15 @@ export async function runFlow(
     const emit = await node.run(stepContext);
 
     if ("invalidate" in emit) {
-      currentThread = threadForInvalidate(currentThread, emit.threadAction, emit.reason);
+      const invalidatedThreadId = currentThread.id;
+      currentThread = applyThreadAction(currentThread, emit.threadAction, emit.reason);
       runtime.store.append(
         {
           target: emit.invalidate,
           threadAction: emit.threadAction,
           ...(emit.reason ? { reason: emit.reason } : {}),
         },
-        { type: "invalidation", threadId: currentThread.id },
+        { type: "invalidation", threadId: invalidatedThreadId },
       );
       current = emit.invalidate;
       input = undefined;
