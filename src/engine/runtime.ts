@@ -88,6 +88,11 @@ function commitOutput(
   return advance(edges, from, output);
 }
 
+/** Applies an edge's threadAction and reports where it leads — the shared tail of following any edge. */
+function follow(edge: Advance, thread: Thread): { thread: Thread; to: NodeId } {
+  return { thread: applyThreadAction(thread, edge.threadAction, undefined), to: edge.to };
+}
+
 /**
  * Parks until the inbox has a message of the given kind, polling on a
  * timer tick so a synchronous `store.submit()` racing this call — before
@@ -407,15 +412,13 @@ export async function runFlow(
         const emit = await interrupt.run(stepContext);
         if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
         input = emit.output;
-        const step = commitOutput(runtime, currentThread.id, flow.edges, interrupt.id, emit.output);
-        currentThread = applyThreadAction(currentThread, step.threadAction, undefined);
-        current = step.to;
+        const edge = commitOutput(runtime, currentThread.id, flow.edges, interrupt.id, emit.output);
+        ({ thread: currentThread, to: current } = follow(edge, currentThread));
         continue;
       }
 
-      const step = advance(flow.edges, current, input);
-      currentThread = applyThreadAction(currentThread, step.threadAction, undefined);
-      current = step.to;
+      const edge = advance(flow.edges, current, input);
+      ({ thread: currentThread, to: current } = follow(edge, currentThread));
       continue;
     }
 
@@ -472,9 +475,8 @@ export async function runFlow(
     }
 
     input = emit.output;
-    const step = commitOutput(runtime, currentThread.id, flow.edges, current, emit.output);
-    currentThread = applyThreadAction(currentThread, step.threadAction, undefined);
-    current = step.to;
+    const edge = commitOutput(runtime, currentThread.id, flow.edges, current, emit.output);
+    ({ thread: currentThread, to: current } = follow(edge, currentThread));
   }
 
   return input;
