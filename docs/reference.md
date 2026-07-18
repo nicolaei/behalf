@@ -402,6 +402,7 @@ interface Flow {
 type EdgeOptions = { threadAction?: ThreadAction; prompt?: (output: unknown) => Message }; // threadAction omitted = "same"
 
 interface Handle {
+  readonly id: NodeId; // the node this handle addresses — target for `invalidate`
   when(condition: (output: any) => boolean, to: Handle, options?: EdgeOptions): Handle;
   otherwise(to: Handle, options?: EdgeOptions): Handle;
   then(to: Handle, options?: EdgeOptions): void; // continue to one node
