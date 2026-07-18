@@ -58,21 +58,22 @@ function selectEdge(
   return outgoing.find((candidate) => candidate.edge === "then");
 }
 
-/** Where a followed edge leads, the thread action it carries, and the prompt (if any) that seeds a new thread. */
+/** Where a followed edge leads, the thread action it carries, and the reason message (if any) that seeds a new thread. */
 interface Advance {
   to: NodeId;
   threadAction: ThreadAction;
-  prompt?: (output: unknown) => Message;
+  reason?: Message;
 }
 
 /** Follows the node's outgoing edge for the given output, or throws if it has none. */
 function advance(edges: readonly EdgeDefinition[], from: NodeId, output: unknown): Advance {
   const edge = selectEdge(edges, from, output);
   if (!edge) throw new Error(`node "${from}" has no outgoing edge`);
+  const reason = edge.options?.prompt?.(output);
   return {
     to: edge.to,
     threadAction: edge.options?.threadAction ?? "same",
-    ...(edge.options?.prompt ? { prompt: edge.options.prompt } : {}),
+    ...(reason ? { reason } : {}),
   };
 }
 
@@ -94,9 +95,8 @@ function commitOutput(
 }
 
 /** Applies an edge's threadAction and reports where it leads — the shared tail of following any edge. */
-function follow(edge: Advance, thread: Thread, output: unknown): { thread: Thread; to: NodeId } {
-  const reason = edge.prompt?.(output);
-  return { thread: applyThreadAction(thread, edge.threadAction, reason), to: edge.to };
+function follow(edge: Advance, thread: Thread): { thread: Thread; to: NodeId } {
+  return { thread: applyThreadAction(thread, edge.threadAction, edge.reason), to: edge.to };
 }
 
 /**
@@ -419,12 +419,12 @@ export async function runFlow(
         if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
         input = emit.output;
         const edge = commitOutput(runtime, currentThread.id, flow.edges, interrupt.id, emit.output);
-        ({ thread: currentThread, to: current } = follow(edge, currentThread, emit.output));
+        ({ thread: currentThread, to: current } = follow(edge, currentThread));
         continue;
       }
 
       const edge = advance(flow.edges, current, input);
-      ({ thread: currentThread, to: current } = follow(edge, currentThread, input));
+      ({ thread: currentThread, to: current } = follow(edge, currentThread));
       continue;
     }
 
@@ -482,7 +482,7 @@ export async function runFlow(
 
     input = emit.output;
     const edge = commitOutput(runtime, currentThread.id, flow.edges, current, emit.output);
-    ({ thread: currentThread, to: current } = follow(edge, currentThread, emit.output));
+    ({ thread: currentThread, to: current } = follow(edge, currentThread));
   }
 
   return input;
