@@ -19,7 +19,10 @@ export interface Toolset {
   readonly describe: string;
 }
 
-export declare function tool<Input, Output>(name: string, describe: string): Tool<Input, Output>;
+export function tool<Input, Output>(name: string, describe: string): Tool<Input, Output> {
+  return { name, describe };
+}
+
 export declare function toolset(name: string, describe: string): Toolset;
 
 /** What a tool handler sees and does. It may re-run on resume, so it owns its idempotency. */
@@ -40,10 +43,12 @@ export type Binding =
   | { kind: "tool"; tool: Tool; handler: ToolHandler }
   | { kind: "toolset"; toolset: Toolset; discover: () => Promise<Record<string, ToolHandler>> };
 
-export declare function provide<Input, Output>(
+export function provide<Input, Output>(
   tool: Tool<Input, Output>,
   handler: ToolHandler<Input, Output>,
-): Binding;
+): Binding {
+  return { kind: "tool", tool, handler: handler as ToolHandler };
+}
 
 export declare function expand(
   toolset: Toolset,

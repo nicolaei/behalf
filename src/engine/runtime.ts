@@ -6,7 +6,8 @@ import type { Graph, NodeId, EdgeDefinition } from "../flow/graph.js";
 import type { Binding } from "../flow/tool.js";
 import type { ThreadId } from "../flow/thread.js";
 import type { StepContext, Emit, ModelCallResult, StepError } from "../flow/step.js";
-import type { Tool } from "../flow/tool.js";
+import type { Tool, ToolContext } from "../flow/tool.js";
+import type { ContentBlock } from "../flow/message.js";
 import type { ModelPort } from "./model-port.js";
 import type { SessionStore } from "./session-store.js";
 import type { ErrorHandler } from "./errors.js";
@@ -87,8 +88,46 @@ export async function runFlow(
       context.thread.messages.push(reply);
       context.thread.history.push(reply);
       runtime.store.append({ message: reply }, { type: "message", threadId: context.thread.id });
-      const usedTools = reply.content.some((block) => block.type === "toolCall");
-      return { usedTools, usage: reply.usage };
+
+      const toolCalls = reply.content.filter(
+        (block): block is Extract<ContentBlock, { type: "toolCall" }> => block.type === "toolCall",
+      );
+
+      for (const call of toolCalls) {
+        const binding = runtime.bindings.find(
+          (candidate) => candidate.kind === "tool" && candidate.tool.name === call.name,
+        );
+        if (binding?.kind !== "tool") {
+          throw new Error(`no tool binding for "${call.name}"`);
+        }
+
+        runtime.store.append(
+          { correlationId: call.correlationId, name: call.name, input: call.input },
+          { type: "toolCall", threadId: context.thread.id },
+        );
+
+        const toolContext: ToolContext = {
+          thread: context.thread.id,
+          stream: context.stream,
+          runFlow: (flow, initialPrompt) =>
+            runFlow(flow, initialPrompt, runtime, { parentThreadId: context.thread.id }),
+        };
+        const output = await binding.handler(call.input, toolContext);
+
+        runtime.store.append(
+          { correlationId: call.correlationId, output },
+          { type: "toolResult", threadId: context.thread.id },
+        );
+
+        const toolMessage: Message = {
+          role: "tool",
+          content: [{ type: "toolResult", correlationId: call.correlationId, output }],
+        };
+        context.thread.messages.push(toolMessage);
+        context.thread.history.push(toolMessage);
+      }
+
+      return { usedTools: toolCalls.length > 0, usage: reply.usage };
     },
     call<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
       void tool;
