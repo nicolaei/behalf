@@ -430,6 +430,8 @@ export async function runFlow(
 
     if (node.kind !== "step") notImplemented(`node kind "${node.kind}"`);
 
+    if (node.label) currentThread = { ...currentThread, label: node.label };
+
     const stepContext: StepContext = { ...context, inputs };
     const emit = await node.run(stepContext);
 
