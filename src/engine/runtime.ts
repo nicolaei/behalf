@@ -374,8 +374,12 @@ export async function runFlow(
     const node = flow.nodes.get(current);
     if (!node) throw new Error(`graph "${flow.name}" has no node "${current}"`);
 
-    if (node.kind === "finish") return input;
+    // Consumed by whichever node runs next, regardless of its kind — a join's
+    // pendingInputs must never survive past the node it was meant for.
+    const inputs = pendingInputs ?? [input];
+    pendingInputs = undefined;
 
+    if (node.kind === "finish") return input;
     if (node.kind === "waitFor") {
       const message = await waitForMessage(runtime.store, [
         node.messageKind,
@@ -407,8 +411,7 @@ export async function runFlow(
 
     if (node.kind !== "step") notImplemented(`node kind "${node.kind}"`);
 
-    const stepContext: StepContext = { ...context, inputs: pendingInputs ?? [input] };
-    pendingInputs = undefined;
+    const stepContext: StepContext = { ...context, inputs };
     const emit = await node.run(stepContext);
 
     if ("invalidate" in emit) {
@@ -443,8 +446,15 @@ export async function runFlow(
           ),
         ),
       );
-      const joinTo: NodeId | undefined = results[0]?.joinTo;
-      if (joinTo === undefined) throw new Error(`fan-out from "${current}" produced no branches`);
+      const [firstBranch, ...restOfBranches] = results;
+      if (!firstBranch) throw new Error(`fan-out from "${current}" produced no branches`);
+      const joinTo = firstBranch.joinTo;
+      const disagreement = restOfBranches.find((result) => result.joinTo !== joinTo);
+      if (disagreement) {
+        throw new Error(
+          `fan-out from "${current}" has branches joining different nodes ("${joinTo}" vs "${disagreement.joinTo}")`,
+        );
+      }
       current = joinTo;
       pendingInputs = results.map((result: { output: unknown }) => result.output);
       input = undefined;
