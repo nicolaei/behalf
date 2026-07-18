@@ -15,8 +15,8 @@ export const fakePort: ModelPort = {
   respond: () =>
     Promise.resolve({
       role: "assistant",
-      provider: "fake",
-      model: "fake",
+      provider: fakeModel.provider,
+      model: fakeModel.identifier,
       content: [{ type: "text", text: "ok" }],
       usage: { input: 1, output: 1 },
     }),

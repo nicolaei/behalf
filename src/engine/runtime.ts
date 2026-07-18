@@ -86,7 +86,7 @@ export async function runFlow(
       const reply = await port.respond(profile, context.thread.messages, context.stream);
       context.thread.messages.push(reply);
       context.thread.history.push(reply);
-      runtime.store.append({ message: reply }, { type: "message", threadId });
+      runtime.store.append({ message: reply }, { type: "message", threadId: context.thread.id });
       const usedTools = reply.content.some((block) => block.type === "toolCall");
       return { usedTools, usage: reply.usage };
     },
