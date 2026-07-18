@@ -28,8 +28,6 @@ describe.skip("invalidate reruns a node out of band", () => {
   }
 
   it("reruns the invalidated node, and its fresh output flows onward as normal", async () => {
-    // given a plan step that produces a fresh draft each run, and an implement
-    // step that invalidates the plan once, then accepts its second draft
     const graph = planThenImplement();
     const ready = await runtime({
       models: neverCalled,
@@ -37,25 +35,21 @@ describe.skip("invalidate reruns a node out of band", () => {
       store: adapters.stores.memoryStore(),
     });
 
-    // when the flow runs
     const result = await runFlow(graph, userText("go"), ready);
 
-    // then plan reran with the reason, and implement finished on the new draft
+    // plan reran with the reason, and implement finished on the new draft
     expect(result).toBe("implemented:draft-2");
   });
 
-  it("appends an invalidation event to the session log", async () => {
-    // given the same graph, and a store we can inspect after the run
+  it("appends an invalidation event between the two plan runs", async () => {
     const graph = planThenImplement();
     const store = adapters.stores.memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
-    // when the flow runs
     await runFlow(graph, userText("go"), ready);
 
-    // then the log records the invalidation between the two plan runs
-    // (loose on exact position — confirm against reference.md's invalidate behaviour
-    // when this slice is active)
+    // loose on exact position — confirm against reference.md's invalidate behaviour
+    // when this slice is active
     expect(loggedEventTypes(store)).toContain("invalidation");
   });
 });

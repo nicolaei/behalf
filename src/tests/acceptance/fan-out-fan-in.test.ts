@@ -16,24 +16,21 @@ describe.skip("fan-out and fan-in", () => {
   });
 
   it("runs each branch once, joins with one input per branch", async () => {
-    // given the graph above
-    // when the flow runs
     const result = await runFlow(fanOut, userText("go"), await storeOnlyRuntime());
 
-    // then the join step received one input per branch, in declaration order
-    expect(result).toEqual(["a", "b", "c"]);
+    // branches run in parallel on their own forked threads, so the spec gives
+    // no ordering guarantee across them — assert membership, not order
+    expect(result).toEqual(expect.arrayContaining(["a", "b", "c"]));
+    expect(result).toHaveLength(3);
   });
 
   it("appends one output event per branch, plus the start and join steps", async () => {
-    // given the graph above, and a store we can inspect after the run
     const store = adapters.stores.memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
-    // when the flow runs
     await runFlow(fanOut, userText("go"), ready);
 
     // then the log holds the initial message and five outputs (start, 3 branches, join)
-    // (branch order among a/b/c may not be deterministic — count only, don't assert order)
     const types = loggedEventTypes(store);
     expect(types[0]).toBe("message");
     expect(types.filter((type) => type === "output")).toHaveLength(5);

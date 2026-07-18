@@ -3,36 +3,40 @@ import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../.
 import { storeOnlyRuntime, neverCalled, loggedEventTypes } from "./support.js";
 
 describe.skip("branching on a step's output", () => {
-  const branch = defineGraph("branch", (flow) => {
-    const classify = flow.step(outputs(() => true));
-    const onTrue = flow.step(outputs(() => "yes"));
-    const onFalse = flow.step(outputs(() => "no"));
+  function branchOn(classifyValue: boolean) {
+    return defineGraph(`branch-${String(classifyValue)}`, (flow) => {
+      const classify = flow.step(outputs(() => classifyValue));
+      const onTrue = flow.step(outputs(() => "yes"));
+      const onFalse = flow.step(outputs(() => "no"));
 
-    flow.entry(classify);
-    classify.when((value) => value === true, onTrue).otherwise(onFalse);
-    onTrue.then(flow.finish);
-    onFalse.then(flow.finish);
-  });
+      flow.entry(classify);
+      classify.when((value) => value === true, onTrue).otherwise(onFalse);
+      onTrue.then(flow.finish);
+      onFalse.then(flow.finish);
+    });
+  }
 
-  it("routes to the matching edge, not the fallthrough", async () => {
-    // given the graph above
-    // when the flow runs
-    const result = await runFlow(branch, userText("hi"), await storeOnlyRuntime());
+  it("routes to the matching `when` edge, not the fallthrough", async () => {
+    const result = await runFlow(branchOn(true), userText("hi"), await storeOnlyRuntime());
 
-    // then it took the `when` branch
     expect(result).toBe("yes");
   });
 
-  it("appends the expected events to the session log", async () => {
-    // given the graph above, and a store we can inspect after the run
+  it("routes to `otherwise` when no `when` condition matches", async () => {
+    // this is the case a routing implementation that just picks the first
+    // declared edge would get wrong — the `when` condition here is false
+    const result = await runFlow(branchOn(false), userText("hi"), await storeOnlyRuntime());
+
+    expect(result).toBe("no");
+  });
+
+  it("appends one output event per step that ran, not the step that didn't", async () => {
     const store = adapters.stores.memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
-    // when the flow runs
-    await runFlow(branch, userText("hi"), ready);
+    await runFlow(branchOn(true), userText("hi"), ready);
 
-    // then the log holds the initial message, then one output per step that ran
-    // (only `classify` and `onTrue` run — `onFalse` never fires)
+    // only `classify` and `onTrue` run — `onFalse` never fires
     expect(loggedEventTypes(store)).toEqual(["message", "output", "output"]);
   });
 });

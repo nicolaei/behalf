@@ -31,7 +31,6 @@ describe.skip("a tool handler spawning a child flow", () => {
   }
 
   it("returns the child flow's result as the tool's output", async () => {
-    // given a tool whose handler spawns a child flow and returns its result
     const { parent, research, child } = fixture();
     const ready = await runtime({
       models: neverCalled,
@@ -41,15 +40,12 @@ describe.skip("a tool handler spawning a child flow", () => {
       store: adapters.stores.memoryStore(),
     });
 
-    // when the flow runs
     const result = await runFlow(parent, userText("go"), ready);
 
-    // then the tool's output is the child flow's result
     expect(result).toBe("answered: what is x");
   });
 
-  it("appends the child flow's messages to the same session log", async () => {
-    // given the same fixture, and a store we can inspect after the run
+  it("appends the child flow's messages to the same session log as the parent's", async () => {
     const { parent, research, child } = fixture();
     const store = adapters.stores.memoryStore();
     const ready = await runtime({
@@ -60,12 +56,10 @@ describe.skip("a tool handler spawning a child flow", () => {
       store,
     });
 
-    // when the flow runs
     await runFlow(parent, userText("go"), ready);
 
-    // then the log holds both the parent's and the child's messages
-    // (loose on exact shape — confirm against reference.md's parentThreadId/spawn
-    // behaviour when this slice is active)
+    // loose on exact shape — confirm against reference.md's parentThreadId/spawn
+    // behaviour when this slice is active
     const types = loggedEventTypes(store);
     expect(types.filter((type) => type === "message").length).toBeGreaterThanOrEqual(2);
   });

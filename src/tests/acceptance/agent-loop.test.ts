@@ -32,7 +32,6 @@ describe.skip("the agent loop", () => {
   }
 
   it("keeps looping while the model calls tools, finishes once it doesn't", async () => {
-    // given a model that calls the tool once, then replies with plain text
     const { agentLoop, scriptedPort, search, callCount } = scriptedFixture();
     const ready = await runtime({
       models: () => scriptedPort,
@@ -40,15 +39,13 @@ describe.skip("the agent loop", () => {
       store: adapters.stores.memoryStore(),
     });
 
-    // when the flow runs
     await runFlow(agentLoop, userText("find x"), ready);
 
-    // then the model was called twice — once producing a tool call, once finishing
+    // called twice — once producing a tool call, once finishing
     expect(callCount()).toBe(2);
   });
 
   it("appends a tool call and its result to the session log", async () => {
-    // given the same fixture, and a store we can inspect after the run
     const { agentLoop, scriptedPort, search } = scriptedFixture();
     const store = adapters.stores.memoryStore();
     const ready = await runtime({
@@ -57,11 +54,9 @@ describe.skip("the agent loop", () => {
       store,
     });
 
-    // when the flow runs
     await runFlow(agentLoop, userText("find x"), ready);
 
-    // then the log includes a toolCall and a matching toolResult
-    // (loose on exact position — confirm the full shape against reference.md when this slice is active)
+    // loose on exact position — confirm the full shape against reference.md when this slice is active
     const types = loggedEventTypes(store);
     expect(types).toContain("toolCall");
     expect(types).toContain("toolResult");
