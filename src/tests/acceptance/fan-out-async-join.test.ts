@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, userText, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
 
-describe.skip("fan-in waits for the slower branch", () => {
+describe("fan-in waits for the slower branch", () => {
   const fanOutAsync = defineGraph("fan-out-async", (flow) => {
     const start = flow.step(outputs(() => "go"));
     const fast = flow.step(outputs(() => "fast"));
