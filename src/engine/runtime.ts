@@ -296,8 +296,9 @@ async function runBranch(
     output<Result>(value: Result): Emit<Result> {
       return { output: value };
     },
-    compact(): Emit<Message[]> {
-      return notImplemented("compact");
+    async compact(replace, meta): Promise<Emit<Message[]>> {
+      const messages = await replace(branchThread.messages);
+      return { compact: messages, ...(meta !== undefined ? { meta } : {}) };
     },
     invalidate(): Emit<never> {
       return notImplemented("invalidate in a fan-out branch");
@@ -365,8 +366,9 @@ export async function runFlow(
     output<Result>(value: Result): Emit<Result> {
       return { output: value };
     },
-    compact(): Emit<Message[]> {
-      return notImplemented("compact");
+    async compact(replace, meta): Promise<Emit<Message[]>> {
+      const messages = await replace(currentThread.messages);
+      return { compact: messages, ...(meta !== undefined ? { meta } : {}) };
     },
     invalidate(target, options): Emit<never> {
       return {
@@ -449,6 +451,19 @@ export async function runFlow(
       );
       current = emit.invalidate;
       input = undefined;
+      continue;
+    }
+
+    if ("compact" in emit) {
+      runtime.store.append(
+        { messages: emit.compact, ...(emit.meta !== undefined ? { meta: emit.meta } : {}) },
+        { type: "compaction", threadId: currentThread.id },
+      );
+      currentThread.messages = emit.compact;
+      currentThread.history.push(...emit.compact);
+      input = undefined;
+      const edge = advance(flow.edges, current, undefined);
+      ({ thread: currentThread, to: current } = follow(edge, currentThread));
       continue;
     }
 

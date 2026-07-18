@@ -43,7 +43,10 @@ export interface StepContext {
   call<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output>;
 
   output<Result>(value: Result): Emit<Result>;
-  compact(replace: (messages: Message[]) => Promise<Message[]>, meta?: unknown): Emit<Message[]>;
+  compact(
+    replace: (messages: Message[]) => Promise<Message[]>,
+    meta?: unknown,
+  ): Promise<Emit<Message[]>>;
   invalidate(
     target: NodeId,
     options?: { threadAction?: ThreadAction; reason?: Message },
