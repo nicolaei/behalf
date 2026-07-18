@@ -81,8 +81,14 @@ export async function runFlow(
     inputs: [],
     stream: { delta: () => notImplemented("stream") },
 
-    modelCall(): Promise<ModelCallResult> {
-      return notImplemented("modelCall");
+    async modelCall(profile): Promise<ModelCallResult> {
+      const port = runtime.models(profile.model);
+      const reply = await port.respond(profile, context.thread.messages, context.stream);
+      context.thread.messages.push(reply);
+      context.thread.history.push(reply);
+      runtime.store.append({ message: reply }, { type: "message", threadId });
+      const usedTools = reply.content.some((block) => block.type === "toolCall");
+      return { usedTools, usage: reply.usage };
     },
     call<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
       void tool;

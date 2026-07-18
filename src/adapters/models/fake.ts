@@ -2,4 +2,22 @@
 
 import type { ModelPort } from "../../engine/model-port.js";
 
-export declare const fakePort: ModelPort;
+const fakeModel = {
+  identifier: "fake",
+  provider: "fake",
+  contextWindow: 128_000,
+  reasoning: [],
+};
+
+/** Always replies with a fixed text message and no tool calls. */
+export const fakePort: ModelPort = {
+  model: fakeModel,
+  respond: () =>
+    Promise.resolve({
+      role: "assistant",
+      provider: "fake",
+      model: "fake",
+      content: [{ type: "text", text: "ok" }],
+      usage: { input: 1, output: 1 },
+    }),
+};
