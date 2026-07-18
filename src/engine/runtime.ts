@@ -275,6 +275,7 @@ async function runBranch(
   const nodeDef = flow.nodes.get(node);
   if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${node}"`);
   if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
+  if (nodeDef.label) branchThread = { ...branchThread, label: nodeDef.label };
 
   const branchContext: StepContext = {
     get thread() {
