@@ -65,6 +65,18 @@ function advance(edges: readonly EdgeDefinition[], from: NodeId, output: unknown
   return edge.to;
 }
 
+/** Logs a step's output and follows the resulting edge — the shared tail of every node that emits one. */
+function commitOutput(
+  runtime: Runtime,
+  threadId: ThreadId,
+  edges: readonly EdgeDefinition[],
+  from: NodeId,
+  output: unknown,
+): NodeId {
+  runtime.store.append({ value: output }, { type: "output", threadId });
+  return advance(edges, from, output);
+}
+
 /**
  * Parks until the inbox has a message of the given kind, polling on a
  * timer tick so a synchronous `store.submit()` racing this call — before
@@ -279,6 +291,7 @@ export async function runFlow(
     },
   };
 
+  const interrupts = findInterruptNodes(flow);
   let current: NodeId | undefined = flow.entry;
   let input: unknown = initialPrompt;
 
@@ -289,11 +302,19 @@ export async function runFlow(
     if (node.kind === "finish") return input;
 
     if (node.kind === "waitFor") {
-      const interrupts = findInterruptNodes(flow);
       const message = await waitForMessage(runtime.store, [
         node.messageKind,
         ...interrupts.map((interrupt) => interrupt.messageKind),
       ]);
+
+      // Consuming the message is the same step regardless of who it's for:
+      // it becomes a log event and joins the thread, then whichever node was
+      // actually armed for its kind — the interrupt, or this waitFor itself —
+      // runs and takes over routing.
+      runtime.store.append({ message }, { type: "message", threadId: currentThread.id });
+      currentThread.messages.push(message);
+      currentThread.history.push(message);
+      input = message;
 
       const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
       if (interrupt) {
@@ -301,19 +322,9 @@ export async function runFlow(
         const emit = await interrupt.run(stepContext);
         if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
         input = emit.output;
-        runtime.store.append(
-          { value: emit.output },
-          { type: "output", threadId: currentThread.id },
-        );
-
-        current = advance(flow.edges, interrupt.id, input);
+        current = commitOutput(runtime, currentThread.id, flow.edges, interrupt.id, emit.output);
         continue;
       }
-
-      runtime.store.append({ message }, { type: "message", threadId: currentThread.id });
-      currentThread.messages.push(message);
-      currentThread.history.push(message);
-      input = message;
 
       current = advance(flow.edges, current, input);
       continue;
@@ -342,9 +353,7 @@ export async function runFlow(
 
     if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
     input = emit.output;
-    runtime.store.append({ value: emit.output }, { type: "output", threadId: currentThread.id });
-
-    current = advance(flow.edges, current, input);
+    current = commitOutput(runtime, currentThread.id, flow.edges, current, emit.output);
   }
 
   return input;
