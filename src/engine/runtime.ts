@@ -58,11 +58,17 @@ function selectEdge(
   return outgoing.find((candidate) => candidate.edge === "then");
 }
 
+/** Where a followed edge leads, and the thread action it carries. */
+interface Advance {
+  to: NodeId;
+  threadAction: ThreadAction;
+}
+
 /** Follows the node's outgoing edge for the given output, or throws if it has none. */
-function advance(edges: readonly EdgeDefinition[], from: NodeId, output: unknown): NodeId {
+function advance(edges: readonly EdgeDefinition[], from: NodeId, output: unknown): Advance {
   const edge = selectEdge(edges, from, output);
   if (!edge) throw new Error(`node "${from}" has no outgoing edge`);
-  return edge.to;
+  return { to: edge.to, threadAction: edge.options?.threadAction ?? "same" };
 }
 
 /** Appends a node's output event to the log — shared by every path that produces one. */
@@ -77,7 +83,7 @@ function commitOutput(
   edges: readonly EdgeDefinition[],
   from: NodeId,
   output: unknown,
-): NodeId {
+): Advance {
   appendOutput(runtime, threadId, output);
   return advance(edges, from, output);
 }
@@ -401,11 +407,15 @@ export async function runFlow(
         const emit = await interrupt.run(stepContext);
         if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
         input = emit.output;
-        current = commitOutput(runtime, currentThread.id, flow.edges, interrupt.id, emit.output);
+        const step = commitOutput(runtime, currentThread.id, flow.edges, interrupt.id, emit.output);
+        currentThread = applyThreadAction(currentThread, step.threadAction, undefined);
+        current = step.to;
         continue;
       }
 
-      current = advance(flow.edges, current, input);
+      const step = advance(flow.edges, current, input);
+      currentThread = applyThreadAction(currentThread, step.threadAction, undefined);
+      current = step.to;
       continue;
     }
 
@@ -462,7 +472,9 @@ export async function runFlow(
     }
 
     input = emit.output;
-    current = commitOutput(runtime, currentThread.id, flow.edges, current, emit.output);
+    const step = commitOutput(runtime, currentThread.id, flow.edges, current, emit.output);
+    currentThread = applyThreadAction(currentThread, step.threadAction, undefined);
+    current = step.to;
   }
 
   return input;
