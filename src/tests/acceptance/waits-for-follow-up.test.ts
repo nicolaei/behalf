@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
 import { neverCalled, textOf, loggedEventTypes } from "./support.js";
 
-describe.skip("a graph that waits for the next prompt", () => {
+describe("a graph that waits for the next prompt", () => {
   const twoTurns = defineGraph("two-turns", (flow) => {
     const first = flow.step(outputs((context) => textOf(context.thread.messages.at(-1))));
     const wait = flow.waitFor("follow-up");
