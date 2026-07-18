@@ -4,7 +4,7 @@ import type { Model } from "../flow/model.js";
 import type { Message, MessageKind, UserMessage } from "../flow/message.js";
 import type { Graph, NodeId, EdgeDefinition } from "../flow/graph.js";
 import type { Binding } from "../flow/tool.js";
-import type { ThreadId } from "../flow/thread.js";
+import type { ThreadId, ThreadAction } from "../flow/thread.js";
 import type { StepContext, Emit, ModelCallResult, StepError } from "../flow/step.js";
 import type { Tool, ToolContext } from "../flow/tool.js";
 import type { Profile } from "../flow/profile.js";
@@ -150,6 +150,54 @@ async function runModelCall(
   return { usedTools: toolCalls.length > 0, usage: reply.usage };
 }
 
+let nextThreadId = 0;
+function freshThreadId(): ThreadId {
+  nextThreadId += 1;
+  return `thread-${String(nextThreadId)}` as ThreadId;
+}
+
+type Thread = StepContext["thread"];
+
+/**
+ * Resolves the thread an invalidated node reruns on, per its `threadAction`:
+ * `same` keeps the current thread, pushing `reason` onto it if given; `fork`
+ * splits onto a new thread that shares the current thread's history so far,
+ * linked back by `forkedFrom`; `new` starts a blank thread whose only message
+ * is `reason`, if given.
+ */
+function threadForInvalidate(
+  current: Thread,
+  threadAction: ThreadAction,
+  reason: Message | undefined,
+): Thread {
+  if (threadAction === "new") {
+    const messages = reason ? [reason] : [];
+    return { id: freshThreadId(), messages, history: [...messages] };
+  }
+
+  if (threadAction === "fork") {
+    const messages = [...current.messages];
+    const history = [...current.history];
+    if (reason) {
+      messages.push(reason);
+      history.push(reason);
+    }
+    return {
+      id: freshThreadId(),
+      forkedFrom: { thread: current.id, at: current.history.length },
+      messages,
+      history,
+    };
+  }
+
+  // "same"
+  if (reason) {
+    current.messages.push(reason);
+    current.history.push(reason);
+  }
+  return current;
+}
+
 /**
  * Seeds a new session with a user message, drives it to completion, and
  * resolves with the terminal output. A `parentThreadId` makes it a child —
@@ -163,14 +211,22 @@ export async function runFlow(
 ): Promise<unknown> {
   const threadId = "thread-0" as ThreadId;
 
-  runtime.store.append({ message: initialPrompt }, { type: "message", threadId });
+  // The live current thread — reassigned (not mutated) by `invalidate` when it
+  // forks or resets. `context.thread` reads it through a getter so every
+  // consumer (modelCall, tool calls, invalidate itself) sees the same,
+  // up-to-date thread rather than a snapshot captured once at the top.
+  let currentThread: Thread = {
+    id: threadId,
+    ...(options?.parentThreadId ? { parentThreadId: options.parentThreadId } : {}),
+    messages: [initialPrompt],
+    history: [initialPrompt],
+  };
+
+  runtime.store.append({ message: initialPrompt }, { type: "message", threadId: currentThread.id });
 
   const context: StepContext = {
-    thread: {
-      id: threadId,
-      ...(options?.parentThreadId ? { parentThreadId: options.parentThreadId } : {}),
-      messages: [initialPrompt],
-      history: [initialPrompt],
+    get thread() {
+      return currentThread;
     },
     inputs: [],
     stream: { delta: () => notImplemented("stream") },
@@ -190,8 +246,12 @@ export async function runFlow(
     compact(): Emit<Message[]> {
       return notImplemented("compact");
     },
-    invalidate(): Emit<never> {
-      return notImplemented("invalidate");
+    invalidate(target, options): Emit<never> {
+      return {
+        invalidate: target,
+        threadAction: options?.threadAction ?? "same",
+        ...(options?.reason ? { reason: options.reason } : {}),
+      };
     },
     fail(error: StepError): Emit<never> {
       return notImplemented("fail: " + error.message);
@@ -209,9 +269,9 @@ export async function runFlow(
 
     if (node.kind === "waitFor") {
       const message = await waitForMessage(runtime.store, node.messageKind);
-      runtime.store.append({ message }, { type: "message", threadId });
-      context.thread.messages.push(message);
-      context.thread.history.push(message);
+      runtime.store.append({ message }, { type: "message", threadId: currentThread.id });
+      currentThread.messages.push(message);
+      currentThread.history.push(message);
       input = message;
 
       current = advance(flow.edges, current, input);
@@ -222,9 +282,25 @@ export async function runFlow(
 
     const stepContext: StepContext = { ...context, inputs: [input] };
     const emit = await node.run(stepContext);
+
+    if ("invalidate" in emit) {
+      currentThread = threadForInvalidate(currentThread, emit.threadAction, emit.reason);
+      runtime.store.append(
+        {
+          target: emit.invalidate,
+          threadAction: emit.threadAction,
+          ...(emit.reason ? { reason: emit.reason } : {}),
+        },
+        { type: "invalidation", threadId: currentThread.id },
+      );
+      current = emit.invalidate;
+      input = undefined;
+      continue;
+    }
+
     if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
     input = emit.output;
-    runtime.store.append({ value: emit.output }, { type: "output", threadId });
+    runtime.store.append({ value: emit.output }, { type: "output", threadId: currentThread.id });
 
     current = advance(flow.edges, current, input);
   }
