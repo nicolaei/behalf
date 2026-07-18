@@ -856,7 +856,7 @@ type Delta =
 ### SessionStore
 
 The log, the inbox, and the delta stream. `submit` adds an input to the inbox;
-`consume` atomically finds and removes a pending message — how the engine
+`consume` finds and removes a pending message in one call — how the engine
 drains the inbox at a `waitFor` node; `append` commits an event (the store
 stamps sequence, time, session); `open` begins a streaming event that
 broadcasts deltas and commits (or aborts) at the end; `changes` yields

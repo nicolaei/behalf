@@ -58,6 +58,13 @@ function selectEdge(
   return outgoing.find((candidate) => candidate.edge === "then");
 }
 
+/** Follows the node's outgoing edge for the given output, or throws if it has none. */
+function advance(edges: readonly EdgeDefinition[], from: NodeId, output: unknown): NodeId {
+  const edge = selectEdge(edges, from, output);
+  if (!edge) throw new Error(`node "${from}" has no outgoing edge`);
+  return edge.to;
+}
+
 /**
  * Parks until the inbox has a message of the given kind, polling on a
  * timer tick so a synchronous `store.submit()` racing this call — before
@@ -207,9 +214,7 @@ export async function runFlow(
       context.thread.history.push(message);
       input = message;
 
-      const edge = selectEdge(flow.edges, current, input);
-      if (!edge) throw new Error(`node "${current}" has no outgoing edge`);
-      current = edge.to;
+      current = advance(flow.edges, current, input);
       continue;
     }
 
@@ -221,9 +226,7 @@ export async function runFlow(
     input = emit.output;
     runtime.store.append({ value: emit.output }, { type: "output", threadId });
 
-    const edge = selectEdge(flow.edges, current, input);
-    if (!edge) throw new Error(`node "${current}" has no outgoing edge`);
-    current = edge.to;
+    current = advance(flow.edges, current, input);
   }
 
   return input;

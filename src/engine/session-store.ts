@@ -6,7 +6,7 @@ import type { Envelope, Event, EventType, Delta } from "../session/index.js";
 
 /**
  * The log, the inbox, and the delta stream. `submit` adds an input to the
- * inbox; `consume` atomically finds and removes a pending message — how
+ * inbox; `consume` finds and removes a pending message in one call — how
  * the engine drains the inbox at a `waitFor` node; `append` commits an
  * event; `open` begins a streaming event that broadcasts deltas and commits
  * (or aborts) at the end; `changes` yields envelopes of every form.
@@ -15,7 +15,7 @@ export interface SessionStore {
   events(): Envelope[]; // committed envelopes
   inbox(): UserMessage[]; // pending input, not yet applied
   submit(message: UserMessage): void;
-  consume(matches: (message: UserMessage) => boolean): UserMessage | undefined; // atomically find-and-remove a pending message
+  consume(matches: (message: UserMessage) => boolean): UserMessage | undefined; // find-and-remove a pending message in one call
   append(
     event: Event[EventType],
     meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId },
