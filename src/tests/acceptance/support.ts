@@ -60,10 +60,12 @@ export function assistantToolCall(name: string, input: unknown): AssistantMessag
   };
 }
 
-type CommittedEnvelope = Extract<Envelope, { type: EventType }>;
+export type CommittedEnvelope = Extract<Envelope, { type: EventType }>;
 
+// Tightened to "committed" only (not "in-progress") — in-progress snapshots are
+// provisional and shouldn't be conflated with settled log data in assertions.
 function isCommitted(envelope: Envelope): envelope is CommittedEnvelope {
-  return envelope.form !== "delta";
+  return envelope.form === "committed";
 }
 
 /** The `.type` of every committed envelope in the store, in order — asserts the shape of the log. */
@@ -79,4 +81,9 @@ export function loggedEventAt(store: SessionStore, index: number): CommittedEnve
   const envelope = store.events().filter(isCommitted)[index];
   if (!envelope) throw new Error(`no committed event at index ${String(index)}`);
   return envelope;
+}
+
+/** Every committed envelope in the store, in order — for assertions that need more than `.type`. */
+export function loggedEnvelopes(store: SessionStore): CommittedEnvelope[] {
+  return store.events().filter(isCommitted);
 }
