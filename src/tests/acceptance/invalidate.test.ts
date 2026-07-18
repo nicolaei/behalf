@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
 import { neverCalled, textOf, loggedEventTypes } from "./support.js";
 
-describe.skip("invalidate reruns a node out of band", () => {
+describe("invalidate reruns a node out of band", () => {
   // A fresh counter per test, so `planRuns` starts at zero each time.
   function planThenImplement() {
     let planRuns = 0;
