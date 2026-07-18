@@ -3,7 +3,7 @@ import { defineGraph, runFlow, runtime, provide, tool, userText, adapters } from
 import type { ModelCallResult, ModelPort, Profile } from "../../index.js";
 import { assistantText, assistantToolCall, loggedEventTypes } from "./support.js";
 
-describe.skip("the agent loop", () => {
+describe("the agent loop", () => {
   // Deferred to a factory, not built at describe-scope: `tool()` isn't real
   // yet, and a describe body runs even when its `it`s are skipped.
   function scriptedFixture() {
