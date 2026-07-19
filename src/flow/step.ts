@@ -5,7 +5,7 @@ import type { Profile } from "./profile.js";
 import type { Tool } from "./tool.js";
 import type { ThreadId, ThreadAction } from "./thread.js";
 import type { NodeId } from "./graph.js";
-import type { DeltaSink, Stream } from "../session/envelope.js";
+import type { Stream } from "../session/envelope.js";
 import type { EventType } from "../session/event.js";
 
 export interface ModelCallResult {
@@ -38,7 +38,6 @@ export interface StepContext {
     history: Message[]; // the full record on this thread, including compaction messages
   };
   readonly inputs: unknown[]; // upstream outputs; a join gets one per branch
-  readonly stream: DeltaSink; // ephemeral — never logged
   openStream(type: EventType): Stream; // open a fresh stream scoped to this step's thread
 
   modelCall(profile: Profile): Promise<ModelCallResult>; // one request + its tools, appended to the log

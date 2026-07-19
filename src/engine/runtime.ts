@@ -7,7 +7,7 @@ import type { Binding } from "../flow/tool.js";
 import type { ThreadId, ThreadAction } from "../flow/thread.js";
 import type { StepContext, Emit, ModelCallResult, StepError, Step } from "../flow/step.js";
 import type { Tool, ToolContext, ToolHandler } from "../flow/tool.js";
-import type { DeltaSink, Stream } from "../session/envelope.js";
+import type { Stream } from "../session/envelope.js";
 import type { Event, EventType } from "../session/event.js";
 import type { Profile } from "../flow/profile.js";
 import type { ContentBlock } from "../flow/message.js";
@@ -21,9 +21,6 @@ import {
   notImplemented,
   unreachable,
 } from "./errors.js";
-
-/** The plain `stream: DeltaSink` field every StepContext gets — distinct from `openStream`, which is implemented; this one has no producer wired up yet, so any write to it throws. One shared instance instead of a fresh literal at each call site. */
-const unimplementedStream: DeltaSink = { delta: () => notImplemented("stream") };
 
 /** What a flow runs against — model resolution, bindings, and store. */
 export interface Runtime {
@@ -251,13 +248,11 @@ function findToolBinding(runtime: Runtime, name: string): ToolHandler {
 /** The `ToolContext` every tool handler runs with, wherever it's called from. */
 function buildToolContext(
   threadId: ThreadId,
-  stream: DeltaSink,
   runtime: Runtime,
   identity: StepIdentity,
 ): ToolContext {
   return {
     thread: threadId,
-    stream,
     openStream: (type) =>
       runtime.store.open({
         correlationId: freshCorrelationId(),
@@ -288,7 +283,7 @@ async function runToolCall(
     { type: "toolCall", threadId: context.thread.id },
   );
 
-  const toolContext = buildToolContext(context.thread.id, context.stream, runtime, identity);
+  const toolContext = buildToolContext(context.thread.id, runtime, identity);
   const output = await handler(call.input, toolContext);
 
   runtime.store.append(
@@ -312,12 +307,11 @@ async function callTool<Input, Output>(
   tool: Tool<Input, Output>,
   input: Input,
   threadId: ThreadId,
-  stream: DeltaSink,
   runtime: Runtime,
   identity: StepIdentity,
 ): Promise<Output> {
   const handler = findToolBinding(runtime, tool.name);
-  const toolContext = buildToolContext(threadId, stream, runtime, identity);
+  const toolContext = buildToolContext(threadId, runtime, identity);
   return handler(input, toolContext) as Promise<Output>;
 }
 
@@ -516,7 +510,6 @@ async function handleStepError(
 interface StepContextConfig {
   getThread: () => Thread;
   inputs: unknown[];
-  stream: DeltaSink; // the plain tool-handler delta sink; no producer wired up yet, so any write throws (distinct from openStream, which is implemented)
   openStream: (type: EventType) => Stream; // on-demand stream factory model calls and steps use to create a logged event
   modelCall: (profile: Profile) => Promise<ModelCallResult>;
   callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
@@ -534,7 +527,6 @@ function makeStepContext(config: StepContextConfig): StepContext {
       return config.getThread();
     },
     inputs: config.inputs,
-    stream: config.stream,
     openStream: config.openStream,
     modelCall: config.modelCall,
     callTool: config.callTool,
@@ -594,7 +586,6 @@ async function runBranch(
   const branchContext = makeStepContext({
     getThread: () => branchThread,
     inputs: [input],
-    stream: unimplementedStream,
     openStream: (type) =>
       runtime.store.open({
         correlationId: freshCorrelationId(),
@@ -604,7 +595,7 @@ async function runBranch(
       }),
     modelCall: (profile) => runModelCall(profile, branchContext, runtime, nodeIdentity),
     callTool: (tool, toolInput) =>
-      callTool(tool, toolInput, branchThread.id, branchContext.stream, runtime, nodeIdentity),
+      callTool(tool, toolInput, branchThread.id, runtime, nodeIdentity),
   });
 
   const joinEdge = flow.edges.find((edge) => edge.from === node && edge.edge === "join");
@@ -863,7 +854,6 @@ function buildDriveContext(
   const context = makeStepContext({
     getThread,
     inputs: [],
-    stream: unimplementedStream,
     openStream: (type) => {
       const identity = currentNodeIdentity(
         getCurrent(),
@@ -893,7 +883,7 @@ function buildDriveContext(
         flow,
         "callTool called outside a running node",
       );
-      return callTool(tool, input, getThread().id, context.stream, runtime, identity);
+      return callTool(tool, input, getThread().id, runtime, identity);
     },
   });
   return context;
