@@ -1,8 +1,8 @@
 // Adapter — an in-memory SessionStore. For tests and local dev, not production.
 
 import type { SessionStore, Stream } from "../../engine/session-store.js";
-import type { UserMessage } from "../../flow/message.js";
-import type { Envelope, Event, EventType, SessionId } from "../../session/index.js";
+import type { UserMessage, Message } from "../../flow/message.js";
+import type { Envelope, Event, EventType, SessionId, Delta } from "../../session/index.js";
 import type { ThreadId } from "../../flow/thread.js";
 
 export function memoryStore(): SessionStore {
@@ -47,8 +47,53 @@ export function memoryStore(): SessionStore {
       } as Envelope);
     },
 
-    open(): Stream {
-      throw new Error("not implemented");
+    open(pending: {
+      correlationId: string;
+      type: EventType;
+      stepId: string;
+      stepName?: string;
+      threadId: ThreadId;
+    }): Stream {
+      const deltas: Delta[] = [];
+
+      function commit(event: Event[EventType], aborted?: boolean): void {
+        sequence += 1;
+        log.push({
+          form: "committed",
+          sessionId: "" as SessionId,
+          threadId: pending.threadId,
+          stepId: pending.stepId,
+          stepName: pending.stepName,
+          type: pending.type,
+          event,
+          sequence,
+          at: Date.now(),
+          ...(aborted ? { aborted: true } : {}),
+        } as Envelope);
+      }
+
+      return {
+        delta(part: Delta): void {
+          deltas.push(part); // accumulated for `abort`, never persisted themselves
+        },
+        commit,
+        abort(): void {
+          const text = deltas
+            .filter(
+              (candidate): candidate is Extract<Delta, { text: string }> => "text" in candidate,
+            )
+            .map((candidate) => candidate.text)
+            .join("");
+          const message: Message = {
+            role: "assistant",
+            content: [{ type: "text", text }],
+            provider: "",
+            model: "",
+            usage: { input: 0, output: 0 },
+          };
+          commit({ message }, true);
+        },
+      };
     },
 
     changes(): AsyncIterable<Envelope> {

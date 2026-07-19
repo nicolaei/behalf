@@ -1,7 +1,7 @@
 // Systems running flows — runtime / runFlow. See docs/reference.md.
 
 import type { Model } from "../flow/model.js";
-import type { Message, MessageKind, UserMessage } from "../flow/message.js";
+import type { Message, MessageKind, UserMessage, AssistantMessage } from "../flow/message.js";
 import type { Graph, NodeId, EdgeDefinition } from "../flow/graph.js";
 import type { Binding } from "../flow/tool.js";
 import type { ThreadId, ThreadAction } from "../flow/thread.js";
@@ -137,6 +137,15 @@ async function waitForMessage(
   }
 }
 
+/** Parks until an abort message reaches the inbox — same polling shape as `waitForMessage`. */
+async function waitForAbort(store: SessionStore): Promise<UserMessage> {
+  for (;;) {
+    const message = store.consume((candidate) => candidate.intent === "abort");
+    if (message) return message;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+}
+
 interface InterruptNode {
   id: NodeId;
   messageKind: MessageKind;
@@ -238,10 +247,32 @@ async function runModelCall(
   runtime: Runtime,
 ): Promise<ModelCallResult> {
   const port = runtime.models(profile.model);
-  const reply = await port.respond(profile, context.thread.messages, context.stream);
+  const stream = runtime.store.open({
+    correlationId: freshCorrelationId(),
+    type: "message",
+    stepId: freshStepId(),
+    threadId: context.thread.id,
+  });
+
+  const outcome = await Promise.race([
+    port
+      .respond(profile, context.thread.messages, stream)
+      .then((message): { kind: "reply"; message: AssistantMessage } => ({
+        kind: "reply",
+        message,
+      })),
+    waitForAbort(runtime.store).then((): { kind: "abort" } => ({ kind: "abort" })),
+  ]);
+
+  if (outcome.kind === "abort") {
+    stream.abort();
+    throw new Error("model call aborted");
+  }
+
+  const { message: reply } = outcome;
+  stream.commit({ message: reply });
   context.thread.messages.push(reply);
   context.thread.history.push(reply);
-  runtime.store.append({ message: reply }, { type: "message", threadId: context.thread.id });
 
   const toolCalls = reply.content.filter(isToolCall);
   for (const call of toolCalls) {
@@ -249,6 +280,18 @@ async function runModelCall(
   }
 
   return { usedTools: toolCalls.length > 0, usage: reply.usage };
+}
+
+let nextStepId = 0;
+function freshStepId(): string {
+  nextStepId += 1;
+  return `step-${String(nextStepId)}`;
+}
+
+let nextCorrelationId = 0;
+function freshCorrelationId(): string {
+  nextCorrelationId += 1;
+  return `correlation-${String(nextCorrelationId)}`;
 }
 
 let nextThreadId = 0;
