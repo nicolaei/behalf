@@ -5,7 +5,7 @@ import type { Model, Profile } from "../../index.js";
 // Every scenario here needs toolset()/expand() to be real — they're currently
 // bare `declare function` stubs with no implementation body. Written now so
 // the shape is pinned down before that slice starts.
-describe.skip("toolset groups multiple tool handlers behind one binding", () => {
+describe("toolset groups multiple tool handlers behind one binding", () => {
   it("resolves the toolset's individual handlers by name via discover()", async () => {
     const bundle = toolset("search-bundle", "Search-related tools.");
     const binding = expand(bundle, () =>
