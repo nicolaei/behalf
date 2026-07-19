@@ -294,15 +294,9 @@ async function runModelCall(
   profile: Profile,
   context: StepContext,
   runtime: Runtime,
-  stepId: NodeId,
 ): Promise<ModelCallResult> {
   const port = runtime.models(profile.model);
-  const stream = runtime.store.open({
-    correlationId: freshCorrelationId(),
-    type: "message",
-    stepId,
-    threadId: context.thread.id,
-  });
+  const stream = context.openStream("message");
 
   let modelSettled = false;
   const outcome = await Promise.race([
@@ -556,11 +550,14 @@ async function runBranch(
     getThread: () => branchThread,
     inputs: [input],
     stream: { delta: () => notImplemented("stream") },
-    openStream: (type) => {
-      void type;
-      return notImplemented("openStream in a fan-out branch");
-    },
-    modelCall: (profile) => runModelCall(profile, branchContext, runtime, node),
+    openStream: (type) =>
+      runtime.store.open({
+        correlationId: freshCorrelationId(),
+        type,
+        threadId: branchThread.id,
+        ...stepIdentity(node, nodeDef.label),
+      }),
+    modelCall: (profile) => runModelCall(profile, branchContext, runtime),
     callTool: (tool, toolInput) =>
       callTool(tool, toolInput, branchThread.id, branchContext.stream, runtime),
     async compact(replace, meta): Promise<Emit<Message[]>> {
@@ -834,14 +831,21 @@ async function driveGraph(
     inputs: [],
     stream: { delta: () => notImplemented("stream") },
     openStream: (type) => {
-      void type;
-      return notImplemented("openStream");
+      if (!current) throw new Error("openStream called outside a running node");
+      const node = flow.nodes.get(current);
+      const label = node?.kind === "step" ? node.label : undefined;
+      return runtime.store.open({
+        correlationId: freshCorrelationId(),
+        type,
+        threadId: currentThread.id,
+        ...stepIdentity(current, label),
+      });
     },
     modelCall(profile): Promise<ModelCallResult> {
       // modelCall only ever runs while a node is being processed inside the
       // loop below, so `current` is always set at that point.
       if (!current) throw new Error("modelCall called outside a running node");
-      return runModelCall(profile, context, runtime, current);
+      return runModelCall(profile, context, runtime);
     },
     callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
       return callTool(tool, input, currentThread.id, context.stream, runtime);

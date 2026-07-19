@@ -44,8 +44,13 @@ describe("a step can open its own stream", () => {
     });
 
     const received = (async () => {
-      for await (const envelope of store.changes()) return envelope;
-      throw new Error("changes() completed without yielding an envelope");
+      // filter to the delta form: a changes() subscriber attached before runFlow
+      // also sees the run's own initial "message" commit broadcast first, which
+      // isn't what this scenario is about.
+      for await (const envelope of store.changes()) {
+        if (envelope.form === "delta") return envelope;
+      }
+      throw new Error("changes() completed without yielding a delta envelope");
     })();
 
     await runFlow(graph, userText("go"), ready);
