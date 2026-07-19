@@ -41,10 +41,10 @@ function buildEnvelope(
   meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId },
   event: Event[EventType],
   sequence: number,
-  aborted?: boolean,
+  options?: { aborted?: boolean; form?: "committed" | "in-progress" },
 ): Envelope {
   return {
-    form: "committed",
+    form: options?.form ?? "committed",
     sessionId: UNSET_SESSION_ID,
     threadId: meta.threadId,
     stepId: meta.stepId,
@@ -53,7 +53,7 @@ function buildEnvelope(
     event,
     sequence,
     at: Date.now(),
-    ...(aborted ? { aborted: true } : {}),
+    ...(options?.aborted ? { aborted: true } : {}),
   } as Envelope;
 }
 
@@ -105,9 +105,11 @@ export function memoryStore(): SessionStore {
     }): Stream {
       const deltas: Delta[] = [];
 
+      broadcast(buildEnvelope(meta, {} as Event[EventType], sequence, { form: "in-progress" }));
+
       function commit(event: Event[EventType], aborted?: boolean): void {
         sequence += 1;
-        const envelope = buildEnvelope(meta, event, sequence, aborted);
+        const envelope = buildEnvelope(meta, event, sequence, aborted ? { aborted } : {});
         log.push(envelope);
         broadcast(envelope);
       }

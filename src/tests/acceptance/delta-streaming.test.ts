@@ -24,6 +24,25 @@ describe("streaming partial content before it's committed to the log", () => {
     ]);
   }
 
+  // Same guard, but skips past the in-progress envelope open() now broadcasts
+  // immediately — these callers want the first envelope that actually carries
+  // streamed content, not the "a stream just started" marker.
+  async function firstContentEnvelope(store: ReturnType<typeof adapters.stores.memoryStore>) {
+    return Promise.race([
+      (async () => {
+        for await (const envelope of store.changes()) {
+          if (envelope.form !== "in-progress") return envelope;
+        }
+        throw new Error("changes() completed without yielding a content envelope");
+      })(),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => {
+          reject(new Error("changes() did not yield a content envelope within 1000ms"));
+        }, 1000);
+      }),
+    ]);
+  }
+
   it("does not persist partial content — delta() alone leaves the log untouched", () => {
     // ref: "Deltas live in the store, not the log. Partial content streams
     // live and is dropped; only the finished event is committed."
@@ -78,7 +97,7 @@ describe("streaming partial content before it's committed to the log", () => {
   it("yields a delta-form envelope to an active changes() subscriber", async () => {
     // ref: "changes(): AsyncIterable<Envelope> // yields envelopes of every form"
     const store = adapters.stores.memoryStore();
-    const received = firstEnvelope(store);
+    const received = firstContentEnvelope(store);
 
     const stream = store.open({
       correlationId: "1",
@@ -97,7 +116,7 @@ describe("streaming partial content before it's committed to the log", () => {
     // store.append() directly — the two paths could otherwise diverge
     // (commit() failing to notify changes() subscribers) with no test to catch it
     const store = adapters.stores.memoryStore();
-    const received = firstEnvelope(store);
+    const received = firstContentEnvelope(store);
 
     const stream = store.open({
       correlationId: "1",
