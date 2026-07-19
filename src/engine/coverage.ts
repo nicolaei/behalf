@@ -2,14 +2,10 @@
 
 import type { Profile } from "../flow/profile.js";
 import type { Model, ReasoningLevel } from "../flow/model.js";
-import type { Graph } from "../flow/graph.js";
+import type { Graph, NodeKind } from "../flow/graph.js";
 import type { Binding, Tool, Toolset } from "../flow/tool.js";
-import type { AssistantMessage } from "../flow/message.js";
-import { userText } from "../flow/message.js";
 import type { ModelPort } from "./model-port.js";
-import type { Runtime } from "./runtime.js";
-import { runFlow } from "./runtime.js";
-import { memoryStore } from "../adapters/stores/memory.js";
+import type { PersonaStep } from "../flow/step.js";
 
 /** Everything a persona needs that is not provided. Empty means ready. */
 export type Missing =
@@ -51,74 +47,51 @@ export function satisfiesPersonas(
   return missing;
 }
 
-/** A harmless reply that lets a probed step's `modelCall` complete and the graph continue. */
-function cannedReply(model: Model): AssistantMessage {
-  return {
-    role: "assistant",
-    provider: "coverage-probe",
-    model: model.identifier,
-    content: [],
-    usage: { input: 0, output: 0 },
-  };
+/** Whether a step carries a `.persona` — i.e. is a `PersonaStep`. */
+function isPersonaStep(run: unknown): run is PersonaStep {
+  return typeof run === "function" && "persona" in run;
+}
+
+/** Collects every `Profile` reachable from a graph's nodes, recursing into `use` subgraphs. */
+function personasIn(graph: Graph, profiles: Profile[], seen: Set<Graph>): void {
+  if (seen.has(graph)) return;
+  seen.add(graph);
+
+  for (const node of graph.nodes.values()) {
+    collectFromNode(node, profiles, seen);
+  }
+}
+
+function collectFromNode(node: NodeKind, profiles: Profile[], seen: Set<Graph>): void {
+  if (node.kind === "step" || node.kind === "interrupt") {
+    if (isPersonaStep(node.run)) profiles.push(node.run.persona);
+  } else if (node.kind === "use") {
+    personasIn(node.subgraph, profiles, seen);
+  }
 }
 
 /**
- * A `ModelPort` that never calls a real model: it inspects the full `Profile`
- * it's asked to respond with — using `satisfiesPersonas` so the two functions
- * share one place that knows what "missing" means for a persona — records
- * whatever's missing, and resolves with a canned reply.
- */
-function probePort(
-  model: Model,
-  models: (model: Model) => ModelPort | undefined,
-  bindings: Binding[],
-  record: (found: Missing[]) => void,
-): ModelPort {
-  return {
-    model,
-    respond(profile) {
-      record(satisfiesPersonas([profile], models, bindings));
-      return Promise.resolve(cannedReply(model));
-    },
-  };
-}
-
-/**
- * Finds every `Profile` reachable before a flow's *first* real suspension.
- * A step is a plain closure — nothing about a graph's structure says which
- * profiles it uses — so the only way to find out is to run it, with every
- * model swapped for a probe that inspects the profile it's handed instead of
- * calling anywhere real. This function returns synchronously (matching how
- * callers use it — no `await`), which bounds what it can discover: a probed
- * `modelCall` records its profile synchronously, before `runFlow`'s own first
- * `await`, but anything after that first suspension — a second step, a second
- * `modelCall` — only runs as a later microtask, once this function has
- * already returned. Coverage-checking a flow whose persona-using steps come
- * after its first suspension point needs a different, `await`-based design.
+ * Finds every `Profile` a set of flows could use, by walking their graphs'
+ * structure statically — no execution involved. Each node of kind "step" or
+ * "interrupt" carries a `run: Step`; if that step is a `PersonaStep` (it has
+ * a `.persona`), its profile is collected. Each node of kind "use" embeds a
+ * whole subgraph, so its nodes are walked too, recursively. `waitFor` and
+ * "finish" nodes carry no step. The collected profiles are then checked with
+ * `satisfiesPersonas`, which already knows what "missing" means for a
+ * persona — this function only needs to find every persona in play, not
+ * evaluate one.
  */
 export function satisfiesFlows(
   flows: Graph[],
   models: (model: Model) => ModelPort | undefined,
   bindings: Binding[],
 ): Missing[] {
-  const missing = new Map<string, Missing>();
-  const record = (found: Missing[]): void => {
-    for (const entry of found) missing.set(JSON.stringify(entry), entry);
-  };
+  const profiles: Profile[] = [];
+  const seen = new Set<Graph>();
 
   for (const flow of flows) {
-    const runtime: Runtime = {
-      models: (model) => probePort(model, models, bindings, record),
-      bindings,
-      store: memoryStore(),
-      errorHandlers: [],
-    };
-
-    // Not awaited, to match satisfiesFlows' own synchronous contract. This
-    // only sees the first modelCall reachable before runFlow's first real
-    // suspension — see the function's doc comment above for why.
-    runFlow(flow, userText("coverage check"), runtime).catch(() => undefined);
+    personasIn(flow, profiles, seen);
   }
 
-  return [...missing.values()];
+  return satisfiesPersonas(profiles, models, bindings);
 }

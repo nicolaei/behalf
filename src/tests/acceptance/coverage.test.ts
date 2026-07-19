@@ -18,10 +18,12 @@ describe("satisfiesFlows reports what a runtime is missing", () => {
   }
 
   function usesProfileGraph(name: string, profile: Profile): Graph {
+    const persona = Object.assign(
+      async (context: StepContext) => context.output(await context.modelCall(profile)),
+      { persona: profile },
+    );
     return defineGraph(name, (flow) => {
-      const respond = flow.step(async (context) =>
-        context.output(await context.modelCall(profile)),
-      );
+      const respond = flow.step(persona);
       flow.entry(respond);
       respond.then(flow.finish);
     });

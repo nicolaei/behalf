@@ -659,8 +659,9 @@ const bindings = [...standardBindings, ...authorBindings];
 
 The coverage check. Given the model resolver and the tool bindings, it returns
 everything the personas need that is not provided: a missing model port, a missing
-tool, or an unsupported reasoning level. `satisfiesFlows` runs it across every
-persona in the given flows. Empty means ready.
+tool, or an unsupported reasoning level. `satisfiesFlows` walks each flow's graph
+statically — every `step`/`interrupt` node, recursing into `use` subgraphs — to
+find every persona in play, then checks it across all of them. Empty means ready.
 
 ```ts
 type Missing =
