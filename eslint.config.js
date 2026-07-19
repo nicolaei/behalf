@@ -38,16 +38,10 @@ export default defineConfig([
         {
           patterns: [
             {
-              // Acceptance tests are black-box against the public surface.
-              // That surface is index.ts (@public exports) plus src/testing
-              // (its own public entry point for test authors) — everything
-              // else here is an internal implementation detail these tests
-              // must not reach into directly, even to make a test easier
-              // to write.
               group: [
                 "../../engine/*",
                 "../../flow/*",
-                "../../adapters/*",
+                "../../adapters/**",
                 "../../session/*",
                 "../../gateway/*",
               ],

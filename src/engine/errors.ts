@@ -38,7 +38,6 @@ const DEFAULT_RETRY_BASE_DELAY_MS = 1;
  * The built-in handler runtime() appends after any user-supplied handlers.
  * Retries retryable errors with exponential backoff up to a small cap, otherwise fails.
  * See docs/reference.md’s Errors section.
- * @public
  */
 export const defaultErrorHandler: ErrorHandler = (error, context) => {
   if (!error.retryable || context.attempts >= DEFAULT_RETRY_CAP) {
