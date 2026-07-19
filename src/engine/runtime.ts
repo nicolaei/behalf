@@ -5,7 +5,14 @@ import type { Message, MessageKind, UserMessage, AssistantMessage } from "../flo
 import type { Graph, NodeId, NodeKind, EdgeDefinition } from "../flow/graph.js";
 import type { Binding } from "../flow/tool.js";
 import type { ThreadId, ThreadAction } from "../flow/thread.js";
-import type { StepContext, Emit, ModelCallResult, StepError, Step } from "../flow/step.js";
+import type {
+  StepContext,
+  Emit,
+  ModelCallResult,
+  StepError,
+  Step,
+  WaitForResult,
+} from "../flow/step.js";
 import type { Tool, ToolContext, ToolHandler } from "../flow/tool.js";
 import type { Stream } from "../session/envelope.js";
 import type { Event, EventType } from "../session/event.js";
@@ -632,6 +639,11 @@ interface RouteResult {
   to: NodeId;
 }
 
+/** Distinguishes a real `Message` from a plain marker value (e.g. `waitFor`'s `WaitForResult`) reaching a `use` node as its incoming value. */
+function looksLikeMessage(value: unknown): value is Message {
+  return typeof value === "object" && value !== null && "role" in value && "content" in value;
+}
+
 /** Runs a `use` node: seeds its subgraph, drives it inline to its own `finish`, and follows the reaching edge with its result. */
 async function driveUseNode(
   node: Extract<NodeKind, { kind: "use" }>,
@@ -645,9 +657,14 @@ async function driveUseNode(
   // The subgraph's initial prompt: the reaching edge's `prompt` output, if it
   // had one (the previous iteration's `follow` already pushed it onto this
   // thread; logged again here so it lands in the log too), otherwise the raw
-  // incoming value, trusted to already be a `Message` (never pushed onto the
-  // thread, so push it now — this node is its only source).
-  const seed: Message = reason ?? (currentInput as Message);
+  // incoming value if it's a real `Message` (never pushed onto the thread, so
+  // push it now — this node is its only source), or — when the incoming value
+  // is a non-message marker such as `waitFor`'s `{ ok: true }` — the message
+  // that marker stands for, already the thread's last message.
+  const fallback: Message | undefined = thread.messages.at(-1);
+  const seed: Message | undefined =
+    reason ?? (looksLikeMessage(currentInput) ? currentInput : fallback);
+  if (!seed) throw new Error("use node has no message to seed its subgraph with");
   if (!reason) pushMessage(thread, seed);
   runtime.store.append({ message: seed }, { type: "message", threadId: thread.id });
 
@@ -706,7 +723,12 @@ async function driveWaitForNode(
 
   const edge = advance(flow.edges, nodeId, message);
   const followed = follow(edge, thread);
-  return { thread: followed.thread, input: message, reason: edge.reason, to: followed.to };
+  return {
+    thread: followed.thread,
+    input: { ok: true } satisfies WaitForResult,
+    reason: edge.reason,
+    to: followed.to,
+  };
 }
 
 /** What handling a step's `Emit` decided: retry the same node, or advance to the next one. */
@@ -1043,12 +1065,6 @@ export async function runFlow(
 export type TickOutcome =
   { status: "advanced" } | { status: "suspended" } | { status: "done"; result: unknown };
 
-/** The first text block's text in a message — what a `waitFor` node hands downstream, mirroring a `step`'s own output (a plain value, not the message envelope). */
-function firstText(message: Message): string {
-  const block = message.content.find((candidate) => candidate.type === "text");
-  return block?.type === "text" ? block.text : "";
-}
-
 /** Where a fresh replay of `runtime.store`'s committed events left off: the node to run next, the thread it runs on, and the value it sees as input. */
 interface ReplayPosition {
   current: NodeId;
@@ -1097,7 +1113,7 @@ function replayPosition(flow: Graph, store: SessionStore): ReplayPosition {
       const followed = follow(edge, thread);
       thread = followed.thread;
       current = followed.to;
-      currentInput = firstText(message);
+      currentInput = { ok: true } satisfies WaitForResult;
       continue;
     }
     // toolCall/toolResult/compaction/invalidation/error don't move the main
@@ -1175,7 +1191,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         const followed = follow(edge, currentThread);
         currentThread = followed.thread;
         current = followed.to;
-        currentInput = firstText(message);
+        currentInput = { ok: true } satisfies WaitForResult;
       }
       continue;
     }
