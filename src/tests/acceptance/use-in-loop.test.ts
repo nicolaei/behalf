@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
 import { neverCalled, textOf } from "./support.js";
 
-describe.skip("re-entering a subgraph after waitFor (the chat pattern)", () => {
+describe("re-entering a subgraph after waitFor (the chat pattern)", () => {
   const turn = defineGraph("turn", (flow) => {
     const respond = flow.step(outputs((context) => textOf(context.thread.messages.at(-1))));
     flow.entry(respond);
