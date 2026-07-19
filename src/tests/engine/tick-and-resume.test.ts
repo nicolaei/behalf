@@ -40,10 +40,12 @@ describe("ticking a flow one node at a time and resuming it from the store alone
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
     const first = await tick(graph, ready); // runs `start`
-    expect(first).toEqual({ status: "advanced" });
+    expect(first).toHaveLength(1);
+    expect(first).toMatchObject([{ status: "active" }]);
 
     const second = await tick(graph, ready); // reaches `gate`, nothing in the inbox
-    expect(second).toEqual({ status: "suspended" });
+    expect(second).toHaveLength(1);
+    expect(second).toMatchObject([{ status: "parked", waitingFor: ["follow-up"] }]);
   });
 
   it("resumes and finishes once a fresh tick sees the submitted message, using tickUntilSuspended", async () => {
@@ -52,14 +54,16 @@ describe("ticking a flow one node at a time and resuming it from the store alone
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
     const parked = await tickUntilSuspended(graph, ready); // start, then suspend at gate
-    expect(parked).toEqual({ status: "suspended" });
+    expect(parked).toHaveLength(1);
+    expect(parked).toMatchObject([{ status: "parked", waitingFor: ["follow-up"] }]);
 
     store.submit(followUp("approved"));
 
     // a brand new call, same runtime object, same store: proves position came
     // from the store, not from any state tick() carried in its own closures
     const finished = await tickUntilSuspended(graph, ready);
-    expect(finished).toEqual({ status: "done", result: "got: approved" });
+    expect(finished).toHaveLength(1);
+    expect(finished).toMatchObject([{ status: "done", result: "got: approved" }]);
   });
 
   it("resumes correctly even with a brand new Runtime object per tick — only the store persists", async () => {
@@ -74,15 +78,18 @@ describe("ticking a flow one node at a time and resuming it from the store alone
     }
 
     const first = await freshTick(); // runs `start`
-    expect(first).toEqual({ status: "advanced" });
+    expect(first).toHaveLength(1);
+    expect(first).toMatchObject([{ status: "active" }]);
 
     const second = await freshTick(); // reaches `gate`, nothing in the inbox
-    expect(second).toEqual({ status: "suspended" });
+    expect(second).toHaveLength(1);
+    expect(second).toMatchObject([{ status: "parked", waitingFor: ["follow-up"] }]);
 
     store.submit(followUp("approved"));
 
     const third = await freshTick(); // runs `finish`
-    expect(third).toEqual({ status: "done", result: "got: approved" });
+    expect(third).toHaveLength(1);
+    expect(third).toMatchObject([{ status: "done", result: "got: approved" }]);
   });
 
   it("gives the waitFor's result as { ok: true }, matching runFlow, with the message already on the thread", async () => {
@@ -110,9 +117,9 @@ describe("ticking a flow one node at a time and resuming it from the store alone
     store.submit(followUp("approved"));
     const result = await tickUntilSuspended(graph, ready);
 
-    expect(result).toEqual({
-      status: "done",
-      result: { ok: true, lastMessageText: "approved" },
-    });
+    expect(result).toHaveLength(1);
+    expect(result).toMatchObject([
+      { status: "done", result: { ok: true, lastMessageText: "approved" } },
+    ]);
   });
 });

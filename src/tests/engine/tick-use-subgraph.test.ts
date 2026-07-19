@@ -33,7 +33,8 @@ describe("ticking a flow through a used subgraph", () => {
 
     const outcome = await tickUntilSuspended(outer, ready);
 
-    expect(outcome).toEqual({ status: "done", result: "HI" });
+    expect(outcome).toHaveLength(1);
+    expect(outcome).toMatchObject([{ status: "done", result: "HI" }]);
   });
 
   it("appends the subgraph's messages and output to the same session log", async () => {

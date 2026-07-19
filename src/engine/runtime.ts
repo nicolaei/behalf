@@ -1137,10 +1137,17 @@ export async function runFlow(
   return result.output;
 }
 
-/** One `tick`'s outcome: a node ran (call again), the flow parked at a `waitFor` with nothing to consume, or it finished. */
-export type TickOutcome =
-  { status: "advanced" } | { status: "suspended" } | { status: "done"; result: unknown };
+/** One cursor's current state within a tick() outcome — node, status, and (for parked) what it's waiting for. */
+export interface CursorState {
+  node: NodeId;
+  status: "active" | "parked" | "done";
+  waitingFor?: MessageKind[]; // present only when status is "parked"
+  result?: unknown; // present only when status is "done" (root cursor only)
+  parent?: string; // absent = this is the root cursor; present = identifies which cursor this folds into
+}
 
+/** One tick()'s outcome: a set of independently-progressing cursors. For single-cursor flows, always a one-element array. */
+export type TickOutcome = CursorState[];
 /** Where a fresh replay of `runtime.store`'s committed events left off: the node to run next, the thread it runs on, and the value it sees as input. */
 interface ReplayPosition {
   current: NodeId;
@@ -1269,15 +1276,15 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     const node = flow.nodes.get(current);
     if (!node) throw new Error(`graph "${flow.name}" has no node "${current}"`);
 
-    if (node.kind === "finish") return { status: "done", result: currentInput };
+    if (node.kind === "finish") return [{ node: current, status: "done", result: currentInput }];
 
     if (node.kind === "waitFor") {
-      if (ranStep) return { status: "advanced" };
+      if (ranStep) return [{ node: current, status: "active" }];
       const kinds = [node.messageKind, ...interrupts.map((interrupt) => interrupt.messageKind)];
       const message = runtime.store.consume(
         (candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind),
       );
-      if (!message) return { status: "suspended" };
+      if (!message) return [{ node: current, status: "parked", waitingFor: kinds }];
 
       runtime.store.append({ message }, { type: "message", threadId: currentThread.id });
       pushMessage(currentThread, message);
@@ -1315,7 +1322,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     }
 
     if (node.kind === "use") {
-      if (ranStep) return { status: "advanced" };
+      if (ranStep) return [{ node: current, status: "active" }];
       const entryNode = node.subgraph.nodes.get(node.subgraph.entry);
       if (entryNode?.kind === "waitFor") {
         const kinds = [
@@ -1346,7 +1353,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
 
     if (node.kind !== "step") notImplemented(`tick: node kind "${node.kind}"`);
 
-    if (ranStep) return { status: "advanced" };
+    if (ranStep) return [{ node: current, status: "active" }];
 
     if (node.label) currentThread = { ...currentThread, label: node.label };
 
@@ -1377,6 +1384,6 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
 export async function tickUntilSuspended(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
   for (;;) {
     const outcome = await tick(flow, runtime);
-    if (outcome.status !== "advanced") return outcome;
+    if (outcome[0]?.status !== "active") return outcome;
   }
 }
