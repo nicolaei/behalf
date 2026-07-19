@@ -3,7 +3,7 @@ import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../.
 import type { SessionStore } from "../../index.js";
 import { neverCalled, loggedEnvelopes } from "./support.js";
 
-describe.skip("envelope metadata: sequence, at, stepId, stepName, threadId", () => {
+describe("envelope metadata: sequence, at, stepId, stepName, threadId", () => {
   // Two steps, not one — a single-envelope run can't tell "consistent across
   // envelopes" apart from "there was only one to begin with".
   const labeled = defineGraph("labeled", (flow) => {
