@@ -3,7 +3,7 @@ import { defineGraph, runFlow, runtime, userText, adapters } from "../../index.j
 import type { ErrorHandler, Graph, SessionStore } from "../../index.js";
 import { neverCalled, loggedEventTypes } from "./support.js";
 
-describe.skip("a step error and its retry handler", () => {
+describe("a step error and its retry handler", () => {
   // A fresh attempt counter per test, and a fresh graph name (defineGraph
   // needs a unique one), so the two `it`s don't share state.
   function flakyFixture(graphName: string): {
