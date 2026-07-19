@@ -25,3 +25,22 @@ export function notImplemented(name: string): never {
 export function unreachable(name: string): never {
   throw new Error(`unreachable: ${name}`);
 }
+
+/** Small cap on retries before giving up. */
+const DEFAULT_RETRY_CAP = 3;
+
+/** Base delay (ms) for exponential backoff between retries; kept tiny so tests stay fast. */
+const DEFAULT_RETRY_BASE_DELAY_MS = 1;
+
+/**
+ * The built-in handler runtime() appends after any user-supplied handlers.
+ * Retries retryable errors with exponential backoff up to a small cap, otherwise fails.
+ * See docs/reference.md's Errors section.
+ */
+export const defaultErrorHandler: ErrorHandler = (error, context) => {
+  if (!error.retryable || context.attempts >= DEFAULT_RETRY_CAP) {
+    return { action: "fail" };
+  }
+  const after = DEFAULT_RETRY_BASE_DELAY_MS * 2 ** context.attempts;
+  return { action: "retry", after };
+};

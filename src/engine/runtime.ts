@@ -17,6 +17,7 @@ import {
   type ErrorContext,
   type ErrorDecision,
   type ErrorHandler,
+  defaultErrorHandler,
   notImplemented,
   unreachable,
 } from "./errors.js";
@@ -61,7 +62,7 @@ export async function runtime(config: {
     models: config.models,
     bindings: config.bindings,
     store: config.store,
-    errorHandlers: config.errorHandlers ?? [],
+    errorHandlers: [...(config.errorHandlers ?? []), defaultErrorHandler],
   };
   resolvedTools.set(ready, await expandToolsets(config.bindings));
   return ready;
