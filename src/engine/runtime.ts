@@ -296,9 +296,8 @@ async function runBranch(
     output<Result>(value: Result): Emit<Result> {
       return { output: value };
     },
-    async compact(replace, meta): Promise<Emit<Message[]>> {
-      const messages = await replace(branchThread.messages);
-      return { compact: messages, ...(meta !== undefined ? { meta } : {}) };
+    compact(): Promise<Emit<Message[]>> {
+      return notImplemented("compact in a fan-out branch");
     },
     invalidate(): Emit<never> {
       return notImplemented("invalidate in a fan-out branch");
