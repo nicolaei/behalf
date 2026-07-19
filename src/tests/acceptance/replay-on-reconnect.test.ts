@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
 import { neverCalled, loggedEnvelopes } from "./support.js";
 
-describe.skip("a late reader replays the full committed log", () => {
+describe("a late reader replays the full committed log", () => {
   const graph = defineGraph("two-events", (flow) => {
     const step = flow.step(outputs(() => "done"));
     flow.entry(step);
