@@ -16,6 +16,15 @@ export interface StepState {
   laneId: string;
   node: NodeId;
   status: "active" | "parked" | "done";
+  // "parked" covers two different situations, distinguished only by whether
+  // `waitingFor` is present:
+  //  - blocked on external input: a `waitFor` node with nothing in the inbox
+  //    yet that matches. `waitingFor` lists the message kinds it's armed for.
+  //  - structurally parked: a fan-out branch that finished its own chain and
+  //    is waiting on its sibling branches to reach the join. `waitingFor` is
+  //    absent here — there's nothing to check the inbox for.
+  // A test author asking "is this lane blocked on me?" should check for
+  // `waitingFor` being present, not just `status === "parked"`.
   waitingFor?: MessageKind[]; // only when parked
   result?: unknown; // only when done
 }

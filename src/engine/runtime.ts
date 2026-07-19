@@ -560,7 +560,7 @@ function makeStepContext(config: StepContextConfig): StepContext {
 
 /** What running one fan-out branch to completion settled with — a normal reach of its convergence node, or a nested `invalidate` emit that means the fan-out step itself must be rerun instead of joining. */
 type BranchResult =
-  | { kind: "output"; output: unknown; joinTo: NodeId }
+  | { kind: "output"; output: unknown }
   | { kind: "invalidate"; emit: Extract<Emit, { invalidate: NodeId }> };
 
 /**
@@ -713,7 +713,7 @@ async function runBranch(
       throw new Error(`fan-out branch step "${currentNode}" has no outgoing then edge`);
 
     if (thenEdge.to === joinNodeId) {
-      return { kind: "output", output: result.output, joinTo: joinNodeId };
+      return { kind: "output", output: result.output };
     }
 
     // Advance to the next step in this branch.

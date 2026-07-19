@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, outputs } from "../../index.js";
+import { defineGraph, runFlow, userText, outputs, join } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
 
 describe("fan-out join() validation", () => {
@@ -23,6 +23,24 @@ describe("fan-out join() validation", () => {
 
     await expect(runFlow(badGraph, userText("go"), await storeOnlyRuntime())).rejects.toThrow(
       "was not defined with join()",
+    );
+  });
+
+  it("rejects when a join()-tagged step is reached as a plain, single-input step", async () => {
+    // A join()-tagged step used in an ordinary linear chain — no fan-out, one
+    // inbound edge — must be rejected: join() declares the node expects every
+    // branch's output as an array, but a plain step only ever gets one input.
+    const badGraph = defineGraph("bad-plain-join", (flow) => {
+      const start = flow.step(outputs(() => "go"));
+      const converge = flow.step(join((context) => context.inputs));
+
+      flow.entry(start);
+      start.then(converge);
+      converge.then(flow.finish);
+    });
+
+    await expect(runFlow(badGraph, userText("go"), await storeOnlyRuntime())).rejects.toThrow(
+      "is tagged with join() but was reached as a plain step",
     );
   });
 });

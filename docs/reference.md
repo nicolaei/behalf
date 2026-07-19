@@ -53,7 +53,6 @@ flowchart LR
     When["when"]
     Otherwise["otherwise"]
     Then["then<br/>(single · array = fan out)"]
-    Join["join<br/>(fan in from a group)"]
   end
   subgraph Emits
     Output["output"]
@@ -70,8 +69,11 @@ flowchart LR
   (always-armed handler), `use` (a subgraph), `finish` (the terminal — its incoming
   value is the flow's result).
 - **Edges** (forward only): `when` (route on output), `otherwise` (fallthrough),
-  `then` (continue; an array fans out to a group; a `threadAction` picks the thread),
-  `join` (fan a group back in — one run when all branches finish).
+  `then` (continue; an array fans out, each target on its own thread; a
+  `threadAction` picks the thread). There is no separate join edge — a join
+  node is recognized structurally, as the point where converging edges from a
+  fan-out's branches meet, and must be built with the `join()` step builder
+  (mirrors `PersonaStep`/`outputs()`) so the engine can validate the wiring.
 - **Emits**: `output` (routed by edges), `compact` (rewrite the thread), `invalidate`
   (rerun a node), and `error` (hand to the runner). Only `output` is routed by edges.
 
@@ -225,7 +227,6 @@ so it owns its idempotency.
 ```ts
 type ToolContext = {
   thread: ThreadId;
-  stream: DeltaSink;
   openStream(type: EventType): Stream; // open a fresh, logged stream scoped to this thread
   runFlow: (flow: Graph, initialPrompt: Message) => Promise<unknown>;
 };
@@ -285,7 +286,7 @@ What a step sees and does. `thread.messages` is the assembled view — compactio
 applied, older messages trimmed; `thread.history` is the full record on the thread.
 `modelCall` makes one model request and runs any tools it returns, appending all of
 it to the log, and returns a small `ModelCallResult` the graph can route on.
-`stream` is ephemeral. `openStream(type)` opens a fresh, logged stream scoped to
+`openStream(type)` opens a fresh, logged stream scoped to
 the step's own thread — deltas broadcast live, then `commit`/`abort` finalizes an
 event into the log, same as a model call's own internal stream. A restarted node
 needs no special channel: `invalidate`
@@ -302,7 +303,6 @@ interface StepContext {
     history: Message[]; // the full record on this thread, including compaction messages
   };
   readonly inputs: unknown[]; // upstream outputs; a join gets one per branch
-  readonly stream: DeltaSink; // ephemeral — never logged
   openStream(type: EventType): Stream; // open a fresh, logged stream scoped to this thread
 
   modelCall(profile: Profile): Promise<ModelCallResult>; // one request + its tools, appended to the log
@@ -389,8 +389,8 @@ gives a thread a stable label you can address.
 
 Composes steps into a runnable flow. Nodes: `step`, `use`, `waitFor`, `interrupt`,
 `finish`; `entry` is a `Flow` method that marks the start node, not a node kind.
-Edges: `when`, `otherwise`, `then` (single, or an array that fans out to a
-`Group`), `join` (fan a group back in).
+Edges: `when`, `otherwise`, `then` (single, or an array that fans out —
+each target on its own thread; there is no separate `Group` return type).
 
 ```ts
 function defineGraph(name: string, build: (flow: Flow) => void): Graph;
@@ -411,18 +411,20 @@ interface Handle {
   when(condition: (output: any) => boolean, to: Handle, options?: EdgeOptions): Handle; // returns this handle (the source), for chaining more `when`/`otherwise`
   otherwise(to: Handle, options?: EdgeOptions): Handle; // returns this handle (the source), same reason
   then(to: Handle, options?: EdgeOptions): void; // continue to one node
-  then(to: Handle[], options?: EdgeOptions): Group; // fan out — each on its own thread
-}
-
-interface Group {
-  join(to: Handle, options?: EdgeOptions): void; // run `to` once when every branch finishes
+  then(to: Handle[], options?: EdgeOptions): void; // fan out — each target on its own forked thread
 }
 ```
 
 Behaviour: a node runs when its trigger is met and it has no current output. An
-agent loops within a thread through a self `then`. `then` with an array fans out to a
-`Group`, each target on its own forked thread; `group.join(target)` runs `target`
-once when every branch finishes, with one input per branch. `waitFor` parks until the inbox has a
+agent loops within a thread through a self `then`. `then` with an array fans
+out, each target on its own forked thread — no special return value comes
+back. A branch reaches its join the same way any node reaches its next step:
+ordinary `.then()` calls on whatever handle its own chain ends at. The
+convergence node — reached by edges converging from every branch of one
+fan-out — must be built with the `join()` step builder (see `JoinStep`/`join()`
+in src/flow/step.ts), so the engine can validate the wiring structurally: a
+node reached by converging fan-out edges without `join()` tagging is rejected,
+and a `join()`-tagged node reached as a plain single-input step is rejected too.
 matching message, then applies it to the thread. `interrupt` fires wherever the
 graph currently is. Routing a value into `finish` ends the flow — that value is the
 result, which is also the output of a `use` node and what `runFlow` resolves with.
@@ -492,20 +494,26 @@ export const chat = defineGraph("chat", (flow) => {
 
 ```ts
 // 2 · A big fork over one prompt, joined into a single reply. Each check is a
-// persona on its own forked thread. The join runs once with all three results and
-// produces the reply, routed to `finish`.
+// persona on its own forked thread; each branch reaches `merge` by an ordinary
+// `.then()` edge. The join runs once with all three results and produces the
+// reply, routed to `finish`.
 export const audit = defineGraph("audit", (flow) => {
   const intake = flow.step(readPrompt);
   const security = flow.step(modelStep(securityReviewer));
   const performance = flow.step(modelStep(performanceReviewer));
   const style = flow.step(modelStep(styleReviewer));
-  const reply = flow.step(modelStep(lead)); // the join target — runs once
+  const merge = flow.step(join((context) => context.inputs)); // the join target — runs once, one input per branch
+  const reply = flow.step(modelStep(lead)); // reads the merged reviews from context.inputs[0]
 
   flow.entry(intake);
-  const reviewers = intake.then([security, performance, style]); // fan out → a group
-  reviewers.join(reply); // fan in → reply runs once, inputs = the three results
+  intake.then([security, performance, style]); // fan out — each on its own forked thread
+  security.then(merge); // each branch reaches the join by an ordinary edge
+  performance.then(merge);
+  style.then(merge);
+  merge.then(reply);
   reply.then(flow.finish);
 });
+```
 ```
 
 ```ts
@@ -721,19 +729,25 @@ const ready = await runtime({ models: resolveModel, bindings, store });
 await runFlow(feature, userText("Add rate limiting to the API."), ready);
 ```
 
-`tick` advances a flow exactly one node and returns; `tickUntilSuspended` calls
-`tick` in a loop until it stops advancing. Both reconstruct where the flow is
-purely from `runtime.store` — no position survives in a JS closure between
-calls, so a fresh `Runtime` (same store) resumes exactly like the original one.
-A `waitFor` with a message already waiting is consumed inline, without counting
-as the call's one step, so reaching `finish` right after resuming reports
-`done`, not `advanced`.
+`tick` advances a flow by one step per independently-progressing cursor and
+returns; `tickUntilSuspended` calls `tick` in a loop until every cursor is
+parked or done. Both reconstruct where the flow is purely from `runtime.store`
+— no position survives in a JS closure between calls, so a fresh `Runtime`
+(same store) resumes exactly like the original one. A `waitFor` with a
+message already waiting is consumed inline, without counting as a step.
+**Internal** — neither is exported from `src/index.ts`; the `behalf/testing`
+module (below) wraps them in a test author's vocabulary.
 
 ```ts
-type TickOutcome =
-  | { status: "advanced" }
-  | { status: "suspended" }
-  | { status: "done"; result: unknown };
+interface CursorState {
+  node: NodeId;
+  status: "active" | "parked" | "done";
+  waitingFor?: MessageKind[]; // present only when status is "parked"
+  result?: unknown; // present only when status is "done" (root cursor only)
+  parent?: string; // absent = the root cursor; present = which cursor this folds into (a fan-out branch or a `use` subgraph)
+}
+
+type TickOutcome = CursorState[]; // one entry per independently-progressing cursor; a single-cursor flow is always a one-element array
 
 function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome>;
 function tickUntilSuspended(flow: Graph, runtime: Runtime): Promise<TickOutcome>;
@@ -801,6 +815,94 @@ const ready = await runtime({ models: resolveModel, bindings, store });
 ```
 
 ---
+
+# Testing
+
+A separate entry point, `behalf/testing` — not part of the public API surface
+at `src/index.ts` and not covered by the "Systems running flows" section
+above. It wraps the engine's internal, cursor-based `tick`/`tickUntilSuspended`
+primitives in a test author's own vocabulary, the same way a fake-timer
+library wraps a runtime's clock: purpose-built verbs instead of raw internals
+(`CursorState`, `parent`, `FanOutGroup`).
+
+## Interfaces
+
+### stepOnce / stepUntilBlocked
+
+Advance a flow one node, or drive it until every lane is parked or done. Each
+call returns a `StepResult` — one `StepState` per independently-progressing
+lane (a fan-out branch, a `use` subgraph, or the root).
+
+```ts
+interface StepState {
+  laneId: string; // synthesized per call — stable within one snapshot, not across calls; key off `node` to compare lanes over time
+  node: NodeId;
+  status: "active" | "parked" | "done";
+  // "parked" covers two different situations, distinguished only by whether
+  // `waitingFor` is present: blocked on external input (a `waitFor` node with
+  // nothing in the inbox that matches — `waitingFor` lists the kinds it's
+  // armed for), or structurally parked (a fan-out branch that finished its
+  // own chain and is waiting on its siblings to reach the join — no
+  // `waitingFor`, nothing to check the inbox for). Check for `waitingFor`,
+  // not just the status string, to tell the two apart.
+  waitingFor?: MessageKind[];
+  result?: unknown; // present only when done
+}
+
+type StepResult = StepState[];
+
+function stepOnce(flow: Graph, runtime: Runtime): Promise<StepResult>;
+function stepUntilBlocked(flow: Graph, runtime: Runtime): Promise<StepResult>;
+```
+
+### stepUntil / atNode / StepUntilError
+
+`stepUntil` calls `stepOnce` in a loop until `condition` is satisfied. It
+throws `StepUntilError("stalled")` the moment every lane is `"parked"` or
+`"done"` and the condition still isn't met — that state is deterministic, so
+stepping again can't help — and `StepUntilError("budget-exceeded")` if
+`maxSteps` (default 1000) is spent while lanes are still active. `atNode`
+builds a condition satisfied once any lane sits at a given step.
+
+```ts
+function stepUntil(
+  flow: Graph,
+  runtime: Runtime,
+  condition: (state: StepResult, runtime: Runtime) => boolean,
+  options?: { maxSteps?: number },
+): Promise<StepResult>;
+
+function atNode(step: Handle): (state: StepResult) => boolean;
+
+class StepUntilError extends Error {
+  readonly reason: "stalled" | "budget-exceeded";
+}
+```
+
+## Full examples
+
+```ts
+// 1 · Drive a flow node by node, asserting on each lane's state.
+const ready = await runtime({ models: () => fakePort, bindings, store });
+const first = await stepOnce(feature, ready);
+expect(first).toEqual([{ laneId: "root#0", node: "ask", status: "active" }]);
+```
+
+```ts
+// 2 · Run until a fan-out's branches are all parked or done, then assert on
+// the concurrent lanes.
+const state = await stepUntilBlocked(audit, ready);
+expect(state.filter((lane) => lane.status === "parked")).toHaveLength(3);
+```
+
+```ts
+// 3 · Step until a specific node is reached, or fail loudly if the flow never
+// gets there.
+await stepUntil(feature, ready, atNode(review));
+```
+
+---
+
 
 # Session store
 
