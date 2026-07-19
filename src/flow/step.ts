@@ -20,6 +20,11 @@ export interface StepError {
   cause?: unknown; // the raw error, for logs
 }
 
+/** What a `waitFor` node hands downstream once it consumes a matching message — a plain marker, not the message itself; the message is already pushed onto the thread. */
+export interface WaitForResult {
+  ok: true;
+}
+
 /** The one outcome a step returns. Only `output` is routed by edges. */
 export type Emit<Result = unknown> =
   | { output: Result }

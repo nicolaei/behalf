@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, tick, tickUntilSuspended, runtime, adapters } from "../../index.js";
-import type { Graph, Runtime } from "../../index.js";
-import { neverCalled } from "./support.js";
+import type { Graph, Runtime, WaitForResult } from "../../index.js";
+import { neverCalled, textOf } from "./support.js";
 
 // Needs tick() to advance a flow exactly one node, reconstructing position
 // purely from runtime.store on every call — currently waitFor is driven by
@@ -14,7 +14,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
       const start = flow.step((context) => Promise.resolve(context.output("go")));
       const gate = flow.waitFor("follow-up");
       const finish = flow.step((context) =>
-        Promise.resolve(context.output(`got: ${String(context.inputs[0])}`)),
+        Promise.resolve(context.output(`got: ${textOf(context.thread.messages.at(-1))}`)),
       );
       flow.entry(start);
       start.then(gate);
@@ -81,5 +81,36 @@ describe("ticking a flow one node at a time and resuming it from the store alone
 
     const third = await freshTick(); // runs `finish`
     expect(third).toEqual({ status: "done", result: "got: approved" });
+  });
+
+  it("gives the waitFor's result as { ok: true }, matching runFlow, with the message already on the thread", async () => {
+    const graph = defineGraph("tick-waitfor-ok", (flow) => {
+      const start = flow.step((context) => Promise.resolve(context.output("go")));
+      const gate = flow.waitFor("follow-up");
+      const finish = flow.step((context) => {
+        const result = context.inputs[0] as WaitForResult;
+        return Promise.resolve(
+          context.output({
+            ok: result.ok,
+            lastMessageText: textOf(context.thread.messages.at(-1)),
+          }),
+        );
+      });
+      flow.entry(start);
+      start.then(gate);
+      gate.then(finish);
+      finish.then(flow.finish);
+    });
+    const store = adapters.stores.memoryStore();
+    const ready = await runtime({ models: neverCalled, bindings: [], store });
+
+    await tickUntilSuspended(graph, ready); // suspends at gate
+    store.submit(followUp("approved"));
+    const result = await tickUntilSuspended(graph, ready);
+
+    expect(result).toEqual({
+      status: "done",
+      result: { ok: true, lastMessageText: "approved" },
+    });
   });
 });
