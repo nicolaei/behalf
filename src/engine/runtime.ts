@@ -339,31 +339,37 @@ async function runBranch(
   return { output: emit.output, joinTo: joinEdge.to };
 }
 
+/** What driving a graph to its `finish` node settles with — the final thread and the terminal value. */
+interface DriveResult {
+  thread: Thread;
+  output: unknown;
+}
+
 /**
- * Seeds a new session with a user message, drives it to completion, and
- * resolves with the terminal output. A `parentThreadId` makes it a child —
- * how a tool spawns a sub-agent.
+ * Drives one graph from its entry node to its `finish` node: runs each step,
+ * follows the edge its output selects, mutates the thread as edges and
+ * emits dictate, and handles `waitFor`, `interrupt`, `invalidate`, `compact`,
+ * and step errors along the way. This is the whole engine loop, factored out
+ * so a `use` node can point the same machinery at a subgraph, inline — same
+ * thread, same runtime, same log — and resume the outer drive with the
+ * subgraph's result once it reaches its own `finish`.
+ *
+ * `input` is the value the entry node sees, exactly like `initialPrompt` at
+ * the top level: usually a `Message` (the flow's or the subgraph's seed), but
+ * any node reachable as an entry may read it via `context.inputs[0]`.
  */
-export async function runFlow(
+async function driveGraph(
   flow: Graph,
-  initialPrompt: Message,
   runtime: Runtime,
-  options?: { parentThreadId?: ThreadId },
-): Promise<unknown> {
-  const threadId = "thread-0" as ThreadId;
-
-  // The live current thread — reassigned (not mutated) by `invalidate` when it
-  // forks or resets. `context.thread` reads it through a getter so every
-  // consumer (modelCall, tool calls, invalidate itself) sees the same,
-  // up-to-date thread rather than a snapshot captured once at the top.
-  let currentThread: Thread = {
-    id: threadId,
-    ...(options?.parentThreadId ? { parentThreadId: options.parentThreadId } : {}),
-    messages: [initialPrompt],
-    history: [initialPrompt],
-  };
-
-  runtime.store.append({ message: initialPrompt }, { type: "message", threadId: currentThread.id });
+  thread: Thread,
+  input: unknown,
+): Promise<DriveResult> {
+  // The live current thread — reassigned (not mutated) by `invalidate`, a
+  // `use` node, or a threadAction when it forks or resets. `context.thread`
+  // reads it through a getter so every consumer (modelCall, tool calls,
+  // invalidate itself) sees the same, up-to-date thread rather than a
+  // snapshot captured once at the top.
+  let currentThread: Thread = thread;
 
   const context: StepContext = {
     get thread() {
@@ -402,7 +408,12 @@ export async function runFlow(
 
   const interrupts = findInterruptNodes(flow);
   let current: NodeId | undefined = flow.entry;
-  let input: unknown = initialPrompt;
+  let currentInput: unknown = input;
+  // The edge-resolved prompt (if any) that led to the node we're about to
+  // run — what a `use` node seeds its subgraph with when the reaching edge
+  // carried a `prompt`. Cleared on any transition that doesn't come from
+  // following a routed edge (invalidate, fan-out join).
+  let reason: Message | undefined;
   // Set only when the previous step joined a fan-out group — one entry per
   // branch, in declared order — so the next step's `inputs` isn't wrapped a
   // second time around a single `input`.
@@ -418,10 +429,35 @@ export async function runFlow(
 
     // Consumed by whichever node runs next, regardless of its kind — a join's
     // pendingInputs must never survive past the node it was meant for.
-    const inputs = pendingInputs ?? [input];
+    const inputs = pendingInputs ?? [currentInput];
     pendingInputs = undefined;
 
-    if (node.kind === "finish") return input;
+    if (node.kind === "finish") return { thread: currentThread, output: currentInput };
+
+    if (node.kind === "use") {
+      // The subgraph's initial prompt: the reaching edge's `prompt` output, if
+      // it had one (already applied to this thread by `follow`, below — logged
+      // here so it lands in the log too), otherwise the raw incoming value,
+      // trusted to already be a `Message` (never pushed onto the thread, so
+      // push it now — this node is its only source).
+      const seed: Message = reason ?? (currentInput as Message);
+      if (!reason) {
+        currentThread.messages.push(seed);
+        currentThread.history.push(seed);
+      }
+      runtime.store.append({ message: seed }, { type: "message", threadId: currentThread.id });
+
+      const result = await driveGraph(node.subgraph, runtime, currentThread, seed);
+      currentThread = result.thread;
+      currentInput = result.output;
+      currentThread = result.thread;
+
+      const edge = commitOutput(runtime, currentThread.id, flow.edges, current, result.output);
+      reason = edge.reason;
+      ({ thread: currentThread, to: current } = follow(edge, currentThread));
+      continue;
+    }
+
     if (node.kind === "waitFor") {
       const message = await waitForMessage(runtime.store, [
         node.messageKind,
@@ -435,20 +471,22 @@ export async function runFlow(
       runtime.store.append({ message }, { type: "message", threadId: currentThread.id });
       currentThread.messages.push(message);
       currentThread.history.push(message);
-      input = message;
+      currentInput = message;
 
       const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
       if (interrupt) {
         const stepContext: StepContext = { ...context, inputs: [message] };
         const emit = await runStep(interrupt.run, stepContext);
         if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
-        input = emit.output;
+        currentInput = emit.output;
         const edge = commitOutput(runtime, currentThread.id, flow.edges, interrupt.id, emit.output);
+        reason = edge.reason;
         ({ thread: currentThread, to: current } = follow(edge, currentThread));
         continue;
       }
 
-      const edge = advance(flow.edges, current, input);
+      const edge = advance(flow.edges, current, currentInput);
+      reason = edge.reason;
       ({ thread: currentThread, to: current } = follow(edge, currentThread));
       continue;
     }
@@ -472,7 +510,8 @@ export async function runFlow(
         { type: "invalidation", threadId: invalidatedThreadId },
       );
       current = emit.invalidate;
-      input = undefined;
+      currentInput = undefined;
+      reason = undefined;
       continue;
     }
 
@@ -483,8 +522,9 @@ export async function runFlow(
       );
       currentThread.messages = emit.compact;
       currentThread.history.push(...emit.compact);
-      input = undefined;
+      currentInput = undefined;
       const edge = advance(flow.edges, current, undefined);
+      reason = edge.reason;
       ({ thread: currentThread, to: current } = follow(edge, currentThread));
       continue;
     }
@@ -550,14 +590,41 @@ export async function runFlow(
       }
       current = joinTo;
       pendingInputs = results.map((result: { output: unknown }) => result.output);
-      input = undefined;
+      currentInput = undefined;
+      reason = undefined;
       continue;
     }
 
-    input = emit.output;
+    currentInput = emit.output;
     const edge = commitOutput(runtime, currentThread.id, flow.edges, current, emit.output);
+    reason = edge.reason;
     ({ thread: currentThread, to: current } = follow(edge, currentThread));
   }
 
-  return input;
+  return { thread: currentThread, output: currentInput };
+}
+
+/**
+ * Seeds a new session with a user message, drives it to completion, and
+ * resolves with the terminal output. A `parentThreadId` makes it a child —
+ * how a tool spawns a sub-agent.
+ */
+export async function runFlow(
+  flow: Graph,
+  initialPrompt: Message,
+  runtime: Runtime,
+  options?: { parentThreadId?: ThreadId },
+): Promise<unknown> {
+  const threadId = "thread-0" as ThreadId;
+  const thread: Thread = {
+    id: threadId,
+    ...(options?.parentThreadId ? { parentThreadId: options.parentThreadId } : {}),
+    messages: [initialPrompt],
+    history: [initialPrompt],
+  };
+
+  runtime.store.append({ message: initialPrompt }, { type: "message", threadId });
+
+  const result = await driveGraph(flow, runtime, thread, initialPrompt);
+  return result.output;
 }
