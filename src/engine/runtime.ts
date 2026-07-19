@@ -103,6 +103,11 @@ interface StepIdentity {
   stepName?: string;
 }
 
+/** Builds a StepIdentity from a node id and its optional label — shared by every call site that logs one. */
+function stepIdentity(id: NodeId, label?: string): StepIdentity {
+  return { stepId: id, ...(label ? { stepName: label } : {}) };
+}
+
 /** Appends a node's output event to the log — shared by every path that produces one. */
 function appendOutput(
   runtime: Runtime,
@@ -274,12 +279,13 @@ async function runModelCall(
   profile: Profile,
   context: StepContext,
   runtime: Runtime,
+  stepId: NodeId,
 ): Promise<ModelCallResult> {
   const port = runtime.models(profile.model);
   const stream = runtime.store.open({
     correlationId: freshCorrelationId(),
     type: "message",
-    stepId: freshStepId(),
+    stepId,
     threadId: context.thread.id,
   });
 
@@ -313,12 +319,6 @@ async function runModelCall(
   }
 
   return { usedTools: toolCalls.length > 0, usage: reply.usage };
-}
-
-let nextStepId = 0;
-function freshStepId(): string {
-  nextStepId += 1;
-  return `step-${String(nextStepId)}`;
 }
 
 let nextCorrelationId = 0;
@@ -407,7 +407,7 @@ async function runBranch(
     stream: { delta: () => notImplemented("stream") },
 
     modelCall(profile): Promise<ModelCallResult> {
-      return runModelCall(profile, branchContext, runtime);
+      return runModelCall(profile, branchContext, runtime, node);
     },
     call<Input, Output>(tool: Tool<Input, Output>, toolInput: Input): Promise<Output> {
       void tool;
@@ -434,10 +434,7 @@ async function runBranch(
     notImplemented(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
   }
 
-  appendOutput(runtime, branchThread.id, emit.output, {
-    stepId: node,
-    ...(nodeDef.label ? { stepName: nodeDef.label } : {}),
-  });
+  appendOutput(runtime, branchThread.id, emit.output, stepIdentity(node, nodeDef.label));
 
   const joinEdge = flow.edges.find((edge) => edge.from === node && edge.edge === "join");
   if (!joinEdge) throw new Error(`fan-out branch "${node}" has no join edge`);
@@ -485,7 +482,10 @@ async function driveGraph(
     stream: { delta: () => notImplemented("stream") },
 
     modelCall(profile): Promise<ModelCallResult> {
-      return runModelCall(profile, context, runtime);
+      // modelCall only ever runs while a node is being processed inside the
+      // loop below, so `current` is always set at that point.
+      if (!current) throw new Error("modelCall called outside a running node");
+      return runModelCall(profile, context, runtime, current);
     },
     call<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
       return callTool(tool, input, currentThread.id, context.stream, runtime);
@@ -555,9 +555,14 @@ async function driveGraph(
       currentThread = result.thread;
       currentInput = result.output;
 
-      const edge = commitOutput(runtime, currentThread.id, flow.edges, current, result.output, {
-        stepId: current,
-      });
+      const edge = commitOutput(
+        runtime,
+        currentThread.id,
+        flow.edges,
+        current,
+        result.output,
+        stepIdentity(current),
+      );
       reason = edge.reason;
       ({ thread: currentThread, to: current } = follow(edge, currentThread));
       continue;
@@ -681,10 +686,7 @@ async function driveGraph(
 
     const branchTargets: NodeId[] = thenEdges(flow.edges, current).map((edge) => edge.to);
     if (branchTargets.length > 1) {
-      appendOutput(runtime, currentThread.id, emit.output, {
-        stepId: current,
-        ...(node.label ? { stepName: node.label } : {}),
-      });
+      appendOutput(runtime, currentThread.id, emit.output, stepIdentity(current, node.label));
       const results: { output: unknown; joinTo: NodeId }[] = await Promise.all(
         branchTargets.map((branch: NodeId) =>
           runBranch(
@@ -713,10 +715,14 @@ async function driveGraph(
     }
 
     currentInput = emit.output;
-    const edge = commitOutput(runtime, currentThread.id, flow.edges, current, emit.output, {
-      stepId: current,
-      ...(node.label ? { stepName: node.label } : {}),
-    });
+    const edge = commitOutput(
+      runtime,
+      currentThread.id,
+      flow.edges,
+      current,
+      emit.output,
+      stepIdentity(current, node.label),
+    );
     reason = edge.reason;
     ({ thread: currentThread, to: current } = follow(edge, currentThread));
   }
