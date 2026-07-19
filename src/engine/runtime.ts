@@ -558,77 +558,131 @@ function makeStepContext(config: StepContextConfig): StepContext {
   };
 }
 
-/** What running one fan-out branch to completion settled with — a normal reach of its own join edge, or a nested `invalidate` emit that means the fan-out step itself must be rerun instead of joining. */
+/** What running one fan-out branch to completion settled with — a normal reach of its convergence node, or a nested `invalidate` emit that means the fan-out step itself must be rerun instead of joining. */
 type BranchResult =
   | { kind: "output"; output: unknown; joinTo: NodeId }
   | { kind: "invalidate"; emit: Extract<Emit, { invalidate: NodeId }> };
 
 /**
- * Runs one fan-out branch to completion on its own forked thread. For this
- * slice a branch is exactly one step whose outgoing edge is a `join` — no
- * waitFor/interrupt/further fan-out inside a branch, that's out of scope
- * here. `callTool`/`compact`/`invalidate` share the same behaviour as the
- * main loop's (see `makeStepContext`); a `compact` emit commits and heads
- * straight to the join edge, an `invalidate` emit bubbles up to the caller
- * instead of being acted on locally (see the fan-out handling in
- * `driveStepEmit`), and an `error` emit goes through the same retry-or-fail
- * handling the main loop uses before either retrying this same node or
- * throwing to fail the whole run.
+ * Walks each branch's linear .then() chain to find the node where all
+ * branches converge. Throws notImplemented if any step inside a branch itself
+ * fans out (multiple .then() edges), and throws if the branches never reach
+ * a common node.
+ */
+function findJoinNode(branchTargets: NodeId[], fanOutNodeId: NodeId, flow: Graph): NodeId {
+  // Build the linear chain for each branch starting from its own target.
+  const chains: NodeId[][] = branchTargets.map((target) => {
+    const chain: NodeId[] = [];
+    let cursor: NodeId = target;
+    const visited = new Set<NodeId>();
+    for (;;) {
+      if (visited.has(cursor))
+        throw new Error(`fan-out branch from "${fanOutNodeId}" contains a cycle at "${cursor}"`);
+      visited.add(cursor);
+      chain.push(cursor);
+      const outgoing = flow.edges.filter((e) => e.from === cursor && e.edge === "then");
+      if (outgoing.length === 0) break;
+      if (outgoing.length > 1) notImplemented("fan-out branch that itself fans out");
+      const nextEdge = outgoing[0];
+      if (!nextEdge) unreachable("outgoing[0] absent after length guard");
+      cursor = nextEdge.to;
+    }
+    return chain;
+  });
+
+  // Return the first node in chains[0] that appears in every other chain.
+  const otherSets = chains.slice(1).map((chain) => new Set(chain));
+  for (const node of chains[0] ?? []) {
+    if (otherSets.every((set) => set.has(node))) return node;
+  }
+
+  throw new Error(`fan-out from "${fanOutNodeId}": branches never converge on a common node`);
+}
+
+/**
+ * Runs one fan-out branch to completion on its own forked thread, walking
+ * every step in its linear .then() chain until reaching `joinNodeId`.
+ * `callTool`/`compact`/`invalidate`/`error` behave the same as the main loop
+ * at every step; `invalidate` bubbles up to the caller instead of being acted
+ * on locally (see the fan-out handling in `driveStepEmit`), and errors go
+ * through the same retry-or-fail path. Only `step` nodes are supported inside
+ * a branch; `waitFor`, `use`, or a nested fan-out are notImplemented.
  */
 async function runBranch(
-  node: NodeId,
-  branchThread: Thread,
+  startNode: NodeId,
+  initialThread: Thread,
   flow: Graph,
   runtime: Runtime,
   input: unknown,
   attemptsByNode: Map<NodeId, number>,
+  joinNodeId: NodeId,
 ): Promise<BranchResult> {
-  const nodeDef = flow.nodes.get(node);
-  if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${node}"`);
-  // A branch node kind other than "step" isn't supported yet — the fan-out
-  // machinery only ever builds a step's node.run against a branch context.
-  if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
-  if (nodeDef.label) branchThread = { ...branchThread, label: nodeDef.label };
-  const nodeIdentity = stepIdentity(node, nodeDef.label);
-
-  const branchContext = makeStepContext({
-    getThread: () => branchThread,
-    inputs: [input],
-    openStream: (type) =>
-      runtime.store.open({
-        correlationId: freshCorrelationId(),
-        type,
-        threadId: branchThread.id,
-        ...nodeIdentity,
-      }),
-    modelCall: (profile) => runModelCall(profile, branchContext, runtime, nodeIdentity),
-    callTool: (tool, toolInput) =>
-      callTool(tool, toolInput, branchThread.id, runtime, nodeIdentity),
-  });
-
-  const joinEdge = flow.edges.find((edge) => edge.from === node && edge.edge === "join");
-  if (!joinEdge) throw new Error(`fan-out branch "${node}" has no join edge`);
+  let currentNode = startNode;
+  let currentThread = initialThread;
+  let currentInput = input;
 
   for (;;) {
-    const emit = await runStep(nodeDef.run, branchContext);
+    const nodeDef = flow.nodes.get(currentNode);
+    if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${currentNode}"`);
+    if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
+    if (nodeDef.label) currentThread = { ...currentThread, label: nodeDef.label };
+    const nodeIdentity = stepIdentity(currentNode, nodeDef.label);
 
-    if ("invalidate" in emit) return { kind: "invalidate", emit };
+    // Capture stable references for this step's context (rebuilt each iteration).
+    const stepThread = currentThread;
+    const stepInput = currentInput;
+    const branchContext: StepContext = makeStepContext({
+      getThread: () => stepThread,
+      inputs: [stepInput],
+      openStream: (type) =>
+        runtime.store.open({
+          correlationId: freshCorrelationId(),
+          type,
+          threadId: stepThread.id,
+          ...nodeIdentity,
+        }),
+      modelCall: (profile) => runModelCall(profile, branchContext, runtime, nodeIdentity),
+      callTool: (tool, toolInput) =>
+        callTool(tool, toolInput, stepThread.id, runtime, nodeIdentity),
+    });
 
-    if ("compact" in emit) {
-      commitCompaction(runtime, branchThread, emit.compact, emit.meta);
-      return { kind: "output", output: undefined, joinTo: joinEdge.to };
+    // Retry loop for this step.
+    let stepOutput: unknown = undefined;
+    for (;;) {
+      const emit = await runStep(nodeDef.run, branchContext);
+
+      if ("invalidate" in emit) return { kind: "invalidate", emit };
+
+      if ("compact" in emit) {
+        commitCompaction(runtime, currentThread, emit.compact, emit.meta);
+        break; // stepOutput stays undefined; advance to next node
+      }
+
+      if ("error" in emit) {
+        await handleStepError(emit, currentNode, currentThread.id, runtime, attemptsByNode);
+        continue;
+      }
+
+      if (!("output" in emit))
+        unreachable(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
+
+      appendOutput(runtime, currentThread.id, emit.output, nodeIdentity);
+      stepOutput = emit.output;
+      break;
     }
 
-    if ("error" in emit) {
-      await handleStepError(emit, node, branchThread.id, runtime, attemptsByNode);
-      continue;
+    // Follow the step's single outgoing then edge.
+    const thenEdge = flow.edges.find((e) => e.from === currentNode && e.edge === "then");
+    if (!thenEdge)
+      throw new Error(`fan-out branch step "${currentNode}" has no outgoing then edge`);
+
+    if (thenEdge.to === joinNodeId) {
+      return { kind: "output", output: stepOutput, joinTo: joinNodeId };
     }
 
-    if (!("output" in emit))
-      unreachable(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
-
-    appendOutput(runtime, branchThread.id, emit.output, nodeIdentity);
-    return { kind: "output", output: emit.output, joinTo: joinEdge.to };
+    // Advance to the next step in this branch.
+    currentNode = thenEdge.to;
+    currentInput = stepOutput;
   }
 }
 
@@ -779,6 +833,10 @@ async function driveStepEmit(
   const branchTargets: NodeId[] = thenEdges(flow.edges, nodeId).map((edge) => edge.to);
   if (branchTargets.length > 1) {
     appendOutput(runtime, thread.id, emit.output, stepIdentity(nodeId, node.label));
+    // Resolve the convergence node before spawning branches — findJoinNode
+    // validates linearity (no nested fan-out) and that all branches share a
+    // single common join, replacing the old per-branch joinEdge lookup.
+    const joinNodeId = findJoinNode(branchTargets, nodeId, flow);
     const results: BranchResult[] = await Promise.all(
       branchTargets.map((branch: NodeId) =>
         runBranch(
@@ -788,6 +846,7 @@ async function driveStepEmit(
           runtime,
           emit.output,
           attemptsByNode,
+          joinNodeId,
         ),
       ),
     );
@@ -805,22 +864,15 @@ async function driveStepEmit(
     const outputs = results.filter(
       (result): result is Extract<BranchResult, { kind: "output" }> => result.kind === "output",
     );
-    const [firstBranch, ...restOfBranches] = outputs;
-    if (!firstBranch) throw new Error(`fan-out from "${nodeId}" produced no branches`);
-    const joinTo = firstBranch.joinTo;
-    const disagreement = restOfBranches.find((result) => result.joinTo !== joinTo);
-    if (disagreement) {
-      throw new Error(
-        `fan-out from "${nodeId}" has branches joining different nodes ("${joinTo}" vs "${disagreement.joinTo}")`,
-      );
-    }
+    if (!outputs.length) throw new Error(`fan-out from "${nodeId}" produced no branches`);
+    // findJoinNode already ensured all branches converge on joinNodeId.
     return {
       kind: "advance",
       thread,
       input: undefined,
       reason: undefined,
       pendingInputs: outputs.map((result) => result.output),
-      to: joinTo,
+      to: joinNodeId,
     };
   }
 
@@ -1009,9 +1061,22 @@ async function driveGraph(
 
     // The only remaining declared kind is "interrupt", which is never a
     // routing target — it's only ever entered via `driveWaitForNode` above.
+    // The only remaining declared kind is "interrupt", which is never a
+    // routing target — it's only ever entered via `driveWaitForNode` above.
     if (node.kind !== "step") notImplemented(`node kind "${node.kind}"`);
 
     if (node.label) currentThread = { ...currentThread, label: node.label };
+
+    // Validate JoinStep tagging: a join()-tagged step must receive multiple
+    // inputs (from fan-out pendingInputs). Running one with a single input
+    // means it was wired as a plain step, which is a mistake the author
+    // should catch at run time rather than silently get wrong results.
+    if ((node.run as { join?: boolean }).join === true && inputs.length < 2) {
+      throw new Error(
+        `node "${current}" is tagged with join() but was reached as a plain step — ` +
+          `it must be the convergence point of a fan-out`,
+      );
+    }
 
     const stepContext: StepContext = { ...context, inputs };
     const emit = await runStep(node.run, stepContext);

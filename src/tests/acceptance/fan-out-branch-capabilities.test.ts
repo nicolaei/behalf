@@ -29,7 +29,9 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
       const join = flow.step(outputs((context) => context.inputs));
 
       flow.entry(start);
-      start.then([searches, other]).join(join);
+      start.then([searches, other]);
+      searches.then(join);
+      other.then(join);
       join.then(flow.finish);
     });
 
@@ -67,7 +69,9 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
 
       flow.entry(start);
       start.then(target);
-      target.then([branch, other]).join(join);
+      target.then([branch, other]);
+      branch.then(join);
+      other.then(join);
       join.then(flow.finish);
     });
 
@@ -88,7 +92,9 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
       const join = flow.step(outputs((context) => context.inputs.length));
 
       flow.entry(start);
-      start.then([branch, other]).join(join);
+      start.then([branch, other]);
+      branch.then(join);
+      other.then(join);
       join.then(flow.finish);
     });
 
@@ -120,7 +126,9 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
       const join = flow.step(outputs((context) => context.inputs));
 
       flow.entry(start);
-      start.then([branch, other]).join(join);
+      start.then([branch, other]);
+      branch.then(join);
+      other.then(join);
       join.then(flow.finish);
     });
 

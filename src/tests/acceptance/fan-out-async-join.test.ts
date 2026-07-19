@@ -15,7 +15,9 @@ describe("fan-in waits for the slower branch", () => {
     });
     const join = flow.step(outputs((context) => context.inputs));
     flow.entry(start);
-    start.then([fast, slow]).join(join);
+    start.then([fast, slow]);
+    fast.then(join);
+    slow.then(join);
     join.then(flow.finish);
   });
 

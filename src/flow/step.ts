@@ -75,6 +75,16 @@ export type Step<Result = unknown> = (context: StepContext) => Promise<Emit<Resu
 export type PersonaStep<Result = unknown> = Step<Result> & { persona: Profile };
 
 /**
+ * A step that sits at a fan-out join point — declares that it expects to receive
+ * every branch's output as one array (its `inputs`).  The engine validates this
+ * declaration against the edges wired at the node: a converging-edges node without
+ * this tag, or a tagged node that is not a converging point, is a wiring mistake
+ * the engine should catch rather than silently misinterpret.
+ * @public
+ */
+export type JoinStep<Result = unknown> = Step<Result> & { join: true };
+
+/**
  * A step that computes a value from context and outputs it — for steps with no
  * model call and no async work of their own. Reads better than the raw
  * `(context) => Promise.resolve(context.output(compute(context)))` it wraps.
@@ -82,6 +92,20 @@ export type PersonaStep<Result = unknown> = Step<Result> & { persona: Profile };
  */
 export function outputs<Result>(compute: (context: StepContext) => Result): Step<Result> {
   return (context) => Promise.resolve(context.output(compute(context)));
+}
+
+/**
+ * A step that collects every fan-out branch's output from `context.inputs` and
+ * computes a single merged result — for join nodes with no async work of their
+ * own.  Reads better than the raw
+ * `(context) => Promise.resolve(context.output(compute(context)))` it wraps.
+ * @public
+ */
+export function join<Result>(compute: (context: StepContext) => Result): JoinStep<Result> {
+  const step = (context: StepContext): Promise<Emit<Result>> =>
+    Promise.resolve(context.output(compute(context)));
+  (step as JoinStep<Result>).join = true;
+  return step as JoinStep<Result>;
 }
 
 /**

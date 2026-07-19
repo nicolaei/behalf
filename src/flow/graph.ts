@@ -25,7 +25,7 @@ export type NodeKind =
 export interface EdgeDefinition {
   from: NodeId;
   to: NodeId;
-  edge: "when" | "otherwise" | "then" | "join";
+  edge: "when" | "otherwise" | "then";
   condition?: (output: unknown) => boolean;
   options?: EdgeOptions;
 }
@@ -43,13 +43,7 @@ export interface Handle {
   readonly id: NodeId;
   when(condition: (output: unknown) => boolean, to: Handle, options?: EdgeOptions): Handle;
   otherwise(to: Handle, options?: EdgeOptions): Handle;
-  then(to: Handle, options?: EdgeOptions): void; // continue to one node
-  then(to: Handle[], options?: EdgeOptions): Group; // fan out — each on its own thread
-}
-
-/** A fan-out group — collect branches so they can be joined. @public */
-export interface Group {
-  join(to: Handle, options?: EdgeOptions): void; // run `to` once when every branch finishes
+  then(to: Handle | Handle[], options?: EdgeOptions): void; // single next node, or fan-out to multiple threads
 }
 
 /** The DSL object passed to `defineGraph`’s build callback. @public */
@@ -91,26 +85,14 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
         edges.push({ from: id, to: to.id, edge: "otherwise", ...(options ? { options } : {}) });
         return handle;
       },
-      then(to: Handle | Handle[], options?: EdgeOptions): Group | undefined {
+      then(to: Handle | Handle[], options?: EdgeOptions): void {
         if (Array.isArray(to)) {
           for (const target of to) {
             edges.push({ from: id, to: target.id, edge: "then", ...(options ? { options } : {}) });
           }
-          return {
-            join(joinTarget, joinOptions) {
-              for (const target of to) {
-                edges.push({
-                  from: target.id,
-                  to: joinTarget.id,
-                  edge: "join",
-                  ...(joinOptions ? { options: joinOptions } : {}),
-                });
-              }
-            },
-          };
+          return;
         }
         edges.push({ from: id, to: to.id, edge: "then", ...(options ? { options } : {}) });
-        return undefined;
       },
     } as Handle;
     return handle;

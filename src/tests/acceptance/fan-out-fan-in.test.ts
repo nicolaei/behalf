@@ -11,7 +11,10 @@ describe("fan-out and fan-in", () => {
     const join = flow.step(outputs((context) => context.inputs));
 
     flow.entry(start);
-    start.then([a, b, c]).join(join);
+    start.then([a, b, c]);
+    a.then(join);
+    b.then(join);
+    c.then(join);
     join.then(flow.finish);
   });
 
