@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { adapters } from "../../index.js";
 
-describe.skip("two stores don't share state", () => {
+describe("two stores don't share state", () => {
   it("keeps one store's committed events and inbox invisible to another", () => {
     const storeA = adapters.stores.memoryStore();
     const storeB = adapters.stores.memoryStore();
