@@ -3,11 +3,13 @@
 import type { ThreadId } from "../flow/thread.js";
 import type { Event, EventType } from "./event.js";
 
+/** Opaque brand for session identifiers. @public */
 export type SessionId = string & { readonly __brand: "SessionId" };
 
 /**
  * The wrapper around every event on the wire and in the log. `form` says
  * whether it is committed, in-progress (a streaming snapshot), or a live delta.
+ * @public
  */
 export type Envelope<Type extends EventType = EventType> =
   | {
@@ -32,18 +34,19 @@ export type Envelope<Type extends EventType = EventType> =
       delta: Delta;
     };
 
+/** A streaming delta fragment pushed before a stream is committed. @public */
 export type Delta =
   | { correlationId: string; open: "text" | "thinking" | "toolCall"; name?: string }
   | { correlationId: string; text: string }
   | { correlationId: string; partialInput: string }
   | { correlationId: string; close: true };
 
-/** What a step or tool writes ephemeral progress to. Never persisted, never logged. */
+/** What a step or tool writes ephemeral progress to. Never persisted, never logged. @public */
 export interface DeltaSink {
   delta(part: Delta): void;
 }
 
-/** A handle for one streamed event: push partial content, then finalize it into the log. */
+/** A handle for one streamed event: push partial content, then finalize it into the log. @public */
 export interface Stream {
   delta(part: Delta): void; // broadcast partial content — not persisted
   commit(event: Event[EventType]): void; // finalize into the log

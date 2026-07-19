@@ -3,5 +3,5 @@
 import type { Model } from "../../flow/model.js";
 import type { ModelPort } from "../../engine/model-port.js";
 
-/** One port per OpenAI model, via the Responses API. Not yet implemented. */
+/** One port per OpenAI model, via the Responses API. Not yet implemented. @public */
 export declare function createOpenAIPort(model: Model): ModelPort;

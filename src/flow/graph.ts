@@ -4,8 +4,10 @@ import type { Step } from "./step.js";
 import type { Message, MessageKind } from "./message.js";
 import type { ThreadAction } from "./thread.js";
 
+/** Opaque brand for node identifiers within a graph. @public */
 export type NodeId = string & { readonly __brand: "NodeId" };
 
+/** Options attached to an edge — optional thread action and prompt transform. @public */
 export interface EdgeOptions {
   threadAction?: ThreadAction; // omitted = "same"
   prompt?: (output: unknown) => Message;
@@ -28,7 +30,7 @@ export interface EdgeDefinition {
   options?: EdgeOptions;
 }
 
-/** A composed, runnable flow — the nodes and edges the `Flow` builder captured. */
+/** A composed, runnable flow — the nodes and edges the `Flow` builder captured. @public */
 export interface Graph {
   readonly name: string;
   readonly nodes: ReadonlyMap<NodeId, NodeKind>;
@@ -36,6 +38,7 @@ export interface Graph {
   readonly entry: NodeId;
 }
 
+/** Fluent builder handle returned by every `Flow` node factory. @public */
 export interface Handle {
   readonly id: NodeId;
   when(condition: (output: unknown) => boolean, to: Handle, options?: EdgeOptions): Handle;
@@ -44,10 +47,12 @@ export interface Handle {
   then(to: Handle[], options?: EdgeOptions): Group; // fan out — each on its own thread
 }
 
+/** A fan-out group — collect branches so they can be joined. @public */
 export interface Group {
   join(to: Handle, options?: EdgeOptions): void; // run `to` once when every branch finishes
 }
 
+/** The DSL object passed to `defineGraph`’s build callback. @public */
 export interface Flow {
   step<Result>(run: Step<Result>, options?: { label?: string }): Handle;
   use(subgraph: Graph): Handle; // compose a graph as a node; runs on the reaching edge's thread
@@ -63,6 +68,7 @@ function freshNodeId(): NodeId {
   return `node-${String(nextNodeId)}` as NodeId;
 }
 
+/** Defines a named, runnable flow graph from a declarative build callback. @public */
 export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
   const nodes = new Map<NodeId, NodeKind>();
   const edges: EdgeDefinition[] = [];

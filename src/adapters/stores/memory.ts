@@ -57,6 +57,7 @@ function buildEnvelope(
   } as Envelope;
 }
 
+/** In-memory SessionStore implementation for tests and local development. @public */
 export function memoryStore(): SessionStore {
   const log: Envelope[] = [];
   const pending: UserMessage[] = [];

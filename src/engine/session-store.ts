@@ -10,6 +10,7 @@ import type { Envelope, Event, EventType, Stream } from "../session/index.js";
  * the engine drains the inbox at a `waitFor` node; `append` commits an
  * event; `open` begins a streaming event that broadcasts deltas and commits
  * (or aborts) at the end; `changes` yields envelopes of every form.
+ * @public
  */
 export interface SessionStore {
   events(): Envelope[]; // committed envelopes

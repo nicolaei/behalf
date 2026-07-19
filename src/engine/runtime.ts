@@ -29,7 +29,7 @@ import {
   unreachable,
 } from "./errors.js";
 
-/** What a flow runs against — model resolution, bindings, and store. */
+/** What a flow runs against — model resolution, bindings, and store. @public */
 export interface Runtime {
   readonly models: (model: Model) => ModelPort;
   readonly bindings: Binding[];
@@ -56,6 +56,7 @@ async function expandToolsets(bindings: Binding[]): Promise<Map<string, ToolHand
   return resolved;
 }
 
+/** Builds a ready-to-run Runtime, expanding all toolset bindings. @public */
 export async function runtime(config: {
   models: (model: Model) => ModelPort;
   bindings: Binding[];
@@ -1040,6 +1041,7 @@ async function driveGraph(
  * Seeds a new session with a user message, drives it to completion, and
  * resolves with the terminal output. A `parentThreadId` makes it a child —
  * how a tool spawns a sub-agent.
+ * @public
  */
 export async function runFlow(
   flow: Graph,
@@ -1061,7 +1063,7 @@ export async function runFlow(
   return result.output;
 }
 
-/** One `tick`'s outcome: a node ran (call again), the flow parked at a `waitFor` with nothing to consume, or it finished. */
+/** One `tick`’s outcome: a node ran (call again), the flow parked at a `waitFor` with nothing to consume, or it finished. @public */
 export type TickOutcome =
   { status: "advanced" } | { status: "suspended" } | { status: "done"; result: unknown };
 
@@ -1167,10 +1169,11 @@ function replayPosition(flow: Graph, store: SessionStore): ReplayPosition {
  * `runtime.store` — no state may survive in a JS closure between calls, so a
  * fresh `Runtime` object (same store) resumes exactly like the original one.
  *
- * A `waitFor` that already has a matching message waiting is "free": it's
- * consumed and its edge followed inline, without counting as this tick's one
+ * A `waitFor` that already has a matching message waiting is “free”: it’s
+ * consumed and its edge followed inline, without counting as this tick’s one
  * step — so resuming at a `waitFor` and reaching `finish` in the same call
  * (no work left to run in between) reports `done`, not `advanced`.
+ * @public
  */
 export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
   const interrupts = findInterruptNodes(flow);
@@ -1297,7 +1300,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
   }
 }
 
-/** Calls `tick` until it stops advancing — either suspended at a `waitFor`, or done. */
+/** Calls `tick` until it stops advancing — either suspended at a `waitFor`, or done. @public */
 export async function tickUntilSuspended(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
   for (;;) {
     const outcome = await tick(flow, runtime);

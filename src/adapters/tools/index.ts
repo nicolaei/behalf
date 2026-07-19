@@ -7,5 +7,5 @@ export { write } from "./write.js";
 export { edit } from "./edit.js";
 export { bash } from "./bash.js";
 
-/** `read`, `write`, `edit`, `bash` concatenated into one list. */
+/** `read`, `write`, `edit`, `bash` concatenated into one list. @public */
 export declare const standardBindings: Binding[];

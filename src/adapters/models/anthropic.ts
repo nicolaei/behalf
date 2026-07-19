@@ -3,5 +3,5 @@
 import type { Model } from "../../flow/model.js";
 import type { ModelPort } from "../../engine/model-port.js";
 
-/** One port per Anthropic model, e.g. Claude Opus. Not yet implemented. */
+/** One port per Anthropic model, e.g. Claude Opus. Not yet implemented. @public */
 export declare function createAnthropicPort(model: Model): ModelPort;

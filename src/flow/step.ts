@@ -8,11 +8,13 @@ import type { NodeId } from "./graph.js";
 import type { Stream } from "../session/envelope.js";
 import type { EventType } from "../session/event.js";
 
+/** Summary of a model call — whether tools were used and token usage. @public */
 export interface ModelCallResult {
   usedTools: boolean;
   usage: Usage;
 }
 
+/** A structured error a step can return instead of throwing. @public */
 export interface StepError {
   type: string; // category: "provider" | "tool" | "timeout" | "validation" | …
   message: string;
@@ -20,19 +22,22 @@ export interface StepError {
   cause?: unknown; // the raw error, for logs
 }
 
-/** What a `waitFor` node hands downstream once it consumes a matching message — a plain marker, not the message itself; the message is already pushed onto the thread. */
+/**
+ * What a `waitFor` node hands downstream once it consumes a matching message — a plain marker, not the message itself; the message is already pushed onto the thread.
+ * @public
+ */
 export interface WaitForResult {
   ok: true;
 }
 
-/** The one outcome a step returns. Only `output` is routed by edges. */
+/** The one outcome a step returns. Only `output` is routed by edges. @public */
 export type Emit<Result = unknown> =
   | { output: Result }
   | { compact: Message[]; meta?: unknown }
   | { invalidate: NodeId; threadAction: ThreadAction; reason?: Message }
   | { error: StepError };
 
-/** What a step sees and does. */
+/** What a step sees and does. @public */
 export interface StepContext {
   readonly thread: {
     id: ThreadId;
@@ -60,23 +65,29 @@ export interface StepContext {
   fail(error: StepError): Emit<never>;
 }
 
+/** A function that runs one node in the graph and returns its outcome. @public */
 export type Step<Result = unknown> = (context: StepContext) => Promise<Emit<Result>>;
 
-/** A step that uses a model — carries its `persona` so the graph sees it with no separate registration. */
+/**
+ * A step that uses a model — carries its `persona` so the graph sees it with no separate registration.
+ * @public
+ */
 export type PersonaStep<Result = unknown> = Step<Result> & { persona: Profile };
 
 /**
  * A step that computes a value from context and outputs it — for steps with no
  * model call and no async work of their own. Reads better than the raw
  * `(context) => Promise.resolve(context.output(compute(context)))` it wraps.
+ * @public
  */
 export function outputs<Result>(compute: (context: StepContext) => Result): Step<Result> {
   return (context) => Promise.resolve(context.output(compute(context)));
 }
 
 /**
- * A step that replaces the thread's messages and nothing else — for
+ * A step that replaces the thread’s messages and nothing else — for
  * compaction steps with no async work of their own.
+ * @public
  */
 export function compacts(
   replace: (messages: Message[]) => Message[],

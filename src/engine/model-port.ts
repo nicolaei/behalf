@@ -9,6 +9,7 @@ import type { DeltaSink } from "../session/envelope.js";
  * The adapter for one model. It only responds — compaction is a normal response
  * with a summary prompt. Thinking blocks pass back unmodified; the provider
  * decides cross-turn retention, never the port.
+ * @public
  */
 export interface ModelPort {
   readonly model: Model;

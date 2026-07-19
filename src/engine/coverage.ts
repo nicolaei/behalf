@@ -7,7 +7,7 @@ import type { Binding, Tool, Toolset } from "../flow/tool.js";
 import type { ModelPort } from "./model-port.js";
 import type { PersonaStep } from "../flow/step.js";
 
-/** Everything a persona needs that is not provided. Empty means ready. */
+/** Everything a persona needs that is not provided. Empty means ready. @public */
 export type Missing =
   | { kind: "model"; model: string }
   | { kind: "tool"; model: string; tool: string }
@@ -22,7 +22,7 @@ function isBound(ref: Tool | Toolset, bindings: Binding[]): boolean {
   );
 }
 
-/** Checks each persona directly: does it have a model port, its tools, its reasoning level? */
+/** Checks each persona directly: does it have a model port, its tools, its reasoning level? @public */
 export function satisfiesPersonas(
   personas: Profile[],
   models: (model: Model) => ModelPort | undefined,
@@ -71,15 +71,16 @@ function gatherPersonasFromNode(node: NodeKind, profiles: Profile[], seen: Set<G
 }
 
 /**
- * Finds every `Profile` a set of flows could use, by walking their graphs'
- * structure statically — no execution involved. Each node of kind "step" or
- * "interrupt" carries a `run: Step`; if that step is a `PersonaStep` (it has
- * a `.persona`), its profile is collected. Each node of kind "use" embeds a
+ * Finds every `Profile` a set of flows could use, by walking their graphs’
+ * structure statically — no execution involved. Each node of kind “step” or
+ * “interrupt” carries a `run: Step`; if that step is a `PersonaStep` (it has
+ * a `.persona`), its profile is collected. Each node of kind “use” embeds a
  * whole subgraph, so its nodes are walked too, recursively. `waitFor` and
- * "finish" nodes carry no step. The collected profiles are then checked with
- * `satisfiesPersonas`, which already knows what "missing" means for a
+ * “finish” nodes carry no step. The collected profiles are then checked with
+ * `satisfiesPersonas`, which already knows what “missing” means for a
  * persona — this function only needs to find every persona in play, not
  * evaluate one.
+ * @public
  */
 export function satisfiesFlows(
   flows: Graph[],

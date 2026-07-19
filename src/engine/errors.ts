@@ -4,6 +4,7 @@ import type { ThreadId } from "../flow/thread.js";
 import type { StepError } from "../flow/step.js";
 import type { Envelope } from "../session/index.js";
 
+/** Context passed to an error handler: the step, thread, attempt count, and session log. @public */
 export interface ErrorContext {
   step: { id: string; name?: string };
   thread: ThreadId;
@@ -11,9 +12,10 @@ export interface ErrorContext {
   log: Envelope[]; // the session so far, to inspect
 }
 
+/** What an error handler returns: retry (optionally after a delay) or give up. @public */
 export type ErrorDecision = { action: "retry"; after?: number } | { action: "fail" };
 
-/** Consulted in order after a step error; the first decision wins. `undefined` defers. */
+/** Consulted in order after a step error; the first decision wins. `undefined` defers. @public */
 export type ErrorHandler = (error: StepError, context: ErrorContext) => ErrorDecision | undefined;
 
 /** A deliberately-unsupported feature gap — a stub awaiting real implementation in a later change. */
@@ -35,7 +37,8 @@ const DEFAULT_RETRY_BASE_DELAY_MS = 1;
 /**
  * The built-in handler runtime() appends after any user-supplied handlers.
  * Retries retryable errors with exponential backoff up to a small cap, otherwise fails.
- * See docs/reference.md's Errors section.
+ * See docs/reference.md’s Errors section.
+ * @public
  */
 export const defaultErrorHandler: ErrorHandler = (error, context) => {
   if (!error.retryable || context.attempts >= DEFAULT_RETRY_CAP) {

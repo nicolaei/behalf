@@ -9,7 +9,7 @@ const fakeModel = {
   reasoning: [],
 };
 
-/** Always replies with a fixed text message and no tool calls. */
+/** Always replies with a fixed text message and no tool calls. @public */
 export const fakePort: ModelPort = {
   model: fakeModel,
   respond: () =>
