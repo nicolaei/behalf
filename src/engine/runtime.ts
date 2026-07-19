@@ -436,10 +436,10 @@ async function driveGraph(
 
     if (node.kind === "use") {
       // The subgraph's initial prompt: the reaching edge's `prompt` output, if
-      // it had one (already applied to this thread by `follow`, below — logged
-      // here so it lands in the log too), otherwise the raw incoming value,
-      // trusted to already be a `Message` (never pushed onto the thread, so
-      // push it now — this node is its only source).
+      // it had one (the previous iteration's `follow` already pushed it onto
+      // this thread; logged again here so it lands in the log too), otherwise
+      // the raw incoming value, trusted to already be a `Message` (never
+      // pushed onto the thread, so push it now — this node is its only source).
       const seed: Message = reason ?? (currentInput as Message);
       if (!reason) {
         currentThread.messages.push(seed);
@@ -450,7 +450,6 @@ async function driveGraph(
       const result = await driveGraph(node.subgraph, runtime, currentThread, seed);
       currentThread = result.thread;
       currentInput = result.output;
-      currentThread = result.thread;
 
       const edge = commitOutput(runtime, currentThread.id, flow.edges, current, result.output);
       reason = edge.reason;
