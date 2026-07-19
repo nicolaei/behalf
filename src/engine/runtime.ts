@@ -11,7 +11,7 @@ import type { Profile } from "../flow/profile.js";
 import type { ContentBlock } from "../flow/message.js";
 import type { ModelPort } from "./model-port.js";
 import type { SessionStore } from "./session-store.js";
-import type { ErrorHandler } from "./errors.js";
+import type { ErrorContext, ErrorDecision, ErrorHandler } from "./errors.js";
 
 /** What a flow runs against — model resolution, bindings, and store. */
 export interface Runtime {
@@ -37,6 +37,25 @@ export function runtime(config: {
 
 function notImplemented(name: string): never {
   throw new Error(`${name} is not implemented yet`);
+}
+
+/**
+ * Runs a step, converting an uncaught throw into the same `{ error }` shape
+ * as an explicit `context.fail(...)` — the two failure modes share one path.
+ */
+async function runStep(run: Step, context: StepContext): Promise<Emit> {
+  try {
+    return await run(context);
+  } catch (cause) {
+    return {
+      error: {
+        type: "unexpected",
+        message: cause instanceof Error ? cause.message : String(cause),
+        retryable: false,
+        cause,
+      },
+    };
+  }
 }
 
 /**
@@ -303,11 +322,11 @@ async function runBranch(
       return notImplemented("invalidate in a fan-out branch");
     },
     fail(error: StepError): Emit<never> {
-      return notImplemented("fail: " + error.message);
+      return { error };
     },
   };
 
-  const emit = await nodeDef.run(branchContext);
+  const emit = await runStep(nodeDef.run, branchContext);
   if (!("output" in emit)) {
     notImplemented(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
   }
@@ -377,7 +396,7 @@ export async function runFlow(
       };
     },
     fail(error: StepError): Emit<never> {
-      return notImplemented("fail: " + error.message);
+      return { error };
     },
   };
 
@@ -388,6 +407,10 @@ export async function runFlow(
   // branch, in declared order — so the next step's `inputs` isn't wrapped a
   // second time around a single `input`.
   let pendingInputs: unknown[] | undefined;
+  // Times each node has already errored — bumped only on a "retry" decision,
+  // so the node's first error sees attempts: 0. Keyed by node id since a
+  // retry re-runs the same node without ever changing `current`.
+  const attemptsByNode = new Map<NodeId, number>();
 
   while (current) {
     const node = flow.nodes.get(current);
@@ -435,7 +458,7 @@ export async function runFlow(
     if (node.label) currentThread = { ...currentThread, label: node.label };
 
     const stepContext: StepContext = { ...context, inputs };
-    const emit = await node.run(stepContext);
+    const emit = await runStep(node.run, stepContext);
 
     if ("invalidate" in emit) {
       const invalidatedThreadId = currentThread.id;
@@ -463,6 +486,38 @@ export async function runFlow(
       input = undefined;
       const edge = advance(flow.edges, current, undefined);
       ({ thread: currentThread, to: current } = follow(edge, currentThread));
+      continue;
+    }
+
+    if ("error" in emit) {
+      runtime.store.append(
+        {
+          type: emit.error.type,
+          message: emit.error.message,
+          ...(emit.error.retryable !== undefined ? { retryable: emit.error.retryable } : {}),
+          ...(emit.error.cause !== undefined ? { cause: emit.error.cause } : {}),
+        },
+        { type: "error", threadId: currentThread.id },
+      );
+
+      const attempts = attemptsByNode.get(current) ?? 0;
+      const errorContext: ErrorContext = {
+        step: { id: current },
+        thread: currentThread.id,
+        attempts,
+        log: runtime.store.events(),
+      };
+
+      let decision: ErrorDecision | undefined;
+      for (const handler of runtime.errorHandlers) {
+        decision = handler(emit.error, errorContext);
+        if (decision) break;
+      }
+
+      if (!decision || decision.action === "fail") throw new Error(emit.error.message);
+
+      attemptsByNode.set(current, attempts + 1);
+      if (decision.after) await new Promise((resolve) => setTimeout(resolve, decision.after));
       continue;
     }
 
