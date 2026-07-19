@@ -8,7 +8,7 @@ import type { ThreadId, ThreadAction } from "../flow/thread.js";
 import type { StepContext, Emit, ModelCallResult, StepError, Step } from "../flow/step.js";
 import type { Tool, ToolContext, ToolHandler } from "../flow/tool.js";
 import type { DeltaSink, Stream } from "../session/envelope.js";
-import type { EventType } from "../session/event.js";
+import type { Event, EventType } from "../session/event.js";
 import type { Profile } from "../flow/profile.js";
 import type { ContentBlock } from "../flow/message.js";
 import type { ModelPort } from "./model-port.js";
@@ -1021,15 +1021,193 @@ export async function runFlow(
 export type TickOutcome =
   { status: "advanced" } | { status: "suspended" } | { status: "done"; result: unknown };
 
+/** The first text block's text in a message — what a `waitFor` node hands downstream, mirroring a `step`'s own output (a plain value, not the message envelope). */
+function firstText(message: Message): string {
+  const block = message.content.find((candidate) => candidate.type === "text");
+  return block?.type === "text" ? block.text : "";
+}
+
+/** Where a fresh replay of `runtime.store`'s committed events left off: the node to run next, the thread it runs on, and the value it sees as input. */
+interface ReplayPosition {
+  current: NodeId;
+  thread: Thread;
+  currentInput: unknown;
+}
+
+/**
+ * Reconstructs `tick`'s position purely from `runtime.store.events()` — no
+ * state survives anywhere else. Starts at `flow.entry` with a fresh thread
+ * when the log is empty, then replays every committed `output` (a step ran;
+ * follow the edge its value selects, same as `advance`) and `message` (a
+ * `waitFor` consumed one; follow *its* edge the same way) event in order,
+ * landing exactly where the last tick call left off.
+ */
+function replayPosition(flow: Graph, store: SessionStore): ReplayPosition {
+  let current: NodeId = flow.entry;
+  let currentInput: unknown;
+  let thread: Thread = { id: freshThreadId(), messages: [], history: [] };
+
+  for (const envelope of store.events()) {
+    if (envelope.form !== "committed") continue;
+    if (envelope.threadId) thread = { ...thread, id: envelope.threadId };
+
+    if (envelope.type === "output") {
+      const { value } = envelope.event as Event["output"];
+      const stepId = envelope.stepId as NodeId;
+      // A fan-out node's own output event has more than one outgoing `then`
+      // edge; replaying it with `advance` would silently pick just the
+      // first branch (see `selectEdge`) and desync from what actually ran.
+      // Fan-out replay isn't implemented — throw rather than resume wrong.
+      if (thenEdges(flow.edges, stepId).length > 1)
+        notImplemented("replayPosition: fan-out replay");
+      const edge = advance(flow.edges, stepId, value);
+      const followed = follow(edge, thread);
+      thread = followed.thread;
+      current = followed.to;
+      currentInput = value;
+      continue;
+    }
+
+    if (envelope.type === "message") {
+      const { message } = envelope.event as Event["message"];
+      pushMessage(thread, message);
+      const edge = advance(flow.edges, current, message);
+      const followed = follow(edge, thread);
+      thread = followed.thread;
+      current = followed.to;
+      currentInput = firstText(message);
+      continue;
+    }
+    // toolCall/toolResult/compaction/invalidation/error don't move the main
+    // position on their own — out of scope for this slice's replay.
+  }
+
+  return { current, thread, currentInput };
+}
+
 /**
  * Advances a flow exactly one node, reconstructing where it is purely from
  * `runtime.store` — no state may survive in a JS closure between calls, so a
  * fresh `Runtime` object (same store) resumes exactly like the original one.
+ *
+ * A `waitFor` that already has a matching message waiting is "free": it's
+ * consumed and its edge followed inline, without counting as this tick's one
+ * step — so resuming at a `waitFor` and reaching `finish` in the same call
+ * (no work left to run in between) reports `done`, not `advanced`.
  */
-export function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
-  void flow;
-  void runtime;
-  return notImplemented("tick");
+export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
+  const interrupts = findInterruptNodes(flow);
+  const attemptsByNode = new Map<NodeId, number>();
+  const position = replayPosition(flow, runtime.store);
+  let currentThread: Thread = position.thread;
+  let current: NodeId = position.current;
+  let currentInput: unknown = position.currentInput;
+  let ranStep = false;
+
+  const context = makeStepContext({
+    getThread: () => currentThread,
+    inputs: [],
+    stream: unimplementedStream,
+    openStream: (type) => {
+      const identity = currentNodeIdentity(
+        current,
+        flow,
+        "openStream called outside a running node",
+      );
+      return runtime.store.open({
+        correlationId: freshCorrelationId(),
+        type,
+        threadId: currentThread.id,
+        ...identity,
+      });
+    },
+    modelCall(profile): Promise<ModelCallResult> {
+      const identity = currentNodeIdentity(
+        current,
+        flow,
+        "modelCall called outside a running node",
+      );
+      return runModelCall(profile, context, runtime, identity);
+    },
+    callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
+      const identity = currentNodeIdentity(current, flow, "callTool called outside a running node");
+      return callTool(tool, input, currentThread.id, context.stream, runtime, identity);
+    },
+  });
+
+  for (;;) {
+    const node = flow.nodes.get(current);
+    if (!node) throw new Error(`graph "${flow.name}" has no node "${current}"`);
+
+    if (node.kind === "finish") return { status: "done", result: currentInput };
+
+    if (node.kind === "waitFor") {
+      if (ranStep) return { status: "advanced" };
+      const kinds = [node.messageKind, ...interrupts.map((interrupt) => interrupt.messageKind)];
+      const message = runtime.store.consume(
+        (candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind),
+      );
+      if (!message) return { status: "suspended" };
+
+      runtime.store.append({ message }, { type: "message", threadId: currentThread.id });
+      pushMessage(currentThread, message);
+
+      const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
+      if (interrupt) {
+        const stepContext: StepContext = { ...context, inputs: [message] };
+        const emit = await runStep(interrupt.run, stepContext);
+        if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
+        const edge = commitOutput(
+          runtime,
+          currentThread.id,
+          flow.edges,
+          interrupt.id,
+          emit.output,
+          {
+            stepId: interrupt.id,
+          },
+        );
+        const followed = follow(edge, currentThread);
+        currentThread = followed.thread;
+        current = followed.to;
+        currentInput = emit.output;
+        ranStep = true;
+      } else {
+        const edge = advance(flow.edges, current, message);
+        const followed = follow(edge, currentThread);
+        currentThread = followed.thread;
+        current = followed.to;
+        currentInput = firstText(message);
+      }
+      continue;
+    }
+
+    if (node.kind !== "step") notImplemented(`tick: node kind "${node.kind}"`);
+
+    if (ranStep) return { status: "advanced" };
+
+    if (node.label) currentThread = { ...currentThread, label: node.label };
+
+    const stepContext: StepContext = { ...context, inputs: [currentInput] };
+    const emit = await runStep(node.run, stepContext);
+    const outcome = await driveStepEmit(
+      emit,
+      node,
+      current,
+      currentThread,
+      flow,
+      runtime,
+      attemptsByNode,
+    );
+
+    if (outcome.kind === "retry") continue;
+    if (outcome.pendingInputs) notImplemented("tick: fan-out");
+
+    currentThread = outcome.thread;
+    currentInput = outcome.input;
+    current = outcome.to;
+    ranStep = true;
+  }
 }
 
 /** Calls `tick` until it stops advancing — either suspended at a `waitFor`, or done. */

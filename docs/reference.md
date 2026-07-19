@@ -722,6 +722,24 @@ const ready = await runtime({ models: resolveModel, bindings, store });
 await runFlow(feature, userText("Add rate limiting to the API."), ready);
 ```
 
+`tick` advances a flow exactly one node and returns; `tickUntilSuspended` calls
+`tick` in a loop until it stops advancing. Both reconstruct where the flow is
+purely from `runtime.store` — no position survives in a JS closure between
+calls, so a fresh `Runtime` (same store) resumes exactly like the original one.
+A `waitFor` with a message already waiting is consumed inline, without counting
+as the call's one step, so reaching `finish` right after resuming reports
+`done`, not `advanced`.
+
+```ts
+type TickOutcome =
+  | { status: "advanced" }
+  | { status: "suspended" }
+  | { status: "done"; result: unknown };
+
+function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome>;
+function tickUntilSuspended(flow: Graph, runtime: Runtime): Promise<TickOutcome>;
+```
+
 ### Errors
 
 A step fails by emitting `{ error }`, or by throwing — the runner wraps a throw as
