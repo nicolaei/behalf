@@ -66,7 +66,7 @@ describe("satisfiesFlows reports what a runtime is missing", () => {
 // PersonaStep node) instead of dynamically probing execution — the current
 // design only ever sees the first modelCall reachable before the flow's first
 // suspension. Written now so the shape is pinned down before that slice starts.
-describe.skip("satisfiesFlows discovers persona steps regardless of position in the graph", () => {
+describe("satisfiesFlows discovers persona steps regardless of position in the graph", () => {
   function testProfile(): Profile {
     const gpt: Model = {
       identifier: "gpt",
