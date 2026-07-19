@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
 import { storeOnlyRuntime, neverCalled, textOf, loggedEventTypes } from "./support.js";
 
-describe.skip("composing a graph as a node with `use`", () => {
+describe("composing a graph as a node with `use`", () => {
   const inner = defineGraph("inner", (flow) => {
     const echo = flow.step(
       outputs((context) => textOf(context.thread.messages.at(-1)).toUpperCase()),
