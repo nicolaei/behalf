@@ -1,6 +1,7 @@
 // Adapter — an in-memory SessionStore. For tests and local dev, not production.
 
-import type { SessionStore, Stream } from "../../engine/session-store.js";
+import type { SessionStore } from "../../engine/session-store.js";
+import type { Stream } from "../../session/index.js";
 import type { UserMessage, Message } from "../../flow/message.js";
 import type { Envelope, Event, EventType, SessionId, Delta } from "../../session/index.js";
 import type { ThreadId } from "../../flow/thread.js";

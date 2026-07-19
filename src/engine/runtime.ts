@@ -7,7 +7,8 @@ import type { Binding } from "../flow/tool.js";
 import type { ThreadId, ThreadAction } from "../flow/thread.js";
 import type { StepContext, Emit, ModelCallResult, StepError, Step } from "../flow/step.js";
 import type { Tool, ToolContext } from "../flow/tool.js";
-import type { DeltaSink } from "../session/envelope.js";
+import type { DeltaSink, Stream } from "../session/envelope.js";
+import type { EventType } from "../session/event.js";
 import type { Profile } from "../flow/profile.js";
 import type { ContentBlock } from "../flow/message.js";
 import type { ModelPort } from "./model-port.js";
@@ -393,6 +394,7 @@ interface StepContextConfig {
   getThread: () => Thread;
   inputs: unknown[];
   stream: DeltaSink;
+  openStream: (type: EventType) => Stream;
   modelCall: (profile: Profile) => Promise<ModelCallResult>;
   callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
   compact: (
@@ -418,6 +420,7 @@ function makeStepContext(config: StepContextConfig): StepContext {
     },
     inputs: config.inputs,
     stream: config.stream,
+    openStream: config.openStream,
     modelCall: config.modelCall,
     callTool: config.callTool,
     output<Result>(value: Result): Emit<Result> {
@@ -458,6 +461,10 @@ async function runBranch(
     // Stubs below are filled in by the branch-context-parity story that
     // follows this one; see the seam this factory exists to narrow.
     stream: { delta: () => notImplemented("stream") },
+    openStream: (type) => {
+      void type;
+      return notImplemented("openStream in a fan-out branch");
+    },
     modelCall: (profile) => runModelCall(profile, branchContext, runtime, node),
     callTool: (tool, toolInput) => {
       void tool;
@@ -744,6 +751,10 @@ async function driveGraph(
     getThread: () => currentThread,
     inputs: [],
     stream: { delta: () => notImplemented("stream") },
+    openStream: (type) => {
+      void type;
+      return notImplemented("openStream");
+    },
     modelCall(profile): Promise<ModelCallResult> {
       // modelCall only ever runs while a node is being processed inside the
       // loop below, so `current` is always set at that point.

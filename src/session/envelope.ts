@@ -42,3 +42,10 @@ export type Delta =
 export interface DeltaSink {
   delta(part: Delta): void;
 }
+
+/** A handle for one streamed event: push partial content, then finalize it into the log. */
+export interface Stream {
+  delta(part: Delta): void; // broadcast partial content — not persisted
+  commit(event: Event[EventType]): void; // finalize into the log
+  abort(): void; // commit what streamed, mark the envelope aborted
+}

@@ -2,7 +2,7 @@
 
 import type { UserMessage } from "../flow/message.js";
 import type { ThreadId } from "../flow/thread.js";
-import type { Envelope, Event, EventType, Delta } from "../session/index.js";
+import type { Envelope, Event, EventType, Stream } from "../session/index.js";
 
 /**
  * The log, the inbox, and the delta stream. `submit` adds an input to the
@@ -28,10 +28,4 @@ export interface SessionStore {
     threadId: ThreadId;
   }): Stream;
   changes(): AsyncIterable<Envelope>;
-}
-
-export interface Stream {
-  delta(part: Delta): void; // broadcast partial content — not persisted
-  commit(event: Event[EventType]): void; // finalize into the log
-  abort(): void; // commit what streamed, mark the envelope aborted
 }
