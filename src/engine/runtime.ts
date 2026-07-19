@@ -22,7 +22,7 @@ import {
   unreachable,
 } from "./errors.js";
 
-/** The unimplemented tool-handler delta sink every StepContext gets until streaming to tools is implemented — one shared instance instead of a fresh literal at each call site. */
+/** The plain `stream: DeltaSink` field every StepContext gets — distinct from `openStream`, which is implemented; this one has no producer wired up yet, so any write to it throws. One shared instance instead of a fresh literal at each call site. */
 const unimplementedStream: DeltaSink = { delta: () => notImplemented("stream") };
 
 /** What a flow runs against — model resolution, bindings, and store. */
@@ -492,13 +492,18 @@ async function handleStepError(
     log: runtime.store.events(),
   };
 
-  let decision: ErrorDecision | undefined;
+  let resolvedDecision: ErrorDecision | undefined;
   for (const handler of runtime.errorHandlers) {
-    decision = handler(emit.error, errorContext);
-    if (decision) break;
+    resolvedDecision = handler(emit.error, errorContext);
+    if (resolvedDecision) break;
   }
+  // runtime() always appends defaultErrorHandler last, and it never itself
+  // returns undefined, so the loop above always settles on a decision.
+  if (resolvedDecision === undefined)
+    unreachable("handleStepError: no error handler produced a decision");
+  const decision = resolvedDecision;
 
-  if (!decision || decision.action === "fail") {
+  if (decision.action === "fail") {
     throw new Error(emit.error.message, { cause: emit.error });
   }
 
@@ -511,7 +516,7 @@ async function handleStepError(
 interface StepContextConfig {
   getThread: () => Thread;
   inputs: unknown[];
-  stream: DeltaSink; // the (currently unimplemented) tool-handler delta sink
+  stream: DeltaSink; // the plain tool-handler delta sink; no producer wired up yet, so any write throws (distinct from openStream, which is implemented)
   openStream: (type: EventType) => Stream; // on-demand stream factory model calls and steps use to create a logged event
   modelCall: (profile: Profile) => Promise<ModelCallResult>;
   callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
@@ -842,6 +847,59 @@ function currentNodeIdentity(
 }
 
 /**
+ * Builds the drive-loop `StepContext` shared by `driveGraph` and `tick`:
+ * `openStream`/`modelCall`/`callTool` all resolve the currently running
+ * node's identity via `currentNodeIdentity`, reading the running node and
+ * its thread through getters — `driveGraph` closes over its `current`/
+ * `currentThread` outer variables, `tick` closes over its own same-named
+ * loop variables, and either way this sees the live value on each call.
+ */
+function buildDriveContext(
+  flow: Graph,
+  runtime: Runtime,
+  getCurrent: () => NodeId | undefined,
+  getThread: () => Thread,
+): StepContext {
+  const context = makeStepContext({
+    getThread,
+    inputs: [],
+    stream: unimplementedStream,
+    openStream: (type) => {
+      const identity = currentNodeIdentity(
+        getCurrent(),
+        flow,
+        "openStream called outside a running node",
+      );
+      return runtime.store.open({
+        correlationId: freshCorrelationId(),
+        type,
+        threadId: getThread().id,
+        ...identity,
+      });
+    },
+    modelCall(profile): Promise<ModelCallResult> {
+      // modelCall only ever runs while a node is being processed by the
+      // caller's drive loop, so getCurrent() is always set at that point.
+      const identity = currentNodeIdentity(
+        getCurrent(),
+        flow,
+        "modelCall called outside a running node",
+      );
+      return runModelCall(profile, context, runtime, identity);
+    },
+    callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
+      const identity = currentNodeIdentity(
+        getCurrent(),
+        flow,
+        "callTool called outside a running node",
+      );
+      return callTool(tool, input, getThread().id, context.stream, runtime, identity);
+    },
+  });
+  return context;
+}
+
+/**
  * Drives one graph from its entry node to its `finish` node: runs each step,
  * follows the edge its output selects, mutates the thread as edges and
  * emits dictate, and handles `waitFor`, `interrupt`, `invalidate`, `compact`,
@@ -867,41 +925,15 @@ async function driveGraph(
   // snapshot captured once at the top.
   let currentThread: Thread = thread;
 
-  const context = makeStepContext({
-    getThread: () => currentThread,
-    inputs: [],
-    stream: unimplementedStream,
-    openStream: (type) => {
-      const identity = currentNodeIdentity(
-        current,
-        flow,
-        "openStream called outside a running node",
-      );
-      return runtime.store.open({
-        correlationId: freshCorrelationId(),
-        type,
-        threadId: currentThread.id,
-        ...identity,
-      });
-    },
-    modelCall(profile): Promise<ModelCallResult> {
-      // modelCall only ever runs while a node is being processed inside the
-      // loop below, so `current` is always set at that point.
-      const identity = currentNodeIdentity(
-        current,
-        flow,
-        "modelCall called outside a running node",
-      );
-      return runModelCall(profile, context, runtime, identity);
-    },
-    callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
-      const identity = currentNodeIdentity(current, flow, "callTool called outside a running node");
-      return callTool(tool, input, currentThread.id, context.stream, runtime, identity);
-    },
-  });
+  let current: NodeId | undefined = flow.entry;
+  const context = buildDriveContext(
+    flow,
+    runtime,
+    () => current,
+    () => currentThread,
+  );
 
   const interrupts = findInterruptNodes(flow);
-  let current: NodeId | undefined = flow.entry;
   let currentInput: unknown = input;
   // The edge-resolved prompt (if any) that led to the node we're about to
   // run — what a `use` node seeds its subgraph with when the reaching edge
@@ -1104,36 +1136,12 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
   let currentInput: unknown = position.currentInput;
   let ranStep = false;
 
-  const context = makeStepContext({
-    getThread: () => currentThread,
-    inputs: [],
-    stream: unimplementedStream,
-    openStream: (type) => {
-      const identity = currentNodeIdentity(
-        current,
-        flow,
-        "openStream called outside a running node",
-      );
-      return runtime.store.open({
-        correlationId: freshCorrelationId(),
-        type,
-        threadId: currentThread.id,
-        ...identity,
-      });
-    },
-    modelCall(profile): Promise<ModelCallResult> {
-      const identity = currentNodeIdentity(
-        current,
-        flow,
-        "modelCall called outside a running node",
-      );
-      return runModelCall(profile, context, runtime, identity);
-    },
-    callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
-      const identity = currentNodeIdentity(current, flow, "callTool called outside a running node");
-      return callTool(tool, input, currentThread.id, context.stream, runtime, identity);
-    },
-  });
+  const context = buildDriveContext(
+    flow,
+    runtime,
+    () => current,
+    () => currentThread,
+  );
 
   for (;;) {
     const node = flow.nodes.get(current);

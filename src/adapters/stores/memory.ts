@@ -109,7 +109,7 @@ export function memoryStore(): SessionStore {
 
       function commit(event: Event[EventType], aborted?: boolean): void {
         sequence += 1;
-        const envelope = buildEnvelope(meta, event, sequence, aborted ? { aborted } : {});
+        const envelope = buildEnvelope(meta, event, sequence, aborted ? { aborted } : undefined);
         log.push(envelope);
         broadcast(envelope);
       }
