@@ -7,6 +7,7 @@ import type { Binding } from "../flow/tool.js";
 import type { ThreadId, ThreadAction } from "../flow/thread.js";
 import type { StepContext, Emit, ModelCallResult, StepError, Step } from "../flow/step.js";
 import type { Tool, ToolContext } from "../flow/tool.js";
+import type { DeltaSink } from "../session/envelope.js";
 import type { Profile } from "../flow/profile.js";
 import type { ContentBlock } from "../flow/message.js";
 import type { ModelPort } from "./model-port.js";
@@ -156,6 +157,25 @@ function isToolCall(block: ContentBlock): block is Extract<ContentBlock, { type:
   return block.type === "toolCall";
 }
 
+/** Finds the binding for a named tool, or throws if the runtime has none. */
+function findToolBinding(runtime: Runtime, name: string): Extract<Binding, { kind: "tool" }> {
+  const binding = runtime.bindings.find(
+    (candidate) => candidate.kind === "tool" && candidate.tool.name === name,
+  );
+  if (binding?.kind !== "tool") throw new Error(`no tool binding for "${name}"`);
+  return binding;
+}
+
+/** The `ToolContext` every tool handler runs with, wherever it's called from. */
+function buildToolContext(threadId: ThreadId, stream: DeltaSink, runtime: Runtime): ToolContext {
+  return {
+    thread: threadId,
+    stream,
+    runFlow: (flow, initialPrompt) =>
+      runFlow(flow, initialPrompt, runtime, { parentThreadId: threadId }),
+  };
+}
+
 /**
  * Runs one tool call: logs it, invokes its bound handler, logs the result,
  * and folds the result into the thread as a tool message so the next model
@@ -166,24 +186,14 @@ async function runToolCall(
   context: StepContext,
   runtime: Runtime,
 ): Promise<void> {
-  const binding = runtime.bindings.find(
-    (candidate) => candidate.kind === "tool" && candidate.tool.name === call.name,
-  );
-  if (binding?.kind !== "tool") {
-    throw new Error(`no tool binding for "${call.name}"`);
-  }
+  const binding = findToolBinding(runtime, call.name);
 
   runtime.store.append(
     { correlationId: call.correlationId, name: call.name, input: call.input },
     { type: "toolCall", threadId: context.thread.id },
   );
 
-  const toolContext: ToolContext = {
-    thread: context.thread.id,
-    stream: context.stream,
-    runFlow: (flow, initialPrompt) =>
-      runFlow(flow, initialPrompt, runtime, { parentThreadId: context.thread.id }),
-  };
+  const toolContext = buildToolContext(context.thread.id, context.stream, runtime);
   const output = await binding.handler(call.input, toolContext);
 
   runtime.store.append(
@@ -200,32 +210,19 @@ async function runToolCall(
 }
 
 /**
- * Calls a tool directly, with no model in the loop: resolves its binding,
- * builds the `ToolContext`, and returns the handler's result as-is — no
- * logging or thread-folding, unlike `runToolCall`, since nothing here asks
- * a model to see the result.
+ * Calls a tool directly, with no model in the loop: resolves its binding and
+ * returns the handler's result as-is — no logging or thread-folding, unlike
+ * `runToolCall`, since nothing here asks a model to see the result.
  */
-async function runToolDirectly<Input, Output>(
+async function callTool<Input, Output>(
   tool: Tool<Input, Output>,
   input: Input,
   threadId: ThreadId,
-  stream: StepContext["stream"],
+  stream: DeltaSink,
   runtime: Runtime,
 ): Promise<Output> {
-  const binding = runtime.bindings.find(
-    (candidate) => candidate.kind === "tool" && candidate.tool.name === tool.name,
-  );
-  if (binding?.kind !== "tool") {
-    throw new Error(`no tool binding for "${tool.name}"`);
-  }
-
-  const toolContext: ToolContext = {
-    thread: threadId,
-    stream,
-    runFlow: (flow, initialPrompt) =>
-      runFlow(flow, initialPrompt, runtime, { parentThreadId: threadId }),
-  };
-
+  const binding = findToolBinding(runtime, tool.name);
+  const toolContext = buildToolContext(threadId, stream, runtime);
   return binding.handler(input, toolContext) as Promise<Output>;
 }
 
@@ -412,7 +409,7 @@ async function driveGraph(
       return runModelCall(profile, context, runtime);
     },
     call<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
-      return runToolDirectly(tool, input, currentThread.id, context.stream, runtime);
+      return callTool(tool, input, currentThread.id, context.stream, runtime);
     },
 
     output<Result>(value: Result): Emit<Result> {
