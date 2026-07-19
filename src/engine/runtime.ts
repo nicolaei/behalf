@@ -440,7 +440,7 @@ export async function runFlow(
       const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
       if (interrupt) {
         const stepContext: StepContext = { ...context, inputs: [message] };
-        const emit = await interrupt.run(stepContext);
+        const emit = await runStep(interrupt.run, stepContext);
         if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
         input = emit.output;
         const edge = commitOutput(runtime, currentThread.id, flow.edges, interrupt.id, emit.output);
@@ -514,7 +514,9 @@ export async function runFlow(
         if (decision) break;
       }
 
-      if (!decision || decision.action === "fail") throw new Error(emit.error.message);
+      if (!decision || decision.action === "fail") {
+        throw new Error(emit.error.message, { cause: emit.error });
+      }
 
       attemptsByNode.set(current, attempts + 1);
       if (decision.after) await new Promise((resolve) => setTimeout(resolve, decision.after));
