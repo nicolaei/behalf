@@ -389,6 +389,92 @@ function thenEdges(edges: readonly EdgeDefinition[], from: NodeId): EdgeDefiniti
   return edges.filter((candidate) => candidate.from === from && candidate.edge === "then");
 }
 
+/** Appends a compaction event and replaces a thread's messages/history — shared by the main-loop and branch paths since both commit a `compact` emit the same way. */
+function commitCompaction(
+  runtime: Runtime,
+  thread: Thread,
+  compact: Message[],
+  meta: unknown,
+): void {
+  runtime.store.append(
+    { messages: compact, ...(meta !== undefined ? { meta } : {}) },
+    { type: "compaction", threadId: thread.id },
+  );
+  thread.messages = compact;
+  thread.history.push(...compact);
+}
+
+/** Appends an invalidation event and returns the outcome that reruns the invalidated node — shared by the main-loop and branch paths since both commit an `invalidate` emit the same way. */
+function commitInvalidation(
+  runtime: Runtime,
+  thread: Thread,
+  emit: Extract<Emit, { invalidate: NodeId }>,
+): StepOutcome {
+  const invalidatedThreadId = thread.id;
+  const nextThread = applyThreadAction(thread, emit.threadAction, emit.reason);
+  runtime.store.append(
+    {
+      target: emit.invalidate,
+      threadAction: emit.threadAction,
+      ...(emit.reason ? { reason: emit.reason } : {}),
+    },
+    { type: "invalidation", threadId: invalidatedThreadId },
+  );
+  return {
+    kind: "advance",
+    thread: nextThread,
+    input: undefined,
+    reason: undefined,
+    to: emit.invalidate,
+  };
+}
+
+/**
+ * Handles a step's `error` emit: logs it, consults the runtime's error
+ * handlers, and either decides to retry the node (bumping its attempt count)
+ * or throws to fail the whole run. Shared by the main-loop and branch paths
+ * since both drive a step's error the same way.
+ */
+async function handleStepError(
+  emit: Extract<Emit, { error: StepError }>,
+  nodeId: NodeId,
+  threadId: ThreadId,
+  runtime: Runtime,
+  attemptsByNode: Map<NodeId, number>,
+): Promise<{ kind: "retry" }> {
+  runtime.store.append(
+    {
+      type: emit.error.type,
+      message: emit.error.message,
+      ...(emit.error.retryable !== undefined ? { retryable: emit.error.retryable } : {}),
+      ...(emit.error.cause !== undefined ? { cause: emit.error.cause } : {}),
+    },
+    { type: "error", threadId },
+  );
+
+  const attempts = attemptsByNode.get(nodeId) ?? 0;
+  const errorContext: ErrorContext = {
+    step: { id: nodeId },
+    thread: threadId,
+    attempts,
+    log: runtime.store.events(),
+  };
+
+  let decision: ErrorDecision | undefined;
+  for (const handler of runtime.errorHandlers) {
+    decision = handler(emit.error, errorContext);
+    if (decision) break;
+  }
+
+  if (!decision || decision.action === "fail") {
+    throw new Error(emit.error.message, { cause: emit.error });
+  }
+
+  attemptsByNode.set(nodeId, attempts + 1);
+  if (decision.after) await new Promise((resolve) => setTimeout(resolve, decision.after));
+  return { kind: "retry" };
+}
+
 /** Config that differs between the main-loop StepContext and a fan-out branch's — everything else is shared. */
 interface StepContextConfig {
   getThread: () => Thread;
@@ -434,12 +520,22 @@ function makeStepContext(config: StepContextConfig): StepContext {
   };
 }
 
+/** What running one fan-out branch to completion settled with — a normal reach of its own join edge, or a nested `invalidate` emit that means the fan-out step itself must be rerun instead of joining. */
+type BranchResult =
+  | { kind: "output"; output: unknown; joinTo: NodeId }
+  | { kind: "invalidate"; emit: Extract<Emit, { invalidate: NodeId }> };
+
 /**
  * Runs one fan-out branch to completion on its own forked thread. For this
  * slice a branch is exactly one step whose outgoing edge is a `join` — no
- * waitFor/interrupt/invalidate/further fan-out inside a branch, that's out
- * of scope here. Returns the branch's output and the join node its edge
- * points to (every branch in a group points to the same join node).
+ * waitFor/interrupt/further fan-out inside a branch, that's out of scope
+ * here. `callTool`/`compact`/`invalidate` share the same behaviour as the
+ * main loop's (see `makeStepContext`); a `compact` emit commits and heads
+ * straight to the join edge, an `invalidate` emit bubbles up to the caller
+ * instead of being acted on locally (see the fan-out handling in
+ * `driveStepEmit`), and an `error` emit goes through the same retry-or-fail
+ * handling the main loop uses before either retrying this same node or
+ * throwing to fail the whole run.
  */
 async function runBranch(
   node: NodeId,
@@ -447,7 +543,8 @@ async function runBranch(
   flow: Graph,
   runtime: Runtime,
   input: unknown,
-): Promise<{ output: unknown; joinTo: NodeId }> {
+  attemptsByNode: Map<NodeId, number>,
+): Promise<BranchResult> {
   const nodeDef = flow.nodes.get(node);
   if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${node}"`);
   // A branch node kind other than "step" isn't supported yet — the fan-out
@@ -458,36 +555,51 @@ async function runBranch(
   const branchContext = makeStepContext({
     getThread: () => branchThread,
     inputs: [input],
-    // Stubs below are filled in by the branch-context-parity story that
-    // follows this one; see the seam this factory exists to narrow.
     stream: { delta: () => notImplemented("stream") },
     openStream: (type) => {
       void type;
       return notImplemented("openStream in a fan-out branch");
     },
     modelCall: (profile) => runModelCall(profile, branchContext, runtime, node),
-    callTool: (tool, toolInput) => {
-      void tool;
-      void toolInput;
-      return notImplemented("callTool");
+    callTool: (tool, toolInput) =>
+      callTool(tool, toolInput, branchThread.id, branchContext.stream, runtime),
+    async compact(replace, meta): Promise<Emit<Message[]>> {
+      const messages = await replace(branchThread.messages);
+      return { compact: messages, ...(meta !== undefined ? { meta } : {}) };
     },
-    compact: () => notImplemented("compact in a fan-out branch"),
-    invalidate: () => notImplemented("invalidate in a fan-out branch"),
+    invalidate(target, options): Emit<never> {
+      return {
+        invalidate: target,
+        threadAction: options?.threadAction ?? "same",
+        ...(options?.reason ? { reason: options.reason } : {}),
+      };
+    },
   });
-
-  const emit = await runStep(nodeDef.run, branchContext);
-  if (!("output" in emit)) {
-    // A branch step emitting anything but `output` (compact/invalidate/error)
-    // isn't supported yet — deliberately out of scope, per the doc above.
-    notImplemented(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
-  }
-
-  appendOutput(runtime, branchThread.id, emit.output, stepIdentity(node, nodeDef.label));
 
   const joinEdge = flow.edges.find((edge) => edge.from === node && edge.edge === "join");
   if (!joinEdge) throw new Error(`fan-out branch "${node}" has no join edge`);
 
-  return { output: emit.output, joinTo: joinEdge.to };
+  for (;;) {
+    const emit = await runStep(nodeDef.run, branchContext);
+
+    if ("invalidate" in emit) return { kind: "invalidate", emit };
+
+    if ("compact" in emit) {
+      commitCompaction(runtime, branchThread, emit.compact, emit.meta);
+      return { kind: "output", output: undefined, joinTo: joinEdge.to };
+    }
+
+    if ("error" in emit) {
+      await handleStepError(emit, node, branchThread.id, runtime, attemptsByNode);
+      continue;
+    }
+
+    if (!("output" in emit))
+      unreachable(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
+
+    appendOutput(runtime, branchThread.id, emit.output, stepIdentity(node, nodeDef.label));
+    return { kind: "output", output: emit.output, joinTo: joinEdge.to };
+  }
 }
 
 /** Where routing a node landed: the (possibly new) thread, the value the next node sees, its seed reason, and the next node id. */
@@ -595,32 +707,11 @@ async function driveStepEmit(
   attemptsByNode: Map<NodeId, number>,
 ): Promise<StepOutcome> {
   if ("invalidate" in emit) {
-    const invalidatedThreadId = thread.id;
-    const nextThread = applyThreadAction(thread, emit.threadAction, emit.reason);
-    runtime.store.append(
-      {
-        target: emit.invalidate,
-        threadAction: emit.threadAction,
-        ...(emit.reason ? { reason: emit.reason } : {}),
-      },
-      { type: "invalidation", threadId: invalidatedThreadId },
-    );
-    return {
-      kind: "advance",
-      thread: nextThread,
-      input: undefined,
-      reason: undefined,
-      to: emit.invalidate,
-    };
+    return commitInvalidation(runtime, thread, emit);
   }
 
   if ("compact" in emit) {
-    runtime.store.append(
-      { messages: emit.compact, ...(emit.meta !== undefined ? { meta: emit.meta } : {}) },
-      { type: "compaction", threadId: thread.id },
-    );
-    thread.messages = emit.compact;
-    thread.history.push(...emit.compact);
+    commitCompaction(runtime, thread, emit.compact, emit.meta);
     const edge = advance(flow.edges, nodeId, undefined);
     const followed = follow(edge, thread);
     return {
@@ -633,37 +724,7 @@ async function driveStepEmit(
   }
 
   if ("error" in emit) {
-    runtime.store.append(
-      {
-        type: emit.error.type,
-        message: emit.error.message,
-        ...(emit.error.retryable !== undefined ? { retryable: emit.error.retryable } : {}),
-        ...(emit.error.cause !== undefined ? { cause: emit.error.cause } : {}),
-      },
-      { type: "error", threadId: thread.id },
-    );
-
-    const attempts = attemptsByNode.get(nodeId) ?? 0;
-    const errorContext: ErrorContext = {
-      step: { id: nodeId },
-      thread: thread.id,
-      attempts,
-      log: runtime.store.events(),
-    };
-
-    let decision: ErrorDecision | undefined;
-    for (const handler of runtime.errorHandlers) {
-      decision = handler(emit.error, errorContext);
-      if (decision) break;
-    }
-
-    if (!decision || decision.action === "fail") {
-      throw new Error(emit.error.message, { cause: emit.error });
-    }
-
-    attemptsByNode.set(nodeId, attempts + 1);
-    if (decision.after) await new Promise((resolve) => setTimeout(resolve, decision.after));
-    return { kind: "retry" };
+    return handleStepError(emit, nodeId, thread.id, runtime, attemptsByNode);
   }
 
   // Emit's variants are exactly invalidate/compact/error/output — having
@@ -673,12 +734,33 @@ async function driveStepEmit(
   const branchTargets: NodeId[] = thenEdges(flow.edges, nodeId).map((edge) => edge.to);
   if (branchTargets.length > 1) {
     appendOutput(runtime, thread.id, emit.output, stepIdentity(nodeId, node.label));
-    const results: { output: unknown; joinTo: NodeId }[] = await Promise.all(
+    const results: BranchResult[] = await Promise.all(
       branchTargets.map((branch: NodeId) =>
-        runBranch(branch, applyThreadAction(thread, "fork", undefined), flow, runtime, emit.output),
+        runBranch(
+          branch,
+          applyThreadAction(thread, "fork", undefined),
+          flow,
+          runtime,
+          emit.output,
+          attemptsByNode,
+        ),
       ),
     );
-    const [firstBranch, ...restOfBranches] = results;
+
+    // A branch that invalidated a node instead of joining means the fan-out
+    // step itself must be rerun — same as the main-loop's own invalidate
+    // handling, using the pre-fork thread so the rerun lands back on the
+    // shared line, not any one branch's forked copy.
+    const invalidated = results.find(
+      (result): result is Extract<BranchResult, { kind: "invalidate" }> =>
+        result.kind === "invalidate",
+    );
+    if (invalidated) return commitInvalidation(runtime, thread, invalidated.emit);
+
+    const outputs = results.filter(
+      (result): result is Extract<BranchResult, { kind: "output" }> => result.kind === "output",
+    );
+    const [firstBranch, ...restOfBranches] = outputs;
     if (!firstBranch) throw new Error(`fan-out from "${nodeId}" produced no branches`);
     const joinTo = firstBranch.joinTo;
     const disagreement = restOfBranches.find((result) => result.joinTo !== joinTo);
@@ -692,7 +774,7 @@ async function driveStepEmit(
       thread,
       input: undefined,
       reason: undefined,
-      pendingInputs: results.map((result: { output: unknown }) => result.output),
+      pendingInputs: outputs.map((result) => result.output),
       to: joinTo,
     };
   }
