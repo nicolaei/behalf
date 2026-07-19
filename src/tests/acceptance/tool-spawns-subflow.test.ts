@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, provide, tool, userText, adapters } from "../../index.js";
 import { neverCalled, textOf, loggedEventTypes } from "./support.js";
 
-describe.skip("a tool handler spawning a child flow", () => {
+describe("a tool handler spawning a child flow", () => {
   // Deferred to a factory, not built at describe-scope: `tool()` isn't real
   // yet, and a describe body runs even when its `it`s are skipped.
   function fixture() {
