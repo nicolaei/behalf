@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, adapters } from "../../index.js";
 import type { ModelPort } from "../../index.js";
 
-describe.skip("aborting an in-flight run", () => {
+describe("aborting an in-flight run", () => {
   // Deliberately one `it`, not a graph/log pair: the aborted flag on the log
   // IS the behaviour under test here, not a secondary observation of it.
   it("cancels the in-flight step and commits what streamed, marked aborted", async () => {
