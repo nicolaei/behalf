@@ -5,10 +5,41 @@ import type { UserMessage, Message } from "../../flow/message.js";
 import type { Envelope, Event, EventType, SessionId, Delta } from "../../session/index.js";
 import type { ThreadId } from "../../flow/thread.js";
 
+// A pull-based queue: `push` delivers a value immediately to a waiting `next()`
+// caller, or buffers it if nobody is waiting yet. Backs each `changes()`
+// subscriber with its own live feed of envelopes.
+class AsyncQueue<T> implements AsyncIterable<T> {
+  private readonly buffered: T[] = [];
+  private readonly waiting: ((value: IteratorResult<T>) => void)[] = [];
+
+  push(value: T): void {
+    const next = this.waiting.shift();
+    if (next) next({ value, done: false });
+    else this.buffered.push(value);
+  }
+
+  [Symbol.asyncIterator](): AsyncIterator<T> {
+    return {
+      next: (): Promise<IteratorResult<T>> => {
+        const value = this.buffered.shift();
+        if (value !== undefined || this.buffered.length > 0) {
+          return Promise.resolve({ value: value as T, done: false });
+        }
+        return new Promise((resolve) => this.waiting.push(resolve));
+      },
+    };
+  }
+}
+
 export function memoryStore(): SessionStore {
   const log: Envelope[] = [];
   const pending: UserMessage[] = [];
+  const subscribers = new Set<AsyncQueue<Envelope>>();
   let sequence = 0;
+
+  function broadcast(envelope: Envelope): void {
+    for (const subscriber of subscribers) subscriber.push(envelope);
+  }
 
   return {
     events(): Envelope[] {
@@ -34,7 +65,7 @@ export function memoryStore(): SessionStore {
       meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId },
     ): void {
       sequence += 1;
-      log.push({
+      const envelope = {
         form: "committed",
         sessionId: "" as SessionId,
         threadId: meta.threadId,
@@ -44,7 +75,9 @@ export function memoryStore(): SessionStore {
         event,
         sequence,
         at: Date.now(),
-      } as Envelope);
+      } as Envelope;
+      log.push(envelope);
+      broadcast(envelope);
     },
 
     open(meta: {
@@ -58,7 +91,7 @@ export function memoryStore(): SessionStore {
 
       function commit(event: Event[EventType], aborted?: boolean): void {
         sequence += 1;
-        log.push({
+        const envelope = {
           form: "committed",
           sessionId: "" as SessionId,
           threadId: meta.threadId,
@@ -69,12 +102,23 @@ export function memoryStore(): SessionStore {
           sequence,
           at: Date.now(),
           ...(aborted ? { aborted: true } : {}),
-        } as Envelope);
+        } as Envelope;
+        log.push(envelope);
+        broadcast(envelope);
       }
 
       return {
         delta(part: Delta): void {
           deltas.push(part); // accumulated for `abort`, never persisted themselves
+          broadcast({
+            form: "delta",
+            sessionId: "" as SessionId,
+            threadId: meta.threadId,
+            stepId: meta.stepId,
+            correlationId: meta.correlationId,
+            at: Date.now(),
+            delta: part,
+          });
         },
         commit,
         abort(): void {
@@ -97,7 +141,9 @@ export function memoryStore(): SessionStore {
     },
 
     changes(): AsyncIterable<Envelope> {
-      throw new Error("not implemented");
+      const queue = new AsyncQueue<Envelope>();
+      subscribers.add(queue);
+      return queue;
     },
   };
 }
