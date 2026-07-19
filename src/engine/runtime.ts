@@ -200,6 +200,36 @@ async function runToolCall(
 }
 
 /**
+ * Calls a tool directly, with no model in the loop: resolves its binding,
+ * builds the `ToolContext`, and returns the handler's result as-is — no
+ * logging or thread-folding, unlike `runToolCall`, since nothing here asks
+ * a model to see the result.
+ */
+async function runToolDirectly<Input, Output>(
+  tool: Tool<Input, Output>,
+  input: Input,
+  threadId: ThreadId,
+  stream: StepContext["stream"],
+  runtime: Runtime,
+): Promise<Output> {
+  const binding = runtime.bindings.find(
+    (candidate) => candidate.kind === "tool" && candidate.tool.name === tool.name,
+  );
+  if (binding?.kind !== "tool") {
+    throw new Error(`no tool binding for "${tool.name}"`);
+  }
+
+  const toolContext: ToolContext = {
+    thread: threadId,
+    stream,
+    runFlow: (flow, initialPrompt) =>
+      runFlow(flow, initialPrompt, runtime, { parentThreadId: threadId }),
+  };
+
+  return binding.handler(input, toolContext) as Promise<Output>;
+}
+
+/**
  * Makes one model request and runs every tool the reply asks for, appending
  * all of it — the reply, each tool call, each tool result — to the log.
  * Does not call the model again itself: a graph loops by routing a step's
@@ -382,9 +412,7 @@ async function driveGraph(
       return runModelCall(profile, context, runtime);
     },
     call<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
-      void tool;
-      void input;
-      return notImplemented("call");
+      return runToolDirectly(tool, input, currentThread.id, context.stream, runtime);
     },
 
     output<Result>(value: Result): Emit<Result> {
