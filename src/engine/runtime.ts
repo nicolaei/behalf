@@ -605,15 +605,6 @@ function findJoinNode(branchTargets: NodeId[], fanOutNodeId: NodeId, flow: Graph
 }
 
 /**
- * Runs one fan-out branch to completion on its own forked thread, walking
- * every step in its linear .then() chain until reaching `joinNodeId`.
- * `callTool`/`compact`/`invalidate`/`error` behave the same as the main loop
- * at every step; `invalidate` bubbles up to the caller instead of being acted
- * on locally (see the fan-out handling in `driveStepEmit`), and errors go
- * through the same retry-or-fail path. Only `step` nodes are supported inside
- * a branch; `waitFor`, `use`, or a nested fan-out are notImplemented.
- */
-/**
  * Runs one node inside a fan-out branch: builds its `StepContext`, retries on
  * error via the shared `handleStepError` path, commits a `compact` the same
  * way the main loop does, and logs a plain output. Never follows an edge —
@@ -1489,7 +1480,11 @@ function branchCursorState(branch: BranchReplay, group: FanOutGroup): CursorStat
  * the group's `mainThread` the first time it's picked, same as `runBranch`
  * forks per branch. Once every branch has reported, cursor-tracking
  * collapses: the caller sees a single active cursor at the join node,
- * exactly as if replay had found the fold already in the log.
+ * exactly as if replay had found the fold already in the log. Picks the
+ * first not-done branch in the group's declared order (`Array.find`,
+ * sequential, not round-robin) — a documented contract observable at
+ * tick()'s entrypoint, since it decides which branch each tick() call
+ * advances when more than one still has work left.
  */
 async function advanceFanOutGroup(
   group: FanOutGroup,

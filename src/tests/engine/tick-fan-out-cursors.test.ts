@@ -9,8 +9,10 @@ import { neverCalled } from "../acceptance/support.js";
 // pendingInputs. This is the prerequisite for driving a fan-out flow one
 // node at a time instead of only via runFlow's Promise.all-based runBranch.
 describe("ticking a fan-out flow", () => {
+  let fanOutNodeId!: string;
   const fanOut = defineGraph("tick-fan-out", (flow) => {
     const start = flow.step(outputs(() => "go"));
+    fanOutNodeId = start.id;
     const a = flow.step(outputs(() => "a"));
     const b = flow.step(outputs(() => "b"));
     const joinStep = flow.step(join((context) => context.inputs));
@@ -44,8 +46,50 @@ describe("ticking a fan-out flow", () => {
     // not collapsed into one status the way the old 3-way discriminant was
     expect(seen.some((snapshot) => snapshot.length > 1)).toBe(true);
 
+    // every branch cursor visible mid-flight is parented to the fan-out node
+    const intermediate = seen.find((snapshot) => snapshot.length > 1);
+    if (!intermediate) throw new Error("expected an intermediate multi-cursor snapshot");
+    for (const cursor of intermediate) {
+      expect((cursor as { parent?: unknown }).parent).toBe(fanOutNodeId);
+    }
+
     expect(outcome).toHaveLength(1);
     expect(outcome).toMatchObject([{ status: "done" }]);
-    expect((outcome[0] as { result: unknown }).result).toEqual(expect.arrayContaining(["a", "b"]));
+    // join()'s contract is declared-order inputs, not just membership —
+    // arrayContaining would pass even if branches came back out of order
+    expect((outcome[0] as { result: unknown }).result).toEqual(["a", "b"]);
+  });
+
+  it("resumes fan-out cursor state correctly even with a brand new Runtime object per tick — only the store persists", async () => {
+    const store = adapters.stores.memoryStore();
+
+    // every tick gets its own fresh runtime() call — the only thing carried
+    // between them is the store itself, nothing cached on a shared Runtime
+    async function freshTick(): Promise<TickOutcome> {
+      const ready = await runtime({ models: neverCalled, bindings: [], store });
+      return tick(fanOut, ready);
+    }
+
+    const seen: TickOutcome[] = [];
+    let outcome = await freshTick();
+    seen.push(outcome);
+
+    const maxIterations = 20;
+    for (let i = 0; i < maxIterations && outcome.some((cursor) => cursor.status !== "done"); i++) {
+      outcome = await freshTick();
+      seen.push(outcome);
+    }
+
+    expect(seen.some((snapshot) => snapshot.length > 1)).toBe(true);
+
+    const intermediate = seen.find((snapshot) => snapshot.length > 1);
+    if (!intermediate) throw new Error("expected an intermediate multi-cursor snapshot");
+    for (const cursor of intermediate) {
+      expect((cursor as { parent?: unknown }).parent).toBe(fanOutNodeId);
+    }
+
+    expect(outcome).toHaveLength(1);
+    expect(outcome).toMatchObject([{ status: "done" }]);
+    expect((outcome[0] as { result: unknown }).result).toEqual(["a", "b"]);
   });
 });

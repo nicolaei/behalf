@@ -20,9 +20,11 @@ describe("ticking a flow through a used subgraph that itself waits", () => {
     respond.then(flow.finish);
   });
 
+  let subNodeId!: string;
   const outer = defineGraph("tick-use-outer-wait", (flow) => {
     const start = flow.step(outputs(() => "hi"));
     const sub = flow.use(inner);
+    subNodeId = sub.id;
     flow.entry(start);
     start.then(sub, { prompt: (value) => userText(String(value)) });
     sub.then(flow.finish);
@@ -35,6 +37,7 @@ describe("ticking a flow through a used subgraph that itself waits", () => {
     const parked = await tickUntilSuspended(outer, ready);
     expect(parked).toHaveLength(1);
     expect(parked).toMatchObject([{ status: "parked", waitingFor: ["approval"] }]);
+    expect((parked[0] as { parent?: unknown }).parent).toBe(subNodeId);
 
     store.submit({
       role: "user",
