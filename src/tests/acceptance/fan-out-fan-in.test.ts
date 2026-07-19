@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
+import { defineGraph, runFlow, runtime, userText, adapters, outputs, join } from "../../index.js";
 import { storeOnlyRuntime, neverCalled, loggedEventTypes } from "./support.js";
 
 describe("fan-out and fan-in", () => {
@@ -8,14 +8,14 @@ describe("fan-out and fan-in", () => {
     const a = flow.step(outputs(() => "a"));
     const b = flow.step(outputs(() => "b"));
     const c = flow.step(outputs(() => "c"));
-    const join = flow.step(outputs((context) => context.inputs));
+    const joinStep = flow.step(join((context) => context.inputs));
 
     flow.entry(start);
     start.then([a, b, c]);
-    a.then(join);
-    b.then(join);
-    c.then(join);
-    join.then(flow.finish);
+    a.then(joinStep);
+    b.then(joinStep);
+    c.then(joinStep);
+    joinStep.then(flow.finish);
   });
 
   it("runs each branch once, joins with one input per branch", async () => {

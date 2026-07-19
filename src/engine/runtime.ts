@@ -580,6 +580,11 @@ function findJoinNode(branchTargets: NodeId[], fanOutNodeId: NodeId, flow: Graph
         throw new Error(`fan-out branch from "${fanOutNodeId}" contains a cycle at "${cursor}"`);
       visited.add(cursor);
       chain.push(cursor);
+      const conditionalEdges = flow.edges.filter(
+        (e) => e.from === cursor && (e.edge === "when" || e.edge === "otherwise"),
+      );
+      if (conditionalEdges.length > 0)
+        notImplemented("fan-out branch step with conditional routing");
       const outgoing = flow.edges.filter((e) => e.from === cursor && e.edge === "then");
       if (outgoing.length === 0) break;
       if (outgoing.length > 1) notImplemented("fan-out branch that itself fans out");
@@ -1061,8 +1066,6 @@ async function driveGraph(
 
     // The only remaining declared kind is "interrupt", which is never a
     // routing target — it's only ever entered via `driveWaitForNode` above.
-    // The only remaining declared kind is "interrupt", which is never a
-    // routing target — it's only ever entered via `driveWaitForNode` above.
     if (node.kind !== "step") notImplemented(`node kind "${node.kind}"`);
 
     if (node.label) currentThread = { ...currentThread, label: node.label };
@@ -1075,6 +1078,12 @@ async function driveGraph(
       throw new Error(
         `node "${current}" is tagged with join() but was reached as a plain step — ` +
           `it must be the convergence point of a fan-out`,
+      );
+    }
+    if ((node.run as { join?: boolean }).join !== true && inputs.length >= 2) {
+      throw new Error(
+        `node "${current}" is the convergence point of a fan-out but was not defined with join() — ` +
+          `wrap its step with join(...) to declare it expects every branch's output`,
       );
     }
 

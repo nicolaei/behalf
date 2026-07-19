@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, outputs } from "../../index.js";
+import { defineGraph, runFlow, userText, outputs, join } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
 
 describe("fan-in waits for the slower branch", () => {
@@ -13,12 +13,12 @@ describe("fan-in waits for the slower branch", () => {
       await Promise.resolve();
       return context.output("slow");
     });
-    const join = flow.step(outputs((context) => context.inputs));
+    const joinStep = flow.step(join((context) => context.inputs));
     flow.entry(start);
     start.then([fast, slow]);
-    fast.then(join);
-    slow.then(join);
-    join.then(flow.finish);
+    fast.then(joinStep);
+    slow.then(joinStep);
+    joinStep.then(flow.finish);
   });
 
   it("runs the join exactly once, once the slower branch also finishes", async () => {

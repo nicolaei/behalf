@@ -6,6 +6,7 @@ import {
   userText,
   adapters,
   outputs,
+  join,
   tool,
   provide,
 } from "../../index.js";
@@ -26,13 +27,13 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
         context.output(await context.callTool(search, { query: "behalf" })),
       );
       const other = flow.step(outputs(() => "other"));
-      const join = flow.step(outputs((context) => context.inputs));
+      const joinStep = flow.step(join((context) => context.inputs));
 
       flow.entry(start);
       start.then([searches, other]);
-      searches.then(join);
-      other.then(join);
-      join.then(flow.finish);
+      searches.then(joinStep);
+      other.then(joinStep);
+      joinStep.then(flow.finish);
     });
 
     const ready = await runtime({
@@ -65,14 +66,14 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
         ),
       );
       const other = flow.step(outputs(() => "other"));
-      const join = flow.step(outputs((context) => context.inputs));
+      const joinStep = flow.step(join((context) => context.inputs));
 
       flow.entry(start);
       start.then(target);
       target.then([branch, other]);
-      branch.then(join);
-      other.then(join);
-      join.then(flow.finish);
+      branch.then(joinStep);
+      other.then(joinStep);
+      joinStep.then(flow.finish);
     });
 
     await runFlow(graph, userText("go"), await storeOnlyRuntime());
@@ -89,13 +90,13 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
         ),
       );
       const other = flow.step(outputs(() => "other"));
-      const join = flow.step(outputs((context) => context.inputs.length));
+      const joinStep = flow.step(join((context) => context.inputs.length));
 
       flow.entry(start);
       start.then([branch, other]);
-      branch.then(join);
-      other.then(join);
-      join.then(flow.finish);
+      branch.then(joinStep);
+      other.then(joinStep);
+      joinStep.then(flow.finish);
     });
 
     const store = adapters.stores.memoryStore();
@@ -123,13 +124,13 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
         return Promise.resolve(context.output("done"));
       });
       const other = flow.step(outputs(() => "other"));
-      const join = flow.step(outputs((context) => context.inputs));
+      const joinStep = flow.step(join((context) => context.inputs));
 
       flow.entry(start);
       start.then([branch, other]);
-      branch.then(join);
-      other.then(join);
-      join.then(flow.finish);
+      branch.then(joinStep);
+      other.then(joinStep);
+      joinStep.then(flow.finish);
     });
 
     await runFlow(graph, userText("go"), ready);
