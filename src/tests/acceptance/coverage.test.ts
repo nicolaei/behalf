@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, satisfiesFlows, tool, provide } from "../../index.js";
 import type { Graph, Model, ModelPort, Profile, Tool } from "../../index.js";
 
-describe.skip("satisfiesFlows reports what a runtime is missing", () => {
+describe("satisfiesFlows reports what a runtime is missing", () => {
   function testProfile(): { profile: Profile; search: Tool } {
     const gpt: Model = {
       identifier: "gpt",
