@@ -17,9 +17,13 @@ export type Missing =
   | { kind: "tool"; model: string; tool: string }
   | { kind: "reasoning"; model: string; level: ReasoningLevel };
 
-/** Whether some binding backs a tool by name — the only kind of reference this checks. */
+/** Whether some binding backs a tool or toolset reference, by name. */
 function isBound(ref: Tool | Toolset, bindings: Binding[]): boolean {
-  return bindings.some((binding) => binding.kind === "tool" && binding.tool.name === ref.name);
+  return bindings.some(
+    (binding) =>
+      (binding.kind === "tool" && binding.tool.name === ref.name) ||
+      (binding.kind === "toolset" && binding.toolset.name === ref.name),
+  );
 }
 
 /** Checks each persona directly: does it have a model port, its tools, its reasoning level? */
@@ -80,12 +84,17 @@ function probePort(
 }
 
 /**
- * Finds every `Profile` a flow's steps might call `context.modelCall` with.
+ * Finds every `Profile` reachable before a flow's *first* real suspension.
  * A step is a plain closure — nothing about a graph's structure says which
  * profiles it uses — so the only way to find out is to run it, with every
  * model swapped for a probe that inspects the profile it's handed instead of
- * calling anywhere real. Driving the flow lets later steps run too, since the
- * probe resolves each `modelCall` well enough for the graph to keep going.
+ * calling anywhere real. This function returns synchronously (matching how
+ * callers use it — no `await`), which bounds what it can discover: a probed
+ * `modelCall` records its profile synchronously, before `runFlow`'s own first
+ * `await`, but anything after that first suspension — a second step, a second
+ * `modelCall` — only runs as a later microtask, once this function has
+ * already returned. Coverage-checking a flow whose persona-using steps come
+ * after its first suspension point needs a different, `await`-based design.
  */
 export function satisfiesFlows(
   flows: Graph[],
@@ -105,9 +114,9 @@ export function satisfiesFlows(
       errorHandlers: [],
     };
 
-    // Not awaited: every probed `modelCall` in this slice resolves through
-    // microtasks alone (no real timer), so each one it reaches already ran
-    // — and reported into `missing` — by the time this loop moves on.
+    // Not awaited, to match satisfiesFlows' own synchronous contract. This
+    // only sees the first modelCall reachable before runFlow's first real
+    // suspension — see the function's doc comment above for why.
     runFlow(flow, userText("coverage check"), runtime).catch(() => undefined);
   }
 
