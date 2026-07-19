@@ -40,7 +40,7 @@ export interface StepContext {
   readonly stream: DeltaSink; // ephemeral — never logged
 
   modelCall(profile: Profile): Promise<ModelCallResult>; // one request + its tools, appended to the log
-  call<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output>;
+  callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output>;
 
   output<Result>(value: Result): Emit<Result>;
   compact(

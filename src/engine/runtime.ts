@@ -394,7 +394,7 @@ interface StepContextConfig {
   inputs: unknown[];
   stream: DeltaSink;
   modelCall: (profile: Profile) => Promise<ModelCallResult>;
-  call: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
+  callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
   compact: (
     replace: (messages: Message[]) => Promise<Message[]>,
     meta?: unknown,
@@ -419,7 +419,7 @@ function makeStepContext(config: StepContextConfig): StepContext {
     inputs: config.inputs,
     stream: config.stream,
     modelCall: config.modelCall,
-    call: config.call,
+    callTool: config.callTool,
     output<Result>(value: Result): Emit<Result> {
       return { output: value };
     },
@@ -459,10 +459,10 @@ async function runBranch(
     // follows this one; see the seam this factory exists to narrow.
     stream: { delta: () => notImplemented("stream") },
     modelCall: (profile) => runModelCall(profile, branchContext, runtime, node),
-    call: (tool, toolInput) => {
+    callTool: (tool, toolInput) => {
       void tool;
       void toolInput;
-      return notImplemented("call");
+      return notImplemented("callTool");
     },
     compact: () => notImplemented("compact in a fan-out branch"),
     invalidate: () => notImplemented("invalidate in a fan-out branch"),
@@ -750,7 +750,7 @@ async function driveGraph(
       if (!current) throw new Error("modelCall called outside a running node");
       return runModelCall(profile, context, runtime, current);
     },
-    call<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
+    callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
       return callTool(tool, input, currentThread.id, context.stream, runtime);
     },
     async compact(replace, meta): Promise<Emit<Message[]>> {

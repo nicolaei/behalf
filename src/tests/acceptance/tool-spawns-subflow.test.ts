@@ -21,7 +21,7 @@ describe("a tool handler spawning a child flow", () => {
 
     const parent = defineGraph("parent", (flow) => {
       const ask = flow.step(async (context) =>
-        context.output(await context.call(research, { question: "what is x" })),
+        context.output(await context.callTool(research, { question: "what is x" })),
       );
       flow.entry(ask);
       ask.then(flow.finish);
