@@ -1070,6 +1070,10 @@ interface ReplayPosition {
   current: NodeId;
   thread: Thread;
   currentInput: unknown;
+  // The edge-resolved prompt (if any) that led to `current` — what a `use`
+  // node reached next would seed its subgraph with. Mirrors driveGraph's
+  // own `reason` variable, reconstructed the same way from replay.
+  reason?: Message;
 }
 
 /**
@@ -1084,6 +1088,7 @@ function replayPosition(flow: Graph, store: SessionStore): ReplayPosition {
   let current: NodeId = flow.entry;
   let currentInput: unknown;
   let thread: Thread = { id: freshThreadId(), messages: [], history: [] };
+  let reason: Message | undefined;
 
   for (const envelope of store.events()) {
     if (envelope.form !== "committed") continue;
@@ -1092,6 +1097,16 @@ function replayPosition(flow: Graph, store: SessionStore): ReplayPosition {
     if (envelope.type === "output") {
       const { value } = envelope.event as Event["output"];
       const stepId = envelope.stepId as NodeId;
+      // A `use` node drives its whole subgraph inline (see `driveUseNode`),
+      // so its inner steps' own output events carry NodeIds that belong to
+      // a different, inner Graph — not this `flow`. Replaying those with
+      // `advance(flow.edges, ...)` would either throw (no such node in
+      // `flow.edges`) or, worse, coincidentally match an unrelated outer
+      // node id. Only an output event whose stepId is actually a node in
+      // this flow can move `current` — everything else is inner noise to
+      // skip over. The `use` node's own final output (tagged with its
+      // outer nodeId by `commitOutput`) always passes this check.
+      if (!flow.nodes.has(stepId)) continue;
       // A fan-out node's own output event has more than one outgoing `then`
       // edge; replaying it with `advance` would silently pick just the
       // first branch (see `selectEdge`) and desync from what actually ran.
@@ -1103,24 +1118,48 @@ function replayPosition(flow: Graph, store: SessionStore): ReplayPosition {
       thread = followed.thread;
       current = followed.to;
       currentInput = value;
+      reason = edge.reason;
       continue;
     }
 
     if (envelope.type === "message") {
       const { message } = envelope.event as Event["message"];
-      pushMessage(thread, message);
-      const edge = advance(flow.edges, current, message);
-      const followed = follow(edge, thread);
-      thread = followed.thread;
-      current = followed.to;
-      currentInput = { ok: true } satisfies WaitForResult;
+      const node = flow.nodes.get(current);
+      // Only a `waitFor` actually sitting at `current` in THIS flow
+      // advances on a message event. A `use` node's own seed message (and
+      // any further message events a nested waitFor inside its subgraph
+      // might produce) leave `current` on the `use` node itself — those
+      // never move this flow's position, only the inner `driveGraph` call
+      // that already ran to completion within a single `tick` call.
+      if (node?.kind === "waitFor") {
+        pushMessage(thread, message);
+        const edge = advance(flow.edges, current, message);
+        const followed = follow(edge, thread);
+        thread = followed.thread;
+        current = followed.to;
+        currentInput = { ok: true } satisfies WaitForResult;
+        reason = edge.reason;
+        continue;
+      }
+      if (node?.kind === "use") {
+        // Mirrors driveUseNode's own dedup: when `reason` is already set,
+        // the reaching edge's prompt was already pushed onto this thread
+        // by the preceding output event's `follow` — this message event is
+        // just its log echo, not a second message to fold in.
+        if (!reason) pushMessage(thread, message);
+        continue;
+      }
+      // Belongs to a node driveUseNode drove that isn't `current` in this
+      // flow — the subgraph's own waitFor or a deeper nested use. Skipping
+      // it (rather than throwing) is safe as long as it never needs to
+      // move `current`, which is true for every shape this slice targets.
       continue;
     }
     // toolCall/toolResult/compaction/invalidation/error don't move the main
     // position on their own — out of scope for this slice's replay.
   }
 
-  return { current, thread, currentInput };
+  return { current, thread, currentInput, ...(reason ? { reason } : {}) };
 }
 
 /**
@@ -1141,6 +1180,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
   let current: NodeId = position.current;
   let currentInput: unknown = position.currentInput;
   let ranStep = false;
+  let reason: Message | undefined = position.reason;
 
   const context = buildDriveContext(
     flow,
@@ -1186,13 +1226,45 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         current = followed.to;
         currentInput = emit.output;
         ranStep = true;
+        reason = edge.reason;
       } else {
         const edge = advance(flow.edges, current, message);
         const followed = follow(edge, currentThread);
         currentThread = followed.thread;
         current = followed.to;
         currentInput = { ok: true } satisfies WaitForResult;
+        reason = edge.reason;
       }
+      continue;
+    }
+
+    if (node.kind === "use") {
+      if (ranStep) return { status: "advanced" };
+      const entryNode = node.subgraph.nodes.get(node.subgraph.entry);
+      if (entryNode?.kind === "waitFor") {
+        const kinds = [
+          entryNode.messageKind,
+          ...interrupts.map((interrupt) => interrupt.messageKind),
+        ];
+        const ready = runtime.store
+          .inbox()
+          .some((candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind));
+        if (!ready) notImplemented("tick: use node's subgraph starts with an unready waitFor");
+      }
+      const routed = await driveUseNode(
+        node,
+        current,
+        currentThread,
+        reason,
+        currentInput,
+        flow,
+        runtime,
+      );
+      currentThread = routed.thread;
+      currentInput = routed.input;
+      reason = routed.reason;
+      current = routed.to;
+      ranStep = true;
       continue;
     }
 
@@ -1219,6 +1291,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
 
     currentThread = outcome.thread;
     currentInput = outcome.input;
+    reason = outcome.reason;
     current = outcome.to;
     ranStep = true;
   }

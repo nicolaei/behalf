@@ -48,9 +48,12 @@ describe("ticking a flow through a used subgraph", () => {
 
     await tickUntilSuspended(outer, ready);
 
-    // loose on exact shape — mirrors use-subgraph.test.ts's own assertion
+    // loose on exact shape. Only 1 message is possible here (not 2, unlike
+    // use-subgraph.test.ts's runFlow-driven version): tick() has no initial-
+    // prompt argument of its own — the only message this graph ever produces
+    // is the edge-computed prompt into the use node, logged once by driveUseNode.
     const types = loggedEventTypes(store);
-    expect(types.filter((type) => type === "message").length).toBeGreaterThanOrEqual(2);
+    expect(types.filter((type) => type === "message").length).toBeGreaterThanOrEqual(1);
     expect(types.filter((type) => type === "output").length).toBeGreaterThanOrEqual(2);
   });
 });
