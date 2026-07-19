@@ -9,7 +9,7 @@ import {
   tool,
   provide,
 } from "../../index.js";
-import { storeOnlyRuntime, neverCalled, loggedEventTypes } from "./support.js";
+import { storeOnlyRuntime, neverCalled, loggedEventTypes, loggedEnvelopes } from "./support.js";
 
 // Every scenario here needs a fan-out branch's StepContext to have the same
 // capabilities as the main-loop's — currently callTool/compact/invalidate are
@@ -99,5 +99,38 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
 
     // then the branch's compaction is logged, same as a main-path step's would be
     expect(loggedEventTypes(store)).toContain("compaction");
+  });
+
+  // Test-only addition — no new engine capability needed, the branch-parity
+  // slice from round 1 already wired this. Confirms it generalizes to openStream.
+  it.skip("commits an event to the log via the branch's own opened stream, scoped to the branch's forked thread", async () => {
+    let branchThreadId: unknown;
+    const store = adapters.stores.memoryStore();
+    const ready = await runtime({ models: neverCalled, bindings: [], store });
+
+    const graph = defineGraph("branch-opens-stream", (flow) => {
+      const start = flow.step(outputs(() => "go"));
+      const branch = flow.step((context) => {
+        branchThreadId = context.thread.id;
+        const stream = context.openStream("output");
+        stream.commit({ value: "from-branch" });
+        return Promise.resolve(context.output("done"));
+      });
+      const other = flow.step(outputs(() => "other"));
+      const join = flow.step(outputs((context) => context.inputs));
+
+      flow.entry(start);
+      start.then([branch, other]).join(join);
+      join.then(flow.finish);
+    });
+
+    await runFlow(graph, userText("go"), ready);
+
+    const committed = loggedEnvelopes(store).find(
+      (envelope) =>
+        envelope.type === "output" &&
+        JSON.stringify(envelope.event) === JSON.stringify({ value: "from-branch" }),
+    );
+    expect(committed?.threadId).toBe(branchThreadId);
   });
 });

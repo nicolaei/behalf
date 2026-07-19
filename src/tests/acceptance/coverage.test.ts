@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, satisfiesFlows, tool, provide } from "../../index.js";
+import { defineGraph, satisfiesFlows, satisfiesPersonas, tool, provide } from "../../index.js";
 import type { Graph, Model, ModelPort, Profile, Tool, StepContext } from "../../index.js";
 
 describe("satisfiesFlows reports what a runtime is missing", () => {
@@ -123,5 +123,47 @@ describe("satisfiesFlows discovers persona steps regardless of position in the g
     const missing = satisfiesFlows([parent], () => undefined, []);
 
     expect(missing).toContainEqual({ kind: "model", model: "gpt" });
+  });
+});
+
+// Test-only additions — satisfiesPersonas already implements both Missing
+// kinds below; only the "model" kind was ever exercised by a test before now.
+describe.skip("satisfiesPersonas reports missing tools and unsupported reasoning levels", () => {
+  function fakePortFor(model: Model): ModelPort {
+    return {
+      model,
+      respond: () =>
+        Promise.resolve({
+          role: "assistant" as const,
+          provider: "test",
+          model: model.identifier,
+          content: [],
+          usage: { input: 0, output: 0 },
+        }),
+    };
+  }
+
+  it("reports a missing tool when the persona's tool has no binding", () => {
+    const gpt: Model = {
+      identifier: "gpt",
+      provider: "test",
+      contextWindow: 1000,
+      reasoning: ["medium"],
+    };
+    const search = tool<{ query: string }, { hits: string[] }>("search", "Search the web.");
+    const profile: Profile = { model: gpt, system: "test", tools: [search] };
+
+    const missing = satisfiesPersonas([profile], () => fakePortFor(gpt), []);
+
+    expect(missing).toContainEqual({ kind: "tool", model: "gpt", tool: "search" });
+  });
+
+  it("reports a missing reasoning level when the model doesn't support it", () => {
+    const gpt: Model = { identifier: "gpt", provider: "test", contextWindow: 1000, reasoning: [] };
+    const profile: Profile = { model: gpt, system: "test", tools: [], reasoning: "medium" };
+
+    const missing = satisfiesPersonas([profile], () => fakePortFor(gpt), []);
+
+    expect(missing).toContainEqual({ kind: "reasoning", model: "gpt", level: "medium" });
   });
 });
