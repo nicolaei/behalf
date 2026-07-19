@@ -818,7 +818,9 @@ type EventType = keyof Event;
 The wrapper around every event on the wire and in the log. `form` says whether it
 is committed, in-progress (a streaming snapshot), or a live delta; `type` names the
 event; `stepId`/`stepName` associate it with the step that produced it (a UUID and
-its name); `sequence` is the per-session ordinal (for order, cursors, dedup); `at`
+its name — `stepName` is the same `label` a `flow.step(run, { label })` declares,
+omitted when the step has none); `sequence` is the per-session ordinal (for order,
+cursors, dedup); `at`
 is wall-clock time; `aborted` marks an event cancelled mid-stream — there is no
 separate cancellation event.
 
