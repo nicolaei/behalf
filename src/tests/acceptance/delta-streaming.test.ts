@@ -3,7 +3,7 @@ import { adapters } from "../../index.js";
 import type { ThreadId } from "../../index.js";
 import { loggedEnvelopes } from "./support.js";
 
-describe.skip("streaming partial content before it's committed to the log", () => {
+describe("streaming partial content before it's committed to the log", () => {
   // Every scenario here needs memoryStore's open()/changes() to be real — both
   // currently throw/no-op. Written now so the shape is pinned down before that
   // slice starts; each `it` names the reference.md passage it verifies.
