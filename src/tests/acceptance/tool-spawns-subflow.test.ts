@@ -47,7 +47,7 @@ describe("a tool handler spawning a child flow", () => {
   // Test-only tightening — no new engine capability needed: buildToolContext
   // already passes parentThreadId through to runFlow. Replaces a loose
   // "at least 2 messages" assertion with the precise claim the doc makes.
-  it.skip("sets the child flow's parentThreadId to the parent's own thread id", async () => {
+  it("sets the child flow's parentThreadId to the parent's own thread id", async () => {
     const { parent, research } = fixture();
     let parentThreadId: unknown;
     let childParentThreadId: unknown;

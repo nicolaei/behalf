@@ -8,7 +8,7 @@ import { assistantToolCall, assistantText, loggedEventTypes } from "./support.js
 // findToolBinding reads from — currently findToolBinding only ever matches
 // kind === "tool" bindings, so a toolset member is never found by name.
 // Written now so the shape is pinned down before that slice starts.
-describe.skip("a model calling a tool that came from an expanded toolset", () => {
+describe("a model calling a tool that came from an expanded toolset", () => {
   function fixture() {
     const bundle = toolset("search-bundle", "Search-related tools.");
     let calls = 0;

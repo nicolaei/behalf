@@ -113,7 +113,7 @@ describe("streaming partial content before it's committed to the log", () => {
   // Needs open() to broadcast a form: "in-progress" envelope immediately on
   // open, before any delta — currently open() never broadcasts anything until
   // the first delta()/commit(). Written now so the shape is pinned down.
-  it.skip("yields an in-progress envelope the instant a stream opens, before any delta", async () => {
+  it("yields an in-progress envelope the instant a stream opens, before any delta", async () => {
     // ref: "A late-joining client sees the committed log, then an in-progress
     // snapshot for any stream still open, then deltas as they occur."
     const store = adapters.stores.memoryStore();

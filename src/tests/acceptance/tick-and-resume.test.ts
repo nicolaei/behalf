@@ -8,7 +8,7 @@ import { neverCalled } from "./support.js";
 // an internal setTimeout-polling loop inside one long-lived runFlow call,
 // so there's nothing to "resume" yet. This is the prerequisite for genuine
 // crash recovery ("the same graph replays deterministically").
-describe.skip("ticking a flow one node at a time and resuming it from the store alone", () => {
+describe("ticking a flow one node at a time and resuming it from the store alone", () => {
   function fixture(name: string): Graph {
     return defineGraph(name, (flow) => {
       const start = flow.step((context) => Promise.resolve(context.output("go")));

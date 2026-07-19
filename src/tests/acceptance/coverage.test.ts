@@ -128,7 +128,7 @@ describe("satisfiesFlows discovers persona steps regardless of position in the g
 
 // Test-only additions — satisfiesPersonas already implements both Missing
 // kinds below; only the "model" kind was ever exercised by a test before now.
-describe.skip("satisfiesPersonas reports missing tools and unsupported reasoning levels", () => {
+describe("satisfiesPersonas reports missing tools and unsupported reasoning levels", () => {
   function fakePortFor(model: Model): ModelPort {
     return {
       model,

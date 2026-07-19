@@ -6,7 +6,7 @@ import type { Graph, NodeId, NodeKind, EdgeDefinition } from "../flow/graph.js";
 import type { Binding } from "../flow/tool.js";
 import type { ThreadId, ThreadAction } from "../flow/thread.js";
 import type { StepContext, Emit, ModelCallResult, StepError, Step } from "../flow/step.js";
-import type { Tool, ToolContext } from "../flow/tool.js";
+import type { Tool, ToolContext, ToolHandler } from "../flow/tool.js";
 import type { DeltaSink, Stream } from "../session/envelope.js";
 import type { EventType } from "../session/event.js";
 import type { Profile } from "../flow/profile.js";
@@ -32,18 +32,39 @@ export interface Runtime {
   readonly errorHandlers: ErrorHandler[];
 }
 
-export function runtime(config: {
+/** Resolves every `kind === "toolset"` binding's members (via its `discover()`, called exactly once) merged with every `kind === "tool"` binding — a single name-keyed lookup `findToolBinding` reads from. Keyed off the returned `Runtime` in a module-scoped `WeakMap` rather than the public type, so this stays an implementation detail (see docs/reference.md's `Runtime` interface). */
+const resolvedTools = new WeakMap<Runtime, Map<string, ToolHandler>>();
+
+/** Expands every binding into one name -> handler map: direct tool bindings as-is, toolset bindings via their `discover()`, called once each. */
+async function expandToolsets(bindings: Binding[]): Promise<Map<string, ToolHandler>> {
+  const resolved = new Map<string, ToolHandler>();
+  for (const binding of bindings) {
+    if (binding.kind === "tool") {
+      resolved.set(binding.tool.name, binding.handler);
+      continue;
+    }
+    const members = await binding.discover();
+    for (const [name, handler] of Object.entries(members)) {
+      resolved.set(name, handler);
+    }
+  }
+  return resolved;
+}
+
+export async function runtime(config: {
   models: (model: Model) => ModelPort;
   bindings: Binding[];
   store: SessionStore;
   errorHandlers?: ErrorHandler[]; // consulted on a step error; a default retry handler runs last
 }): Promise<Runtime> {
-  return Promise.resolve({
+  const ready: Runtime = {
     models: config.models,
     bindings: config.bindings,
     store: config.store,
     errorHandlers: config.errorHandlers ?? [],
-  });
+  };
+  resolvedTools.set(ready, await expandToolsets(config.bindings));
+  return ready;
 }
 
 /**
@@ -219,24 +240,30 @@ function isToolCall(block: ContentBlock): block is Extract<ContentBlock, { type:
   return block.type === "toolCall";
 }
 
-/** Finds the binding for a named tool, or throws if the runtime has none. */
-function findToolBinding(runtime: Runtime, name: string): Extract<Binding, { kind: "tool" }> {
-  const binding = runtime.bindings.find(
-    (candidate) => candidate.kind === "tool" && candidate.tool.name === name,
-  );
-  if (binding?.kind !== "tool") throw new Error(`no tool binding for "${name}"`);
-  return binding;
+/** Finds the resolved handler for a named tool — direct or a toolset member — or throws if the runtime has none. */
+function findToolBinding(runtime: Runtime, name: string): ToolHandler {
+  const handler = resolvedTools.get(runtime)?.get(name);
+  if (!handler) throw new Error(`no tool binding for "${name}"`);
+  return handler;
 }
 
 /** The `ToolContext` every tool handler runs with, wherever it's called from. */
-function buildToolContext(threadId: ThreadId, stream: DeltaSink, runtime: Runtime): ToolContext {
+function buildToolContext(
+  threadId: ThreadId,
+  stream: DeltaSink,
+  runtime: Runtime,
+  identity: StepIdentity,
+): ToolContext {
   return {
     thread: threadId,
     stream,
-    openStream: (type) => {
-      void type;
-      return notImplemented("ToolContext.openStream");
-    },
+    openStream: (type) =>
+      runtime.store.open({
+        correlationId: freshCorrelationId(),
+        type,
+        threadId,
+        ...identity,
+      }),
     runFlow: (flow, initialPrompt) =>
       runFlow(flow, initialPrompt, runtime, { parentThreadId: threadId }),
   };
@@ -251,16 +278,17 @@ async function runToolCall(
   call: Extract<ContentBlock, { type: "toolCall" }>,
   context: StepContext,
   runtime: Runtime,
+  identity: StepIdentity,
 ): Promise<void> {
-  const binding = findToolBinding(runtime, call.name);
+  const handler = findToolBinding(runtime, call.name);
 
   runtime.store.append(
     { correlationId: call.correlationId, name: call.name, input: call.input },
     { type: "toolCall", threadId: context.thread.id },
   );
 
-  const toolContext = buildToolContext(context.thread.id, context.stream, runtime);
-  const output = await binding.handler(call.input, toolContext);
+  const toolContext = buildToolContext(context.thread.id, context.stream, runtime, identity);
+  const output = await handler(call.input, toolContext);
 
   runtime.store.append(
     { correlationId: call.correlationId, output },
@@ -285,10 +313,11 @@ async function callTool<Input, Output>(
   threadId: ThreadId,
   stream: DeltaSink,
   runtime: Runtime,
+  identity: StepIdentity,
 ): Promise<Output> {
-  const binding = findToolBinding(runtime, tool.name);
-  const toolContext = buildToolContext(threadId, stream, runtime);
-  return binding.handler(input, toolContext) as Promise<Output>;
+  const handler = findToolBinding(runtime, tool.name);
+  const toolContext = buildToolContext(threadId, stream, runtime, identity);
+  return handler(input, toolContext) as Promise<Output>;
 }
 
 /**
@@ -301,6 +330,7 @@ async function runModelCall(
   profile: Profile,
   context: StepContext,
   runtime: Runtime,
+  identity: StepIdentity,
 ): Promise<ModelCallResult> {
   const port = runtime.models(profile.model);
   const stream = context.openStream("message");
@@ -330,7 +360,7 @@ async function runModelCall(
 
   const toolCalls = reply.content.filter(isToolCall);
   for (const call of toolCalls) {
-    await runToolCall(call, context, runtime);
+    await runToolCall(call, context, runtime, identity);
   }
 
   return { usedTools: toolCalls.length > 0, usage: reply.usage };
@@ -566,9 +596,9 @@ async function runBranch(
         threadId: branchThread.id,
         ...nodeIdentity,
       }),
-    modelCall: (profile) => runModelCall(profile, branchContext, runtime),
+    modelCall: (profile) => runModelCall(profile, branchContext, runtime, nodeIdentity),
     callTool: (tool, toolInput) =>
-      callTool(tool, toolInput, branchThread.id, branchContext.stream, runtime),
+      callTool(tool, toolInput, branchThread.id, branchContext.stream, runtime, nodeIdentity),
   });
 
   const joinEdge = flow.edges.find((edge) => edge.from === node && edge.edge === "join");
@@ -856,11 +886,16 @@ async function driveGraph(
     modelCall(profile): Promise<ModelCallResult> {
       // modelCall only ever runs while a node is being processed inside the
       // loop below, so `current` is always set at that point.
-      currentNodeIdentity(current, flow, "modelCall called outside a running node");
-      return runModelCall(profile, context, runtime);
+      const identity = currentNodeIdentity(
+        current,
+        flow,
+        "modelCall called outside a running node",
+      );
+      return runModelCall(profile, context, runtime, identity);
     },
     callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
-      return callTool(tool, input, currentThread.id, context.stream, runtime);
+      const identity = currentNodeIdentity(current, flow, "callTool called outside a running node");
+      return callTool(tool, input, currentThread.id, context.stream, runtime, identity);
     },
   });
 

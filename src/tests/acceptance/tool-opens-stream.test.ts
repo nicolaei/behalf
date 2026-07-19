@@ -5,7 +5,7 @@ import { neverCalled, loggedEnvelopes } from "./support.js";
 // Needs ToolContext.openStream to be wired for real — currently a
 // notImplemented stub in buildToolContext. Mirrors StepContext.openStream's
 // slice from round 1.
-describe.skip("a tool handler opening its own stream", () => {
+describe("a tool handler opening its own stream", () => {
   it("commits an event to the log via the tool's own opened stream", async () => {
     const echo = tool<{ text: string }, { text: string }>("echo", "Echoes its input.");
     const graph = defineGraph("tool-opens-stream", (flow) => {

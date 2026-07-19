@@ -103,7 +103,7 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
 
   // Test-only addition — no new engine capability needed, the branch-parity
   // slice from round 1 already wired this. Confirms it generalizes to openStream.
-  it.skip("commits an event to the log via the branch's own opened stream, scoped to the branch's forked thread", async () => {
+  it("commits an event to the log via the branch's own opened stream, scoped to the branch's forked thread", async () => {
     let branchThreadId: unknown;
     const store = adapters.stores.memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });

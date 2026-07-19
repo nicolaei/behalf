@@ -7,7 +7,7 @@ import { neverCalled, loggedEventTypes } from "./support.js";
 // so an unhandled retryable error rejects immediately. ref: "A default
 // handler runs last: it retries retryable errors with exponential backoff
 // up to a small cap, otherwise fails."
-describe.skip("the built-in default retry/backoff handler, with no errorHandlers configured", () => {
+describe("the built-in default retry/backoff handler, with no errorHandlers configured", () => {
   it("retries a retryable error until the step recovers", async () => {
     let attempts = 0;
     const graph = defineGraph("default-retry-recovers", (flow) => {
