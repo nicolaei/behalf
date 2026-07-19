@@ -226,6 +226,7 @@ so it owns its idempotency.
 type ToolContext = {
   thread: ThreadId;
   stream: DeltaSink;
+  openStream(type: EventType): Stream; // open a fresh, logged stream scoped to this thread
   runFlow: (flow: Graph, initialPrompt: Message) => Promise<unknown>;
 };
 
@@ -284,7 +285,11 @@ What a step sees and does. `thread.messages` is the assembled view — compactio
 applied, older messages trimmed; `thread.history` is the full record on the thread.
 `modelCall` makes one model request and runs any tools it returns, appending all of
 it to the log, and returns a small `ModelCallResult` the graph can route on.
-`stream` is ephemeral. A restarted node needs no special channel: `invalidate`
+`stream` is ephemeral. `openStream(type)` opens a fresh, logged stream scoped to
+the step's own thread — deltas broadcast live, then `commit`/`abort` finalizes an
+event into the log, same as a model call's own internal stream. A restarted node
+needs no special channel: `invalidate`
+pushes its `reason` onto the thread, so a rerun agent reads it among its messages.
 pushes its `reason` onto the thread, so a rerun agent reads it among its messages.
 
 ```ts
@@ -299,6 +304,7 @@ interface StepContext {
   };
   readonly inputs: unknown[]; // upstream outputs; a join gets one per branch
   readonly stream: DeltaSink; // ephemeral — never logged
+  openStream(type: EventType): Stream; // open a fresh, logged stream scoped to this thread
 
   modelCall(profile: Profile): Promise<ModelCallResult>; // one request + its tools, appended to the log
   callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output>;

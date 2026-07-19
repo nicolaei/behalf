@@ -3,7 +3,8 @@
 import type { ThreadId } from "./thread.js";
 import type { Message } from "./message.js";
 import type { Graph } from "./graph.js";
-import type { DeltaSink } from "../session/envelope.js";
+import type { DeltaSink, Stream } from "../session/envelope.js";
+import type { EventType } from "../session/event.js";
 
 /** One typed capability. `_input`/`_output` are phantom — never populated, used for inference. */
 export interface Tool<Input = unknown, Output = unknown> {
@@ -31,6 +32,7 @@ export function toolset(name: string, describe: string): Toolset {
 export interface ToolContext {
   thread: ThreadId;
   stream: DeltaSink;
+  openStream(type: EventType): Stream; // open a fresh, logged stream scoped to this thread
   runFlow: (flow: Graph, initialPrompt: Message) => Promise<unknown>;
 }
 

@@ -233,6 +233,10 @@ function buildToolContext(threadId: ThreadId, stream: DeltaSink, runtime: Runtim
   return {
     thread: threadId,
     stream,
+    openStream: (type) => {
+      void type;
+      return notImplemented("ToolContext.openStream");
+    },
     runFlow: (flow, initialPrompt) =>
       runFlow(flow, initialPrompt, runtime, { parentThreadId: threadId }),
   };
@@ -975,4 +979,27 @@ export async function runFlow(
 
   const result = await driveGraph(flow, runtime, thread, initialPrompt);
   return result.output;
+}
+
+/** One `tick`'s outcome: a node ran (call again), the flow parked at a `waitFor` with nothing to consume, or it finished. */
+export type TickOutcome =
+  { status: "advanced" } | { status: "suspended" } | { status: "done"; result: unknown };
+
+/**
+ * Advances a flow exactly one node, reconstructing where it is purely from
+ * `runtime.store` — no state may survive in a JS closure between calls, so a
+ * fresh `Runtime` object (same store) resumes exactly like the original one.
+ */
+export function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
+  void flow;
+  void runtime;
+  return notImplemented("tick");
+}
+
+/** Calls `tick` until it stops advancing — either suspended at a `waitFor`, or done. */
+export async function tickUntilSuspended(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
+  for (;;) {
+    const outcome = await tick(flow, runtime);
+    if (outcome.status !== "advanced") return outcome;
+  }
 }

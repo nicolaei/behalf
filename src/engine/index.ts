@@ -6,4 +6,5 @@ export type { Missing } from "./coverage.js";
 export { satisfiesPersonas, satisfiesFlows } from "./coverage.js";
 export type { ErrorContext, ErrorDecision, ErrorHandler } from "./errors.js";
 export type { Runtime } from "./runtime.js";
-export { runtime, runFlow } from "./runtime.js";
+export { runtime, runFlow, tick, tickUntilSuspended } from "./runtime.js";
+export type { TickOutcome } from "./runtime.js";

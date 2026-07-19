@@ -20,6 +20,9 @@ describe("toolset groups multiple tool handlers behind one binding", () => {
     const result = await search("x", {
       thread: "thread-1" as never,
       stream: { delta: () => undefined },
+      openStream: () => {
+        throw new Error("unused");
+      },
       runFlow: () => Promise.resolve(undefined),
     });
 
