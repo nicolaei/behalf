@@ -1063,7 +1063,7 @@ export async function runFlow(
   return result.output;
 }
 
-/** One `tick`’s outcome: a node ran (call again), the flow parked at a `waitFor` with nothing to consume, or it finished. @public */
+/** One `tick`'s outcome: a node ran (call again), the flow parked at a `waitFor` with nothing to consume, or it finished. */
 export type TickOutcome =
   { status: "advanced" } | { status: "suspended" } | { status: "done"; result: unknown };
 
@@ -1173,7 +1173,6 @@ function replayPosition(flow: Graph, store: SessionStore): ReplayPosition {
  * consumed and its edge followed inline, without counting as this tick’s one
  * step — so resuming at a `waitFor` and reaching `finish` in the same call
  * (no work left to run in between) reports `done`, not `advanced`.
- * @public
  */
 export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
   const interrupts = findInterruptNodes(flow);
@@ -1300,7 +1299,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
   }
 }
 
-/** Calls `tick` until it stops advancing — either suspended at a `waitFor`, or done. @public */
+/** Calls `tick` until it stops advancing — either suspended at a `waitFor`, or done. */
 export async function tickUntilSuspended(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
   for (;;) {
     const outcome = await tick(flow, runtime);
