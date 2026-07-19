@@ -2,7 +2,7 @@
 
 import type { Model } from "../flow/model.js";
 import type { Message, MessageKind, UserMessage, AssistantMessage } from "../flow/message.js";
-import type { Graph, NodeId, EdgeDefinition } from "../flow/graph.js";
+import type { Graph, NodeId, NodeKind, EdgeDefinition } from "../flow/graph.js";
 import type { Binding } from "../flow/tool.js";
 import type { ThreadId, ThreadAction } from "../flow/thread.js";
 import type { StepContext, Emit, ModelCallResult, StepError, Step } from "../flow/step.js";
@@ -12,7 +12,13 @@ import type { Profile } from "../flow/profile.js";
 import type { ContentBlock } from "../flow/message.js";
 import type { ModelPort } from "./model-port.js";
 import type { SessionStore } from "./session-store.js";
-import type { ErrorContext, ErrorDecision, ErrorHandler } from "./errors.js";
+import {
+  type ErrorContext,
+  type ErrorDecision,
+  type ErrorHandler,
+  notImplemented,
+  unreachable,
+} from "./errors.js";
 
 /** What a flow runs against — model resolution, bindings, and store. */
 export interface Runtime {
@@ -34,10 +40,6 @@ export function runtime(config: {
     store: config.store,
     errorHandlers: config.errorHandlers ?? [],
   });
-}
-
-function notImplemented(name: string): never {
-  throw new Error(`${name} is not implemented yet`);
 }
 
 /**
@@ -144,22 +146,40 @@ function follow(edge: Advance, thread: Thread): { thread: Thread; to: NodeId } {
   return { thread: applyThreadAction(thread, edge.threadAction, edge.reason), to: edge.to };
 }
 
+/** Appends `message` to both a thread's assembled view and its full history — the shared tail of every path that folds one in. */
+function pushMessage(thread: { messages: Message[]; history: Message[] }, message: Message): void {
+  thread.messages.push(message);
+  thread.history.push(message);
+}
+
 /**
- * Parks until the inbox has a message of the given kind, polling on a
- * timer tick so a synchronous `store.submit()` racing this call — before
- * or after it starts — is never missed.
+ * Parks until `poll` returns a value, checking on a timer tick so a
+ * synchronous `store.submit()` racing this call — before or after it starts
+ * — is never missed. Stops early once `stop` says so, if given.
  */
+async function pollInbox<T>(
+  poll: () => T | undefined,
+  stop?: () => boolean,
+): Promise<T | undefined> {
+  while (!stop?.()) {
+    const value = poll();
+    if (value) return value;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  return undefined;
+}
+
+/** Parks until the inbox has a message of the given kind. */
 async function waitForMessage(
   store: SessionStore,
   kinds: readonly MessageKind[],
 ): Promise<UserMessage> {
-  for (;;) {
-    const message = store.consume(
-      (candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind),
-    );
-    if (message) return message;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
+  const message = await pollInbox(() =>
+    store.consume((candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind)),
+  );
+  // pollInbox only returns undefined when given a `stop` predicate, which this call omits.
+  if (!message) unreachable("waitForMessage resolved without a message");
+  return message;
 }
 
 /**
@@ -172,12 +192,7 @@ async function waitForAbort(
   store: SessionStore,
   isCancelled: () => boolean,
 ): Promise<UserMessage | undefined> {
-  while (!isCancelled()) {
-    const message = store.consume((candidate) => candidate.intent === "abort");
-    if (message) return message;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-  }
-  return undefined;
+  return pollInbox(() => store.consume((candidate) => candidate.intent === "abort"), isCancelled);
 }
 
 interface InterruptNode {
@@ -248,8 +263,7 @@ async function runToolCall(
     role: "tool",
     content: [{ type: "toolResult", correlationId: call.correlationId, output }],
   };
-  context.thread.messages.push(toolMessage);
-  context.thread.history.push(toolMessage);
+  pushMessage(context.thread, toolMessage);
 }
 
 /**
@@ -310,8 +324,7 @@ async function runModelCall(
 
   const { message: reply } = outcome;
   stream.commit({ message: reply });
-  context.thread.messages.push(reply);
-  context.thread.history.push(reply);
+  pushMessage(context.thread, reply);
 
   const toolCalls = reply.content.filter(isToolCall);
   for (const call of toolCalls) {
@@ -355,10 +368,8 @@ function applyThreadAction(
   if (threadAction === "fork") {
     const messages = [...current.messages];
     const history = [...current.history];
-    if (reason) {
-      messages.push(reason);
-      history.push(reason);
-    }
+    const forked = { messages, history };
+    if (reason) pushMessage(forked, reason);
     return {
       id: freshThreadId(),
       forkedFrom: { thread: current.id, at: current.history.length },
@@ -368,16 +379,56 @@ function applyThreadAction(
   }
 
   // "same": no new thread — push the reason onto the one already running.
-  if (reason) {
-    current.messages.push(reason);
-    current.history.push(reason);
-  }
+  if (reason) pushMessage(current, reason);
   return current;
 }
 
 /** The `then` edges leaving a node, in declared order — more than one means a fan-out. */
 function thenEdges(edges: readonly EdgeDefinition[], from: NodeId): EdgeDefinition[] {
   return edges.filter((candidate) => candidate.from === from && candidate.edge === "then");
+}
+
+/** Config that differs between the main-loop StepContext and a fan-out branch's — everything else is shared. */
+interface StepContextConfig {
+  getThread: () => Thread;
+  inputs: unknown[];
+  stream: DeltaSink;
+  modelCall: (profile: Profile) => Promise<ModelCallResult>;
+  call: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
+  compact: (
+    replace: (messages: Message[]) => Promise<Message[]>,
+    meta?: unknown,
+  ) => Promise<Emit<Message[]>>;
+  invalidate: (
+    target: NodeId,
+    options?: { threadAction?: ThreadAction; reason?: Message },
+  ) => Emit<never>;
+}
+
+/**
+ * Builds a `StepContext` from whatever differs between where it runs — the
+ * main drive loop or a fan-out branch. Both call this one factory so a later
+ * change (filling in a branch's `call`/`compact`/`invalidate` stubs) touches
+ * one place instead of two parallel builders.
+ */
+function makeStepContext(config: StepContextConfig): StepContext {
+  return {
+    get thread() {
+      return config.getThread();
+    },
+    inputs: config.inputs,
+    stream: config.stream,
+    modelCall: config.modelCall,
+    call: config.call,
+    output<Result>(value: Result): Emit<Result> {
+      return { output: value };
+    },
+    compact: config.compact,
+    invalidate: config.invalidate,
+    fail(error: StepError): Emit<never> {
+      return { error };
+    },
+  };
 }
 
 /**
@@ -396,41 +447,31 @@ async function runBranch(
 ): Promise<{ output: unknown; joinTo: NodeId }> {
   const nodeDef = flow.nodes.get(node);
   if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${node}"`);
+  // A branch node kind other than "step" isn't supported yet — the fan-out
+  // machinery only ever builds a step's node.run against a branch context.
   if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
   if (nodeDef.label) branchThread = { ...branchThread, label: nodeDef.label };
 
-  const branchContext: StepContext = {
-    get thread() {
-      return branchThread;
-    },
+  const branchContext = makeStepContext({
+    getThread: () => branchThread,
     inputs: [input],
+    // Stubs below are filled in by the branch-context-parity story that
+    // follows this one; see the seam this factory exists to narrow.
     stream: { delta: () => notImplemented("stream") },
-
-    modelCall(profile): Promise<ModelCallResult> {
-      return runModelCall(profile, branchContext, runtime, node);
-    },
-    call<Input, Output>(tool: Tool<Input, Output>, toolInput: Input): Promise<Output> {
+    modelCall: (profile) => runModelCall(profile, branchContext, runtime, node),
+    call: (tool, toolInput) => {
       void tool;
       void toolInput;
       return notImplemented("call");
     },
-
-    output<Result>(value: Result): Emit<Result> {
-      return { output: value };
-    },
-    compact(): Promise<Emit<Message[]>> {
-      return notImplemented("compact in a fan-out branch");
-    },
-    invalidate(): Emit<never> {
-      return notImplemented("invalidate in a fan-out branch");
-    },
-    fail(error: StepError): Emit<never> {
-      return { error };
-    },
-  };
+    compact: () => notImplemented("compact in a fan-out branch"),
+    invalidate: () => notImplemented("invalidate in a fan-out branch"),
+  });
 
   const emit = await runStep(nodeDef.run, branchContext);
   if (!("output" in emit)) {
+    // A branch step emitting anything but `output` (compact/invalidate/error)
+    // isn't supported yet — deliberately out of scope, per the doc above.
     notImplemented(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
   }
 
@@ -440,6 +481,231 @@ async function runBranch(
   if (!joinEdge) throw new Error(`fan-out branch "${node}" has no join edge`);
 
   return { output: emit.output, joinTo: joinEdge.to };
+}
+
+/** Where routing a node landed: the (possibly new) thread, the value the next node sees, its seed reason, and the next node id. */
+interface RouteResult {
+  thread: Thread;
+  input: unknown;
+  reason: Message | undefined;
+  to: NodeId;
+}
+
+/** Runs a `use` node: seeds its subgraph, drives it inline to its own `finish`, and follows the reaching edge with its result. */
+async function driveUseNode(
+  node: Extract<NodeKind, { kind: "use" }>,
+  nodeId: NodeId,
+  thread: Thread,
+  reason: Message | undefined,
+  currentInput: unknown,
+  flow: Graph,
+  runtime: Runtime,
+): Promise<RouteResult> {
+  // The subgraph's initial prompt: the reaching edge's `prompt` output, if it
+  // had one (the previous iteration's `follow` already pushed it onto this
+  // thread; logged again here so it lands in the log too), otherwise the raw
+  // incoming value, trusted to already be a `Message` (never pushed onto the
+  // thread, so push it now — this node is its only source).
+  const seed: Message = reason ?? (currentInput as Message);
+  if (!reason) pushMessage(thread, seed);
+  runtime.store.append({ message: seed }, { type: "message", threadId: thread.id });
+
+  const result = await driveGraph(node.subgraph, runtime, thread, seed);
+
+  const edge = commitOutput(
+    runtime,
+    result.thread.id,
+    flow.edges,
+    nodeId,
+    result.output,
+    stepIdentity(nodeId),
+  );
+  const followed = follow(edge, result.thread);
+  return { thread: followed.thread, input: result.output, reason: edge.reason, to: followed.to };
+}
+
+/**
+ * Runs a `waitFor` node: parks until a matching message (or an armed
+ * interrupt's) arrives, folds it into the thread, then either hands routing
+ * to the interrupt it was for or advances this node's own edge.
+ */
+async function driveWaitForNode(
+  node: Extract<NodeKind, { kind: "waitFor" }>,
+  nodeId: NodeId,
+  thread: Thread,
+  interrupts: InterruptNode[],
+  context: StepContext,
+  flow: Graph,
+  runtime: Runtime,
+): Promise<RouteResult> {
+  const message = await waitForMessage(runtime.store, [
+    node.messageKind,
+    ...interrupts.map((interrupt) => interrupt.messageKind),
+  ]);
+
+  // Consuming the message is the same step regardless of who it's for: it
+  // becomes a log event and joins the thread, then whichever node was
+  // actually armed for its kind — the interrupt, or this waitFor itself —
+  // runs and takes over routing.
+  runtime.store.append({ message }, { type: "message", threadId: thread.id });
+  pushMessage(thread, message);
+
+  const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
+  if (interrupt) {
+    const stepContext: StepContext = { ...context, inputs: [message] };
+    const emit = await runStep(interrupt.run, stepContext);
+    // An interrupt step emitting anything but `output` isn't supported yet.
+    if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
+    const edge = commitOutput(runtime, thread.id, flow.edges, interrupt.id, emit.output, {
+      stepId: interrupt.id,
+    });
+    const followed = follow(edge, thread);
+    return { thread: followed.thread, input: emit.output, reason: edge.reason, to: followed.to };
+  }
+
+  const edge = advance(flow.edges, nodeId, message);
+  const followed = follow(edge, thread);
+  return { thread: followed.thread, input: message, reason: edge.reason, to: followed.to };
+}
+
+/** What handling a step's `Emit` decided: retry the same node, or advance to the next one. */
+type StepOutcome =
+  { kind: "retry" } | ({ kind: "advance" } & RouteResult & { pendingInputs?: unknown[] });
+
+/**
+ * Handles the `Emit` a `step` node produced: invalidate, compact, error, a
+ * fan-out (more than one `then` edge), or a plain routed output. Each case
+ * decides the next node and, for fan-out, the per-branch inputs the join
+ * node receives.
+ */
+async function driveStepEmit(
+  emit: Emit,
+  node: Extract<NodeKind, { kind: "step" }>,
+  nodeId: NodeId,
+  thread: Thread,
+  flow: Graph,
+  runtime: Runtime,
+  attemptsByNode: Map<NodeId, number>,
+): Promise<StepOutcome> {
+  if ("invalidate" in emit) {
+    const invalidatedThreadId = thread.id;
+    const nextThread = applyThreadAction(thread, emit.threadAction, emit.reason);
+    runtime.store.append(
+      {
+        target: emit.invalidate,
+        threadAction: emit.threadAction,
+        ...(emit.reason ? { reason: emit.reason } : {}),
+      },
+      { type: "invalidation", threadId: invalidatedThreadId },
+    );
+    return {
+      kind: "advance",
+      thread: nextThread,
+      input: undefined,
+      reason: undefined,
+      to: emit.invalidate,
+    };
+  }
+
+  if ("compact" in emit) {
+    runtime.store.append(
+      { messages: emit.compact, ...(emit.meta !== undefined ? { meta: emit.meta } : {}) },
+      { type: "compaction", threadId: thread.id },
+    );
+    thread.messages = emit.compact;
+    thread.history.push(...emit.compact);
+    const edge = advance(flow.edges, nodeId, undefined);
+    const followed = follow(edge, thread);
+    return {
+      kind: "advance",
+      thread: followed.thread,
+      input: undefined,
+      reason: edge.reason,
+      to: followed.to,
+    };
+  }
+
+  if ("error" in emit) {
+    runtime.store.append(
+      {
+        type: emit.error.type,
+        message: emit.error.message,
+        ...(emit.error.retryable !== undefined ? { retryable: emit.error.retryable } : {}),
+        ...(emit.error.cause !== undefined ? { cause: emit.error.cause } : {}),
+      },
+      { type: "error", threadId: thread.id },
+    );
+
+    const attempts = attemptsByNode.get(nodeId) ?? 0;
+    const errorContext: ErrorContext = {
+      step: { id: nodeId },
+      thread: thread.id,
+      attempts,
+      log: runtime.store.events(),
+    };
+
+    let decision: ErrorDecision | undefined;
+    for (const handler of runtime.errorHandlers) {
+      decision = handler(emit.error, errorContext);
+      if (decision) break;
+    }
+
+    if (!decision || decision.action === "fail") {
+      throw new Error(emit.error.message, { cause: emit.error });
+    }
+
+    attemptsByNode.set(nodeId, attempts + 1);
+    if (decision.after) await new Promise((resolve) => setTimeout(resolve, decision.after));
+    return { kind: "retry" };
+  }
+
+  // Emit's variants are exactly invalidate/compact/error/output — having
+  // ruled out the first three, only "output" remains; anything else is a bug.
+  if (!("output" in emit)) unreachable(`emit "${Object.keys(emit).join(", ")}"`);
+
+  const branchTargets: NodeId[] = thenEdges(flow.edges, nodeId).map((edge) => edge.to);
+  if (branchTargets.length > 1) {
+    appendOutput(runtime, thread.id, emit.output, stepIdentity(nodeId, node.label));
+    const results: { output: unknown; joinTo: NodeId }[] = await Promise.all(
+      branchTargets.map((branch: NodeId) =>
+        runBranch(branch, applyThreadAction(thread, "fork", undefined), flow, runtime, emit.output),
+      ),
+    );
+    const [firstBranch, ...restOfBranches] = results;
+    if (!firstBranch) throw new Error(`fan-out from "${nodeId}" produced no branches`);
+    const joinTo = firstBranch.joinTo;
+    const disagreement = restOfBranches.find((result) => result.joinTo !== joinTo);
+    if (disagreement) {
+      throw new Error(
+        `fan-out from "${nodeId}" has branches joining different nodes ("${joinTo}" vs "${disagreement.joinTo}")`,
+      );
+    }
+    return {
+      kind: "advance",
+      thread,
+      input: undefined,
+      reason: undefined,
+      pendingInputs: results.map((result: { output: unknown }) => result.output),
+      to: joinTo,
+    };
+  }
+
+  const edge = commitOutput(
+    runtime,
+    thread.id,
+    flow.edges,
+    nodeId,
+    emit.output,
+    stepIdentity(nodeId, node.label),
+  );
+  const followed = follow(edge, thread);
+  return {
+    kind: "advance",
+    thread: followed.thread,
+    input: emit.output,
+    reason: edge.reason,
+    to: followed.to,
+  };
 }
 
 /** What driving a graph to its `finish` node settles with — the final thread and the terminal value. */
@@ -474,13 +740,10 @@ async function driveGraph(
   // snapshot captured once at the top.
   let currentThread: Thread = thread;
 
-  const context: StepContext = {
-    get thread() {
-      return currentThread;
-    },
+  const context = makeStepContext({
+    getThread: () => currentThread,
     inputs: [],
     stream: { delta: () => notImplemented("stream") },
-
     modelCall(profile): Promise<ModelCallResult> {
       // modelCall only ever runs while a node is being processed inside the
       // loop below, so `current` is always set at that point.
@@ -489,10 +752,6 @@ async function driveGraph(
     },
     call<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
       return callTool(tool, input, currentThread.id, context.stream, runtime);
-    },
-
-    output<Result>(value: Result): Emit<Result> {
-      return { output: value };
     },
     async compact(replace, meta): Promise<Emit<Message[]>> {
       const messages = await replace(currentThread.messages);
@@ -505,10 +764,7 @@ async function driveGraph(
         ...(options?.reason ? { reason: options.reason } : {}),
       };
     },
-    fail(error: StepError): Emit<never> {
-      return { error };
-    },
-  };
+  });
 
   const interrupts = findInterruptNodes(flow);
   let current: NodeId | undefined = flow.entry;
@@ -539,77 +795,41 @@ async function driveGraph(
     if (node.kind === "finish") return { thread: currentThread, output: currentInput };
 
     if (node.kind === "use") {
-      // The subgraph's initial prompt: the reaching edge's `prompt` output, if
-      // it had one (the previous iteration's `follow` already pushed it onto
-      // this thread; logged again here so it lands in the log too), otherwise
-      // the raw incoming value, trusted to already be a `Message` (never
-      // pushed onto the thread, so push it now — this node is its only source).
-      const seed: Message = reason ?? (currentInput as Message);
-      if (!reason) {
-        currentThread.messages.push(seed);
-        currentThread.history.push(seed);
-      }
-      runtime.store.append({ message: seed }, { type: "message", threadId: currentThread.id });
-
-      const result = await driveGraph(node.subgraph, runtime, currentThread, seed);
-      currentThread = result.thread;
-      currentInput = result.output;
-
-      const edge = commitOutput(
-        runtime,
-        currentThread.id,
-        flow.edges,
+      const routed = await driveUseNode(
+        node,
         current,
-        result.output,
-        stepIdentity(current),
+        currentThread,
+        reason,
+        currentInput,
+        flow,
+        runtime,
       );
-      reason = edge.reason;
-      ({ thread: currentThread, to: current } = follow(edge, currentThread));
+      currentThread = routed.thread;
+      currentInput = routed.input;
+      reason = routed.reason;
+      current = routed.to;
       continue;
     }
 
     if (node.kind === "waitFor") {
-      const message = await waitForMessage(runtime.store, [
-        node.messageKind,
-        ...interrupts.map((interrupt) => interrupt.messageKind),
-      ]);
-
-      // Consuming the message is the same step regardless of who it's for:
-      // it becomes a log event and joins the thread, then whichever node was
-      // actually armed for its kind — the interrupt, or this waitFor itself —
-      // runs and takes over routing.
-      runtime.store.append({ message }, { type: "message", threadId: currentThread.id });
-      currentThread.messages.push(message);
-      currentThread.history.push(message);
-      currentInput = message;
-
-      const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
-      if (interrupt) {
-        const stepContext: StepContext = { ...context, inputs: [message] };
-        const emit = await runStep(interrupt.run, stepContext);
-        if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
-        currentInput = emit.output;
-        const edge = commitOutput(
-          runtime,
-          currentThread.id,
-          flow.edges,
-          interrupt.id,
-          emit.output,
-          {
-            stepId: interrupt.id,
-          },
-        );
-        reason = edge.reason;
-        ({ thread: currentThread, to: current } = follow(edge, currentThread));
-        continue;
-      }
-
-      const edge = advance(flow.edges, current, currentInput);
-      reason = edge.reason;
-      ({ thread: currentThread, to: current } = follow(edge, currentThread));
+      const routed = await driveWaitForNode(
+        node,
+        current,
+        currentThread,
+        interrupts,
+        context,
+        flow,
+        runtime,
+      );
+      currentThread = routed.thread;
+      currentInput = routed.input;
+      reason = routed.reason;
+      current = routed.to;
       continue;
     }
 
+    // The only remaining declared kind is "interrupt", which is never a
+    // routing target — it's only ever entered via `driveWaitForNode` above.
     if (node.kind !== "step") notImplemented(`node kind "${node.kind}"`);
 
     if (node.label) currentThread = { ...currentThread, label: node.label };
@@ -617,114 +837,22 @@ async function driveGraph(
     const stepContext: StepContext = { ...context, inputs };
     const emit = await runStep(node.run, stepContext);
 
-    if ("invalidate" in emit) {
-      const invalidatedThreadId = currentThread.id;
-      currentThread = applyThreadAction(currentThread, emit.threadAction, emit.reason);
-      runtime.store.append(
-        {
-          target: emit.invalidate,
-          threadAction: emit.threadAction,
-          ...(emit.reason ? { reason: emit.reason } : {}),
-        },
-        { type: "invalidation", threadId: invalidatedThreadId },
-      );
-      current = emit.invalidate;
-      currentInput = undefined;
-      reason = undefined;
-      continue;
-    }
-
-    if ("compact" in emit) {
-      runtime.store.append(
-        { messages: emit.compact, ...(emit.meta !== undefined ? { meta: emit.meta } : {}) },
-        { type: "compaction", threadId: currentThread.id },
-      );
-      currentThread.messages = emit.compact;
-      currentThread.history.push(...emit.compact);
-      currentInput = undefined;
-      const edge = advance(flow.edges, current, undefined);
-      reason = edge.reason;
-      ({ thread: currentThread, to: current } = follow(edge, currentThread));
-      continue;
-    }
-
-    if ("error" in emit) {
-      runtime.store.append(
-        {
-          type: emit.error.type,
-          message: emit.error.message,
-          ...(emit.error.retryable !== undefined ? { retryable: emit.error.retryable } : {}),
-          ...(emit.error.cause !== undefined ? { cause: emit.error.cause } : {}),
-        },
-        { type: "error", threadId: currentThread.id },
-      );
-
-      const attempts = attemptsByNode.get(current) ?? 0;
-      const errorContext: ErrorContext = {
-        step: { id: current },
-        thread: currentThread.id,
-        attempts,
-        log: runtime.store.events(),
-      };
-
-      let decision: ErrorDecision | undefined;
-      for (const handler of runtime.errorHandlers) {
-        decision = handler(emit.error, errorContext);
-        if (decision) break;
-      }
-
-      if (!decision || decision.action === "fail") {
-        throw new Error(emit.error.message, { cause: emit.error });
-      }
-
-      attemptsByNode.set(current, attempts + 1);
-      if (decision.after) await new Promise((resolve) => setTimeout(resolve, decision.after));
-      continue;
-    }
-
-    if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
-
-    const branchTargets: NodeId[] = thenEdges(flow.edges, current).map((edge) => edge.to);
-    if (branchTargets.length > 1) {
-      appendOutput(runtime, currentThread.id, emit.output, stepIdentity(current, node.label));
-      const results: { output: unknown; joinTo: NodeId }[] = await Promise.all(
-        branchTargets.map((branch: NodeId) =>
-          runBranch(
-            branch,
-            applyThreadAction(currentThread, "fork", undefined),
-            flow,
-            runtime,
-            emit.output,
-          ),
-        ),
-      );
-      const [firstBranch, ...restOfBranches] = results;
-      if (!firstBranch) throw new Error(`fan-out from "${current}" produced no branches`);
-      const joinTo = firstBranch.joinTo;
-      const disagreement = restOfBranches.find((result) => result.joinTo !== joinTo);
-      if (disagreement) {
-        throw new Error(
-          `fan-out from "${current}" has branches joining different nodes ("${joinTo}" vs "${disagreement.joinTo}")`,
-        );
-      }
-      current = joinTo;
-      pendingInputs = results.map((result: { output: unknown }) => result.output);
-      currentInput = undefined;
-      reason = undefined;
-      continue;
-    }
-
-    currentInput = emit.output;
-    const edge = commitOutput(
-      runtime,
-      currentThread.id,
-      flow.edges,
+    const outcome = await driveStepEmit(
+      emit,
+      node,
       current,
-      emit.output,
-      stepIdentity(current, node.label),
+      currentThread,
+      flow,
+      runtime,
+      attemptsByNode,
     );
-    reason = edge.reason;
-    ({ thread: currentThread, to: current } = follow(edge, currentThread));
+    if (outcome.kind === "retry") continue;
+
+    currentThread = outcome.thread;
+    currentInput = outcome.input;
+    reason = outcome.reason;
+    pendingInputs = outcome.pendingInputs;
+    current = outcome.to;
   }
 
   return { thread: currentThread, output: currentInput };
@@ -741,7 +869,7 @@ export async function runFlow(
   runtime: Runtime,
   options?: { parentThreadId?: ThreadId },
 ): Promise<unknown> {
-  const threadId = "thread-0" as ThreadId;
+  const threadId = freshThreadId();
   const thread: Thread = {
     id: threadId,
     ...(options?.parentThreadId ? { parentThreadId: options.parentThreadId } : {}),

@@ -31,6 +31,29 @@ class AsyncQueue<T> implements AsyncIterable<T> {
   }
 }
 
+/** Builds the envelope committed by both `append` and a `Stream`'s `commit` — the two
+ * paths that turn an event into a logged, broadcast envelope, differing only in whether
+ * the event was aborted. */
+function buildEnvelope(
+  meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId },
+  event: Event[EventType],
+  sequence: number,
+  aborted?: boolean,
+): Envelope {
+  return {
+    form: "committed",
+    sessionId: "" as SessionId,
+    threadId: meta.threadId,
+    stepId: meta.stepId,
+    stepName: meta.stepName,
+    type: meta.type,
+    event,
+    sequence,
+    at: Date.now(),
+    ...(aborted ? { aborted: true } : {}),
+  } as Envelope;
+}
+
 export function memoryStore(): SessionStore {
   const log: Envelope[] = [];
   const pending: UserMessage[] = [];
@@ -65,17 +88,7 @@ export function memoryStore(): SessionStore {
       meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId },
     ): void {
       sequence += 1;
-      const envelope = {
-        form: "committed",
-        sessionId: "" as SessionId,
-        threadId: meta.threadId,
-        stepId: meta.stepId,
-        stepName: meta.stepName,
-        type: meta.type,
-        event,
-        sequence,
-        at: Date.now(),
-      } as Envelope;
+      const envelope = buildEnvelope(meta, event, sequence);
       log.push(envelope);
       broadcast(envelope);
     },
@@ -91,18 +104,7 @@ export function memoryStore(): SessionStore {
 
       function commit(event: Event[EventType], aborted?: boolean): void {
         sequence += 1;
-        const envelope = {
-          form: "committed",
-          sessionId: "" as SessionId,
-          threadId: meta.threadId,
-          stepId: meta.stepId,
-          stepName: meta.stepName,
-          type: meta.type,
-          event,
-          sequence,
-          at: Date.now(),
-          ...(aborted ? { aborted: true } : {}),
-        } as Envelope;
+        const envelope = buildEnvelope(meta, event, sequence, aborted);
         log.push(envelope);
         broadcast(envelope);
       }

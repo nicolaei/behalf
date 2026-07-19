@@ -15,3 +15,13 @@ export type ErrorDecision = { action: "retry"; after?: number } | { action: "fai
 
 /** Consulted in order after a step error; the first decision wins. `undefined` defers. */
 export type ErrorHandler = (error: StepError, context: ErrorContext) => ErrorDecision | undefined;
+
+/** A deliberately-unsupported feature gap — a stub awaiting real implementation in a later change. */
+export function notImplemented(name: string): never {
+  throw new Error(`${name} is not implemented yet`);
+}
+
+/** A structurally-impossible state — reaching this is a bug in the engine, not a missing feature. */
+export function unreachable(name: string): never {
+  throw new Error(`unreachable: ${name}`);
+}
