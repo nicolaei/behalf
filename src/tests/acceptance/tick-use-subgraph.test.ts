@@ -13,7 +13,7 @@ import { neverCalled, textOf, loggedEventTypes } from "./support.js";
 // notImplemented("tick: node kind \"use\"") whenever the replayed position
 // lands on one. Mirrors use-subgraph.test.ts's graph shape, driven via
 // tick() instead of runFlow.
-describe.skip("ticking a flow through a used subgraph", () => {
+describe("ticking a flow through a used subgraph", () => {
   const inner = defineGraph("tick-use-inner", (flow) => {
     const echo = flow.step(
       outputs((context) => textOf(context.thread.messages.at(-1)).toUpperCase()),
