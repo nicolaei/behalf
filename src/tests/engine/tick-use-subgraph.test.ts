@@ -1,13 +1,7 @@
 import { describe, it, expect } from "vitest";
-import {
-  defineGraph,
-  tickUntilSuspended,
-  runtime,
-  userText,
-  adapters,
-  outputs,
-} from "../../index.js";
-import { neverCalled, textOf, loggedEventTypes } from "./support.js";
+import { tickUntilSuspended } from "../../engine/runtime.js";
+import { defineGraph, runtime, userText, adapters, outputs } from "../../index.js";
+import { neverCalled, textOf, loggedEventTypes } from "../acceptance/support.js";
 
 // Needs tick() to support "use" nodes — currently it throws
 // notImplemented("tick: node kind \"use\"") whenever the replayed position

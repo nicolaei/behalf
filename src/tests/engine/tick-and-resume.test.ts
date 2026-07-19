@@ -1,7 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, tick, tickUntilSuspended, runtime, adapters } from "../../index.js";
+import { tick, tickUntilSuspended } from "../../engine/runtime.js";
+import type { TickOutcome } from "../../engine/runtime.js";
+import { defineGraph, runtime, adapters } from "../../index.js";
 import type { Graph, Runtime, WaitForResult } from "../../index.js";
-import { neverCalled, textOf } from "./support.js";
+import { neverCalled, textOf } from "../acceptance/support.js";
 
 // Needs tick() to advance a flow exactly one node, reconstructing position
 // purely from runtime.store on every call — currently waitFor is driven by
@@ -66,7 +68,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
 
     // every tick gets its own fresh runtime() call — the only thing carried
     // between them is the store itself, nothing cached on a shared Runtime
-    async function freshTick(): Promise<Awaited<ReturnType<typeof tick>>> {
+    async function freshTick(): Promise<TickOutcome> {
       const ready: Runtime = await runtime({ models: neverCalled, bindings: [], store });
       return tick(graph, ready);
     }
