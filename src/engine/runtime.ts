@@ -613,6 +613,80 @@ function findJoinNode(branchTargets: NodeId[], fanOutNodeId: NodeId, flow: Graph
  * through the same retry-or-fail path. Only `step` nodes are supported inside
  * a branch; `waitFor`, `use`, or a nested fan-out are notImplemented.
  */
+/**
+ * Runs one node inside a fan-out branch: builds its `StepContext`, retries on
+ * error via the shared `handleStepError` path, commits a `compact` the same
+ * way the main loop does, and logs a plain output. Never follows an edge —
+ * that's the caller's job, since `runBranch` walks a whole chain to the join
+ * while tick's per-call branch advance stops after this one node.
+ */
+async function runBranchNode(
+  nodeId: NodeId,
+  thread: Thread,
+  flow: Graph,
+  runtime: Runtime,
+  input: unknown,
+  attemptsByNode: Map<NodeId, number>,
+): Promise<
+  | { kind: "invalidate"; emit: Extract<Emit, { invalidate: NodeId }> }
+  | { kind: "output"; output: unknown }
+> {
+  const nodeDef = flow.nodes.get(nodeId);
+  if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${nodeId}"`);
+  if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
+  const nodeIdentity = stepIdentity(nodeId, nodeDef.label);
+
+  const branchContext: StepContext = makeStepContext({
+    getThread: () => thread,
+    inputs: [input],
+    openStream: (type) =>
+      runtime.store.open({
+        correlationId: freshCorrelationId(),
+        type,
+        threadId: thread.id,
+        ...nodeIdentity,
+      }),
+    modelCall: (profile) => runModelCall(profile, branchContext, runtime, nodeIdentity),
+    callTool: (tool, toolInput) => callTool(tool, toolInput, thread.id, runtime, nodeIdentity),
+  });
+
+  let stepOutput: unknown = undefined;
+  for (;;) {
+    const emit = await runStep(nodeDef.run, branchContext);
+
+    if ("invalidate" in emit) return { kind: "invalidate", emit };
+
+    if ("compact" in emit) {
+      commitCompaction(runtime, thread, emit.compact, emit.meta);
+      break; // stepOutput stays undefined; advance to next node
+    }
+
+    if ("error" in emit) {
+      await handleStepError(emit, nodeId, thread.id, runtime, attemptsByNode);
+      continue;
+    }
+
+    if (!("output" in emit))
+      unreachable(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
+
+    appendOutput(runtime, thread.id, emit.output, nodeIdentity);
+    stepOutput = emit.output;
+    break;
+  }
+  return { kind: "output", output: stepOutput };
+}
+
+/**
+ * Runs one fan-out branch to completion on its own forked thread, walking
+ * every step in its linear .then() chain until reaching `joinNodeId`.
+ * `callTool`/`compact`/`invalidate`/`error` behave the same as the main loop
+ * at every step; `invalidate` bubbles up to the caller instead of being acted
+ * on locally (see the fan-out handling in `driveStepEmit`), and errors go
+ * through the same retry-or-fail path. Only `step` nodes are supported inside
+ * a branch; `waitFor`, `use`, or a nested fan-out are notImplemented. Each
+ * step's own work is delegated to `runBranchNode`, shared with tick's
+ * per-call branch advance so both drive the exact same node logic.
+ */
 async function runBranch(
   startNode: NodeId,
   initialThread: Thread,
@@ -631,50 +705,16 @@ async function runBranch(
     if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${currentNode}"`);
     if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
     if (nodeDef.label) currentThread = { ...currentThread, label: nodeDef.label };
-    const nodeIdentity = stepIdentity(currentNode, nodeDef.label);
 
-    // Capture stable references for this step's context (rebuilt each iteration).
-    const stepThread = currentThread;
-    const stepInput = currentInput;
-    const branchContext: StepContext = makeStepContext({
-      getThread: () => stepThread,
-      inputs: [stepInput],
-      openStream: (type) =>
-        runtime.store.open({
-          correlationId: freshCorrelationId(),
-          type,
-          threadId: stepThread.id,
-          ...nodeIdentity,
-        }),
-      modelCall: (profile) => runModelCall(profile, branchContext, runtime, nodeIdentity),
-      callTool: (tool, toolInput) =>
-        callTool(tool, toolInput, stepThread.id, runtime, nodeIdentity),
-    });
-
-    // Retry loop for this step.
-    let stepOutput: unknown = undefined;
-    for (;;) {
-      const emit = await runStep(nodeDef.run, branchContext);
-
-      if ("invalidate" in emit) return { kind: "invalidate", emit };
-
-      if ("compact" in emit) {
-        commitCompaction(runtime, currentThread, emit.compact, emit.meta);
-        break; // stepOutput stays undefined; advance to next node
-      }
-
-      if ("error" in emit) {
-        await handleStepError(emit, currentNode, currentThread.id, runtime, attemptsByNode);
-        continue;
-      }
-
-      if (!("output" in emit))
-        unreachable(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
-
-      appendOutput(runtime, currentThread.id, emit.output, nodeIdentity);
-      stepOutput = emit.output;
-      break;
-    }
+    const result = await runBranchNode(
+      currentNode,
+      currentThread,
+      flow,
+      runtime,
+      currentInput,
+      attemptsByNode,
+    );
+    if (result.kind === "invalidate") return result;
 
     // Follow the step's single outgoing then edge.
     const thenEdge = flow.edges.find((e) => e.from === currentNode && e.edge === "then");
@@ -682,12 +722,12 @@ async function runBranch(
       throw new Error(`fan-out branch step "${currentNode}" has no outgoing then edge`);
 
     if (thenEdge.to === joinNodeId) {
-      return { kind: "output", output: stepOutput, joinTo: joinNodeId };
+      return { kind: "output", output: result.output, joinTo: joinNodeId };
     }
 
     // Advance to the next step in this branch.
     currentNode = thenEdge.to;
-    currentInput = stepOutput;
+    currentInput = result.output;
   }
 }
 
@@ -1148,15 +1188,113 @@ export interface CursorState {
 
 /** One tick()'s outcome: a set of independently-progressing cursors. For single-cursor flows, always a one-element array. */
 export type TickOutcome = CursorState[];
-/** Where a fresh replay of `runtime.store`'s committed events left off: the node to run next, the thread it runs on, and the value it sees as input. */
-interface ReplayPosition {
+
+/**
+ * One fan-out branch's reconstructed progress inside an in-flight group.
+ * `thread` is set once the branch has actually run its first node (forked
+ * off the group's `mainThread`, same as `runBranch` forks per branch for
+ * `runFlow`) — absent while the branch hasn't been picked yet. `current` is
+ * the node this branch will run next; once `done`, it stays at the last
+ * chain node the branch actually ran, and `output` holds what it reported
+ * to the join.
+ */
+interface BranchReplay {
+  target: NodeId;
   current: NodeId;
-  thread: Thread;
+  thread?: Thread;
+  currentInput: unknown;
+  started: boolean;
+  done: boolean;
+  output?: unknown;
+}
+
+/**
+ * A fan-out node's branches, forked off `mainThread` and walked one node at
+ * a time across separate `tick()` calls — reconstructed from
+ * `runtime.store` the same way a single cursor's `ReplayPosition` is, just
+ * with one `BranchReplay` per branch instead of one `current`/`thread` pair.
+ */
+interface FanOutGroup {
+  fanOutNodeId: NodeId;
+  joinNodeId: NodeId;
+  mainThread: Thread;
+  branches: BranchReplay[];
+}
+
+/** One level of a replayed `tick()` position — the outermost flow, or a `use` node's subgraph descended into it. `useNodeId` is the id, in the ENCLOSING frame's own flow, of the `use` node whose subgraph this frame reconstructs; absent only for the outermost (root) frame — which is also why it doubles as the `parent` a nested cursor reports. */
+interface ReplayFrame {
+  flow: Graph;
+  useNodeId?: NodeId;
+  current: NodeId;
   currentInput: unknown;
   // The edge-resolved prompt (if any) that led to `current` — what a `use`
   // node reached next would seed its subgraph with. Mirrors driveGraph's
   // own `reason` variable, reconstructed the same way from replay.
-  reason?: Message;
+  reason?: Message | undefined;
+}
+
+/** Where a fresh replay of `runtime.store`'s committed events left off: the frame stack — outermost flow first, innermost active `use` descent last — plus the thread they all share (a `use` node's subgraph never forks it) and any pending fan-out join inputs. */
+interface ReplayPosition {
+  thread: Thread;
+  frames: ReplayFrame[];
+  // Set only when replay landed on a join node whose fan-out group just
+  // folded (every branch reported) — one entry per branch, in declared
+  // order, mirroring driveStepEmit's own `pendingInputs`. Fan-out is only
+  // ever reconstructed at the outermost frame — see `advanceFanOutGroup`.
+  pendingInputs?: unknown[];
+}
+
+/** What a fresh replay of `runtime.store` left off at: mid-flight on one line (`single`), or spread across an in-flight fan-out group's branches (`fanout`). */
+type ReplayResult = ({ kind: "single" } & ReplayPosition) | { kind: "fanout"; group: FanOutGroup };
+
+/** A fan-out group's branches all reporting collapses cursor-tracking back to one line: the join node, fed every branch's output in declared order. `undefined` while any branch is still in flight. */
+function foldGroup(group: FanOutGroup): { current: NodeId; pendingInputs: unknown[] } | undefined {
+  if (!group.branches.every((branch) => branch.done)) return undefined;
+  return {
+    current: group.joinNodeId,
+    pendingInputs: group.branches.map((branch) => branch.output),
+  };
+}
+
+/** Reconstructs a forked branch thread from its observed thread id — an approximation of `applyThreadAction(mainThread, "fork", ...)` sufficient for a branch, which (like `runBranch`) never runs a node that folds a further message into its thread. */
+function replayForkedThread(mainThread: Thread, threadId: ThreadId): Thread {
+  return {
+    id: threadId,
+    forkedFrom: { thread: mainThread.id, at: mainThread.history.length },
+    messages: [...mainThread.messages],
+    history: [...mainThread.history],
+  };
+}
+
+/** Folds one committed output event into whichever branch of `group` it belongs to — identified by the event's thread id once known, or by its stepId matching a not-yet-started branch's own target the first time that branch's thread appears in the log. */
+function replayBranchOutput(
+  group: FanOutGroup,
+  threadId: ThreadId | undefined,
+  stepId: NodeId,
+  value: unknown,
+  flow: Graph,
+): void {
+  let branch = threadId
+    ? group.branches.find((candidate) => candidate.thread?.id === threadId)
+    : undefined;
+  if (!branch) {
+    branch = group.branches.find((candidate) => candidate.target === stepId && !candidate.started);
+    if (!branch) return; // not a node this fan-out group owns
+    branch.started = true;
+    if (threadId) branch.thread = replayForkedThread(group.mainThread, threadId);
+  }
+
+  const thenEdge = flow.edges.find((edge) => edge.from === stepId && edge.edge === "then");
+  if (!thenEdge) throw new Error(`fan-out branch step "${stepId}" has no outgoing then edge`);
+
+  if (thenEdge.to === group.joinNodeId) {
+    branch.done = true;
+    branch.output = value;
+    branch.current = stepId;
+  } else {
+    branch.current = thenEdge.to;
+    branch.currentInput = value;
+  }
 }
 
 /**
@@ -1164,85 +1302,265 @@ interface ReplayPosition {
  * state survives anywhere else. Starts at `flow.entry` with a fresh thread
  * when the log is empty, then replays every committed `output` (a step ran;
  * follow the edge its value selects, same as `advance`) and `message` (a
- * `waitFor` consumed one; follow *its* edge the same way) event in order,
- * landing exactly where the last tick call left off.
+ * `waitFor` consumed one, or a `use` node's subgraph was seeded; follow *its*
+ * edge, or descend into it, the same way) event in order, landing exactly
+ * where the last tick call left off. A fan-out node's own output event
+ * switches this into per-branch reconstruction (`FanOutGroup`) until either
+ * every branch has reported (folding back to a single position at the join
+ * node, `pendingInputs` set) or the join node's own output event shows the
+ * fold already ran on an earlier tick call — the log-level signal to resume
+ * ordinary single-line replay from there. Fan-out is only ever reconstructed
+ * at the outermost frame — a fan-out inside a used subgraph is
+ * notImplemented, matching tick()'s own live handling.
+ *
+ * A `use` node's subgraph shares its parent's thread (never forked), so
+ * thread identity says nothing about whether a given event belongs to the
+ * outer flow or a nested descent — only the event's own node id does. Every
+ * node across every graph gets a globally unique id (see flow/graph.ts's
+ * `freshNodeId`), so an output event's `stepId` belongs to exactly one
+ * frame; the frame stack mirrors the `use` descents a live tick() call would
+ * have made: pushed the moment a `message` event seeds a `use` node's
+ * subgraph, popped the moment an output event turns up whose id belongs to
+ * an enclosing frame instead — the completion event `commitOutput` tags with
+ * the `use` node's own (outer) id once its subgraph reaches `finish`.
  */
-function replayPosition(flow: Graph, store: SessionStore): ReplayPosition {
-  let current: NodeId = flow.entry;
-  let currentInput: unknown;
+function replayPosition(flow: Graph, store: SessionStore): ReplayResult {
   let thread: Thread = { id: freshThreadId(), messages: [], history: [] };
-  let reason: Message | undefined;
+  let group: FanOutGroup | undefined;
+  const frames: ReplayFrame[] = [{ flow, current: flow.entry, currentInput: undefined }];
+  const root = frames[0];
+  if (!root) unreachable("replayPosition: frame stack starts empty");
 
   for (const envelope of store.events()) {
     if (envelope.form !== "committed") continue;
+
+    if (group) {
+      if (envelope.type === "output") {
+        const { value } = envelope.event as Event["output"];
+        const stepId = envelope.stepId as NodeId;
+        if (stepId === group.joinNodeId) {
+          // The join already ran on an earlier tick call: the group folded
+          // in the log itself. Resume ordinary single-line replay from here.
+          thread = group.mainThread;
+          const edge = advance(flow.edges, stepId, value);
+          const followed = follow(edge, thread);
+          thread = followed.thread;
+          root.current = followed.to;
+          root.currentInput = value;
+          root.reason = edge.reason;
+          group = undefined;
+        } else {
+          replayBranchOutput(group, envelope.threadId, stepId, value, flow);
+        }
+      }
+      // toolCall/toolResult/compaction/invalidation/error/message inside a
+      // branch aren't produced by any node kind `runBranchNode` supports —
+      // out of scope for this slice's replay, same as the single-line path.
+      continue;
+    }
+
     if (envelope.threadId) thread = { ...thread, id: envelope.threadId };
 
     if (envelope.type === "output") {
       const { value } = envelope.event as Event["output"];
       const stepId = envelope.stepId as NodeId;
-      // A `use` node drives its whole subgraph inline (see `driveUseNode`),
-      // so its inner steps' own output events carry NodeIds that belong to
-      // a different, inner Graph — not this `flow`. Replaying those with
-      // `advance(flow.edges, ...)` would either throw (no such node in
-      // `flow.edges`) or, worse, coincidentally match an unrelated outer
-      // node id. Only an output event whose stepId is actually a node in
-      // this flow can move `current` — everything else is inner noise to
-      // skip over. The `use` node's own final output (tagged with its
-      // outer nodeId by `commitOutput`) always passes this check.
-      if (!flow.nodes.has(stepId)) continue;
-      // A fan-out node's own output event has more than one outgoing `then`
-      // edge; replaying it with `advance` would silently pick just the
-      // first branch (see `selectEdge`) and desync from what actually ran.
-      // Fan-out replay isn't implemented — throw rather than resume wrong.
-      if (thenEdges(flow.edges, stepId).length > 1)
-        notImplemented("replayPosition: fan-out replay");
-      const edge = advance(flow.edges, stepId, value);
+
+      // Find the frame that actually owns this node id, from the innermost
+      // frame outward. Node ids are globally unique per graph, so exactly
+      // one frame ever recognizes a given id; landing on an ENCLOSING
+      // frame's own id (rather than the innermost one's) means every frame
+      // above it already reached its own `finish` — each logged its own
+      // such completion event first — so truncating the stack back to that
+      // depth is simply catching up on pops a live tick() call already made.
+      let owner: ReplayFrame | undefined;
+      let depth = frames.length - 1;
+      for (; depth >= 0; depth -= 1) {
+        const candidate = frames[depth];
+        if (candidate?.flow.nodes.has(stepId)) {
+          owner = candidate;
+          break;
+        }
+      }
+      if (!owner) continue; // inner noise no known frame owns — skip
+      frames.length = depth + 1;
+      const top = owner;
+
+      const branchTargets = thenEdges(top.flow.edges, stepId).map((edge) => edge.to);
+      if (branchTargets.length > 1) {
+        if (depth > 0) notImplemented("tick: fan-out inside a used subgraph");
+        // A fan-out node's own output: hand off to per-branch reconstruction
+        // instead of `advance`, which would silently pick just the first
+        // branch (see `selectEdge`) and desync from what actually ran.
+        group = {
+          fanOutNodeId: stepId,
+          joinNodeId: findJoinNode(branchTargets, stepId, top.flow),
+          mainThread: thread,
+          branches: branchTargets.map((target) => ({
+            target,
+            current: target,
+            currentInput: value,
+            started: false,
+            done: false,
+          })),
+        };
+        continue;
+      }
+
+      const edge = advance(top.flow.edges, stepId, value);
       const followed = follow(edge, thread);
       thread = followed.thread;
-      current = followed.to;
-      currentInput = value;
-      reason = edge.reason;
+      top.current = followed.to;
+      top.currentInput = value;
+      top.reason = edge.reason;
       continue;
     }
 
     if (envelope.type === "message") {
       const { message } = envelope.event as Event["message"];
-      const node = flow.nodes.get(current);
-      // Only a `waitFor` actually sitting at `current` in THIS flow
-      // advances on a message event. A `use` node's own seed message (and
-      // any further message events a nested waitFor inside its subgraph
-      // might produce) leave `current` on the `use` node itself — those
-      // never move this flow's position, only the inner `driveGraph` call
-      // that already ran to completion within a single `tick` call.
+      const top = frames[frames.length - 1];
+      if (!top) unreachable("replayPosition: frame stack is empty");
+      const node = top.flow.nodes.get(top.current);
+
       if (node?.kind === "waitFor") {
         pushMessage(thread, message);
-        const edge = advance(flow.edges, current, message);
+        const edge = advance(top.flow.edges, top.current, message);
         const followed = follow(edge, thread);
         thread = followed.thread;
-        current = followed.to;
-        currentInput = { ok: true } satisfies WaitForResult;
-        reason = edge.reason;
+        top.current = followed.to;
+        top.currentInput = { ok: true } satisfies WaitForResult;
+        top.reason = edge.reason;
         continue;
       }
+
       if (node?.kind === "use") {
-        // Mirrors driveUseNode's own dedup: when `reason` is already set,
-        // the reaching edge's prompt was already pushed onto this thread
-        // by the preceding output event's `follow` — this message event is
-        // just its log echo, not a second message to fold in.
-        if (!reason) pushMessage(thread, message);
+        // Entering this use node's subgraph: mirrors driveUseNode's own seed
+        // dedup (a "same"-threadAction reaching edge already pushed this
+        // message onto the thread; this event just echoes it into the log)
+        // and descends a frame at the subgraph's own entry, seeded with this
+        // exact message — the same value `driveGraph`'s own `input`
+        // parameter would carry.
+        if (!top.reason) pushMessage(thread, message);
+        frames.push({
+          flow: node.subgraph,
+          useNodeId: top.current,
+          current: node.subgraph.entry,
+          currentInput: message,
+        });
         continue;
       }
-      // Belongs to a node driveUseNode drove that isn't `current` in this
-      // flow — the subgraph's own waitFor or a deeper nested use. Skipping
-      // it (rather than throwing) is safe as long as it never needs to
-      // move `current`, which is true for every shape this slice targets.
+
+      // Belongs to a node this replay isn't tracking as any frame's
+      // `current` — safe to skip; it never needs to move a frame's position.
       continue;
     }
     // toolCall/toolResult/compaction/invalidation/error don't move the main
     // position on their own — out of scope for this slice's replay.
   }
 
-  return { current, thread, currentInput, ...(reason ? { reason } : {}) };
+  if (group) {
+    const folded = foldGroup(group);
+    if (folded) {
+      return {
+        kind: "single",
+        thread: group.mainThread,
+        frames: [{ flow, current: folded.current, currentInput: undefined }],
+        pendingInputs: folded.pendingInputs,
+      };
+    }
+    return { kind: "fanout", group };
+  }
+
+  return { kind: "single", thread, frames };
+}
+
+/** One branch cursor's outward `CursorState` — `parked` (not `done`, reserved for the root) once it has folded its own output in, `active` while it still has work of its own left. */
+function branchCursorState(branch: BranchReplay, group: FanOutGroup): CursorState {
+  return {
+    node: branch.current,
+    status: branch.done ? "parked" : "active",
+    parent: group.fanOutNodeId,
+  };
+}
+
+/**
+ * Advances one not-yet-done branch of a fan-out group by exactly one node —
+ * tick's per-call granularity applied to `runBranchNode` instead of
+ * `runBranch`'s run-to-completion loop. Forks the branch's own thread off
+ * the group's `mainThread` the first time it's picked, same as `runBranch`
+ * forks per branch. Once every branch has reported, cursor-tracking
+ * collapses: the caller sees a single active cursor at the join node,
+ * exactly as if replay had found the fold already in the log.
+ */
+async function advanceFanOutGroup(
+  group: FanOutGroup,
+  flow: Graph,
+  runtime: Runtime,
+  attemptsByNode: Map<NodeId, number>,
+): Promise<TickOutcome> {
+  const branch = group.branches.find((candidate) => !candidate.done);
+  if (!branch) unreachable("advanceFanOutGroup: no unfinished branch in a fan-out group");
+
+  branch.thread ??= applyThreadAction(group.mainThread, "fork", undefined);
+  let branchThread = branch.thread;
+  const nodeDef = flow.nodes.get(branch.current);
+  if (nodeDef?.kind === "step" && nodeDef.label)
+    branchThread = { ...branchThread, label: nodeDef.label };
+  branch.thread = branchThread;
+
+  const result = await runBranchNode(
+    branch.current,
+    branchThread,
+    flow,
+    runtime,
+    branch.currentInput,
+    attemptsByNode,
+  );
+  if (result.kind === "invalidate") notImplemented("tick: fan-out branch invalidate");
+
+  const thenEdge = flow.edges.find((edge) => edge.from === branch.current && edge.edge === "then");
+  if (!thenEdge)
+    throw new Error(`fan-out branch step "${branch.current}" has no outgoing then edge`);
+
+  if (thenEdge.to === group.joinNodeId) {
+    branch.done = true;
+    branch.output = result.output;
+  } else {
+    branch.current = thenEdge.to;
+    branch.currentInput = result.output;
+  }
+
+  const folded = foldGroup(group);
+  if (folded) return [{ node: folded.current, status: "active" }];
+  return group.branches.map((candidate) => branchCursorState(candidate, group));
+}
+
+/** One frame of tick()'s live execution — same shape as a `ReplayFrame`, plus what only matters while actually running: this frame's own armed interrupts (recomputed per level, same as `driveGraph` does for every nested `driveGraph` call) and the `StepContext` its own nodes run with. */
+interface LiveFrame {
+  flow: Graph;
+  useNodeId?: NodeId;
+  interrupts: InterruptNode[];
+  current: NodeId;
+  currentInput: unknown;
+  reason?: Message | undefined;
+  context: StepContext;
+}
+
+/** Builds a `LiveFrame` from a replayed one, wiring its `StepContext` to read this exact frame's own (mutable) `current` through a closure — so a later push/pop only ever touches the frame objects themselves, never anything `buildDriveContext` captured. */
+function buildLiveFrame(
+  replayFrame: ReplayFrame,
+  runtime: Runtime,
+  getThread: () => Thread,
+): LiveFrame {
+  const frame = {
+    flow: replayFrame.flow,
+    useNodeId: replayFrame.useNodeId,
+    interrupts: findInterruptNodes(replayFrame.flow),
+    current: replayFrame.current,
+    currentInput: replayFrame.currentInput,
+    reason: replayFrame.reason,
+  } as LiveFrame;
+  frame.context = buildDriveContext(frame.flow, runtime, () => frame.current, getThread);
+  return frame;
 }
 
 /**
@@ -1254,50 +1572,99 @@ function replayPosition(flow: Graph, store: SessionStore): ReplayPosition {
  * consumed and its edge followed inline, without counting as this tick’s one
  * step — so resuming at a `waitFor` and reaching `finish` in the same call
  * (no work left to run in between) reports `done`, not `advanced`.
+ *
+ * A fan-out node's branches advance one at a time across separate `tick`
+ * calls instead of running every branch to completion in one `Promise.all`
+ * like `runFlow` does — see `advanceFanOutGroup`.
+ *
+ * A `use` node is driven the same way tick() drives its own top-level graph:
+ * one node at a time, on a child frame pushed onto a stack (not forked —
+ * `use` shares its parent's thread, unlike a fan-out branch). Reaching the
+ * subgraph's own `finish` pops that frame and folds its result into the
+ * enclosing one, exactly like `driveUseNode`'s own tail; parking on the
+ * subgraph's own `waitFor` reports a cursor whose `parent` is the `use`
+ * node's id, mirroring how a fan-out branch's cursor reports the fan-out
+ * node as its parent.
  */
 export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
-  const interrupts = findInterruptNodes(flow);
   const attemptsByNode = new Map<NodeId, number>();
   const position = replayPosition(flow, runtime.store);
-  let currentThread: Thread = position.thread;
-  let current: NodeId = position.current;
-  let currentInput: unknown = position.currentInput;
-  let ranStep = false;
-  let reason: Message | undefined = position.reason;
 
-  const context = buildDriveContext(
-    flow,
-    runtime,
-    () => current,
-    () => currentThread,
+  if (position.kind === "fanout") {
+    return advanceFanOutGroup(position.group, flow, runtime, attemptsByNode);
+  }
+
+  let currentThread: Thread = position.thread;
+  let pendingInputs: unknown[] | undefined = position.pendingInputs;
+  let ranStep = false;
+
+  const getThread = (): Thread => currentThread;
+  const frames: LiveFrame[] = position.frames.map((replayFrame) =>
+    buildLiveFrame(replayFrame, runtime, getThread),
   );
 
   for (;;) {
-    const node = flow.nodes.get(current);
-    if (!node) throw new Error(`graph "${flow.name}" has no node "${current}"`);
+    const frame = frames[frames.length - 1];
+    if (!frame) unreachable("tick: frame stack is empty");
+    const node = frame.flow.nodes.get(frame.current);
+    if (!node) throw new Error(`graph "${frame.flow.name}" has no node "${frame.current}"`);
+    const parent = frame.useNodeId !== undefined ? { parent: frame.useNodeId } : {};
 
-    if (node.kind === "finish") return [{ node: current, status: "done", result: currentInput }];
+    if (node.kind === "finish") {
+      if (frames.length === 1) {
+        return [{ node: frame.current, status: "done", result: frame.currentInput }];
+      }
+      // Pop: fold this frame's terminal value back into the enclosing one,
+      // exactly like driveUseNode's own tail — a single output event tagged
+      // with the *outer* use node's id, then follow its edge.
+      const finished = frame;
+      frames.pop();
+      const below = frames[frames.length - 1];
+      const useNodeId = finished.useNodeId;
+      if (!below || useNodeId === undefined)
+        unreachable("tick: popped frame missing its enclosing use-node id");
+      const edge = commitOutput(
+        runtime,
+        currentThread.id,
+        below.flow.edges,
+        useNodeId,
+        finished.currentInput,
+        stepIdentity(useNodeId),
+      );
+      const followed = follow(edge, currentThread);
+      currentThread = followed.thread;
+      below.current = followed.to;
+      below.currentInput = finished.currentInput;
+      below.reason = edge.reason;
+      continue;
+    }
 
     if (node.kind === "waitFor") {
-      if (ranStep) return [{ node: current, status: "active" }];
-      const kinds = [node.messageKind, ...interrupts.map((interrupt) => interrupt.messageKind)];
+      if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
+      const kinds = [
+        node.messageKind,
+        ...frame.interrupts.map((interrupt) => interrupt.messageKind),
+      ];
       const message = runtime.store.consume(
         (candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind),
       );
-      if (!message) return [{ node: current, status: "parked", waitingFor: kinds }];
+      if (!message)
+        return [{ node: frame.current, status: "parked", waitingFor: kinds, ...parent }];
 
       runtime.store.append({ message }, { type: "message", threadId: currentThread.id });
       pushMessage(currentThread, message);
 
-      const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
+      const interrupt = frame.interrupts.find(
+        (candidate) => candidate.messageKind === message.kind,
+      );
       if (interrupt) {
-        const stepContext: StepContext = { ...context, inputs: [message] };
+        const stepContext: StepContext = { ...frame.context, inputs: [message] };
         const emit = await runStep(interrupt.run, stepContext);
         if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
         const edge = commitOutput(
           runtime,
           currentThread.id,
-          flow.edges,
+          frame.flow.edges,
           interrupt.id,
           emit.output,
           {
@@ -1306,84 +1673,135 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         );
         const followed = follow(edge, currentThread);
         currentThread = followed.thread;
-        current = followed.to;
-        currentInput = emit.output;
+        frame.current = followed.to;
+        frame.currentInput = emit.output;
         ranStep = true;
-        reason = edge.reason;
+        frame.reason = edge.reason;
       } else {
-        const edge = advance(flow.edges, current, message);
+        const edge = advance(frame.flow.edges, frame.current, message);
         const followed = follow(edge, currentThread);
         currentThread = followed.thread;
-        current = followed.to;
-        currentInput = { ok: true } satisfies WaitForResult;
-        reason = edge.reason;
+        frame.current = followed.to;
+        frame.currentInput = { ok: true } satisfies WaitForResult;
+        frame.reason = edge.reason;
       }
       continue;
     }
 
     if (node.kind === "use") {
-      if (ranStep) return [{ node: current, status: "active" }];
-      const entryNode = node.subgraph.nodes.get(node.subgraph.entry);
-      if (entryNode?.kind === "waitFor") {
-        const kinds = [
-          entryNode.messageKind,
-          ...interrupts.map((interrupt) => interrupt.messageKind),
-        ];
-        const ready = runtime.store
-          .inbox()
-          .some((candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind));
-        if (!ready) notImplemented("tick: use node's subgraph starts with an unready waitFor");
-      }
-      const routed = await driveUseNode(
-        node,
-        current,
-        currentThread,
-        reason,
-        currentInput,
-        flow,
-        runtime,
+      if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
+
+      // The subgraph's initial prompt — same seed rule as driveUseNode's own
+      // (the reaching edge's prompt, a real Message reaching this node
+      // directly, or the thread's last message as fallback) — logged once
+      // here the same way regardless of which of those it came from.
+      const fallback: Message | undefined = currentThread.messages.at(-1);
+      const seed: Message | undefined =
+        frame.reason ?? (looksLikeMessage(frame.currentInput) ? frame.currentInput : fallback);
+      if (!seed) throw new Error("use node has no message to seed its subgraph with");
+      if (!frame.reason) pushMessage(currentThread, seed);
+      runtime.store.append({ message: seed }, { type: "message", threadId: currentThread.id });
+
+      frames.push(
+        buildLiveFrame(
+          {
+            flow: node.subgraph,
+            useNodeId: frame.current,
+            current: node.subgraph.entry,
+            currentInput: seed,
+          },
+          runtime,
+          getThread,
+        ),
       );
-      currentThread = routed.thread;
-      currentInput = routed.input;
-      reason = routed.reason;
-      current = routed.to;
-      ranStep = true;
       continue;
     }
 
     if (node.kind !== "step") notImplemented(`tick: node kind "${node.kind}"`);
 
-    if (ranStep) return [{ node: current, status: "active" }];
+    if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
 
     if (node.label) currentThread = { ...currentThread, label: node.label };
 
-    const stepContext: StepContext = { ...context, inputs: [currentInput] };
+    const inputs = pendingInputs ?? [frame.currentInput];
+    pendingInputs = undefined;
+
+    // Validate JoinStep tagging the same way driveGraph does for runFlow —
+    // a join()-tagged node reached with a single input, or a converging
+    // node not tagged with join(), is a wiring mistake worth catching here
+    // too, not only when driven through runFlow.
+    if ((node.run as { join?: boolean }).join === true && inputs.length < 2) {
+      throw new Error(
+        `node "${frame.current}" is tagged with join() but was reached as a plain step — ` +
+          `it must be the convergence point of a fan-out`,
+      );
+    }
+    if ((node.run as { join?: boolean }).join !== true && inputs.length >= 2) {
+      throw new Error(
+        `node "${frame.current}" is the convergence point of a fan-out but was not defined with join() — ` +
+          `wrap its step with join(...) to declare it expects every branch's output`,
+      );
+    }
+
+    const stepContext: StepContext = { ...frame.context, inputs };
     const emit = await runStep(node.run, stepContext);
+
+    if ("output" in emit) {
+      const branchTargets = thenEdges(frame.flow.edges, frame.current).map((edge) => edge.to);
+      if (branchTargets.length > 1) {
+        // Same detection driveStepEmit uses, but tick spawns per-branch
+        // cursors instead of running every branch to completion in one
+        // Promise.all — see advanceFanOutGroup. Only ever reconstructed at
+        // the outermost frame — see replayPosition's own matching guard.
+        if (frames.length > 1) notImplemented("tick: fan-out inside a used subgraph");
+        appendOutput(
+          runtime,
+          currentThread.id,
+          emit.output,
+          stepIdentity(frame.current, node.label),
+        );
+        const group: FanOutGroup = {
+          fanOutNodeId: frame.current,
+          joinNodeId: findJoinNode(branchTargets, frame.current, frame.flow),
+          mainThread: currentThread,
+          branches: branchTargets.map((target) => ({
+            target,
+            current: target,
+            currentInput: emit.output,
+            started: false,
+            done: false,
+          })),
+        };
+        return group.branches.map((branch) => branchCursorState(branch, group));
+      }
+    }
+
     const outcome = await driveStepEmit(
       emit,
       node,
-      current,
+      frame.current,
       currentThread,
-      flow,
+      frame.flow,
       runtime,
       attemptsByNode,
     );
 
     if (outcome.kind === "retry") continue;
-    if (outcome.pendingInputs) notImplemented("tick: fan-out");
+    if (outcome.pendingInputs)
+      unreachable("tick: driveStepEmit reported a fan-out after tick's own check ruled it out");
 
     currentThread = outcome.thread;
-    currentInput = outcome.input;
-    reason = outcome.reason;
-    current = outcome.to;
+    frame.currentInput = outcome.input;
+    frame.reason = outcome.reason;
+    frame.current = outcome.to;
     ranStep = true;
   }
 }
 
-/** Calls `tick` until it stops advancing — either suspended at a `waitFor`, or done. */
+/** Calls `tick` until it stops advancing — every cursor either parked or done. */
 export async function tickUntilSuspended(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
   for (;;) {
     const outcome = await tick(flow, runtime);
-    if (outcome[0]?.status !== "active") return outcome;
+    if (outcome.every((cursor) => cursor.status !== "active")) return outcome;
   }
 }
