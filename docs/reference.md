@@ -290,7 +290,6 @@ the step's own thread — deltas broadcast live, then `commit`/`abort` finalizes
 event into the log, same as a model call's own internal stream. A restarted node
 needs no special channel: `invalidate`
 pushes its `reason` onto the thread, so a rerun agent reads it among its messages.
-pushes its `reason` onto the thread, so a rerun agent reads it among its messages.
 
 ```ts
 interface StepContext {
@@ -769,6 +768,9 @@ Behaviour: `retry` re-runs the step after `after` ms and bumps `attempts`; `fail
 halts the flow and `runFlow` rejects. `retryable` is only an advisory hint from the
 raiser — the handler owns the policy. A default handler runs last: it retries
 `retryable` errors with exponential backoff up to a small cap, otherwise fails.
+
+A handler with this shape (the built-in default uses the same pattern, with its
+own small cap and base delay — not necessarily these exact numbers):
 
 ```ts
 const backoff: ErrorHandler = (error, { attempts }) =>
