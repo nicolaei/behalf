@@ -97,9 +97,28 @@ function advance(edges: readonly EdgeDefinition[], from: NodeId, output: unknown
   };
 }
 
+/** A step's identity for logging purposes — its node id, and its declared label, if any. */
+interface StepIdentity {
+  stepId: NodeId;
+  stepName?: string;
+}
+
 /** Appends a node's output event to the log — shared by every path that produces one. */
-function appendOutput(runtime: Runtime, threadId: ThreadId, output: unknown): void {
-  runtime.store.append({ value: output }, { type: "output", threadId });
+function appendOutput(
+  runtime: Runtime,
+  threadId: ThreadId,
+  output: unknown,
+  step: StepIdentity,
+): void {
+  runtime.store.append(
+    { value: output },
+    {
+      type: "output",
+      threadId,
+      stepId: step.stepId,
+      ...(step.stepName ? { stepName: step.stepName } : {}),
+    },
+  );
 }
 
 /** Logs a step's output and follows the resulting edge — the shared tail of every node that emits one. */
@@ -109,8 +128,9 @@ function commitOutput(
   edges: readonly EdgeDefinition[],
   from: NodeId,
   output: unknown,
+  step: StepIdentity,
 ): Advance {
-  appendOutput(runtime, threadId, output);
+  appendOutput(runtime, threadId, output, step);
   return advance(edges, from, output);
 }
 
@@ -414,7 +434,10 @@ async function runBranch(
     notImplemented(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
   }
 
-  appendOutput(runtime, branchThread.id, emit.output);
+  appendOutput(runtime, branchThread.id, emit.output, {
+    stepId: node,
+    ...(nodeDef.label ? { stepName: nodeDef.label } : {}),
+  });
 
   const joinEdge = flow.edges.find((edge) => edge.from === node && edge.edge === "join");
   if (!joinEdge) throw new Error(`fan-out branch "${node}" has no join edge`);
@@ -532,7 +555,9 @@ async function driveGraph(
       currentThread = result.thread;
       currentInput = result.output;
 
-      const edge = commitOutput(runtime, currentThread.id, flow.edges, current, result.output);
+      const edge = commitOutput(runtime, currentThread.id, flow.edges, current, result.output, {
+        stepId: current,
+      });
       reason = edge.reason;
       ({ thread: currentThread, to: current } = follow(edge, currentThread));
       continue;
@@ -559,7 +584,16 @@ async function driveGraph(
         const emit = await runStep(interrupt.run, stepContext);
         if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
         currentInput = emit.output;
-        const edge = commitOutput(runtime, currentThread.id, flow.edges, interrupt.id, emit.output);
+        const edge = commitOutput(
+          runtime,
+          currentThread.id,
+          flow.edges,
+          interrupt.id,
+          emit.output,
+          {
+            stepId: interrupt.id,
+          },
+        );
         reason = edge.reason;
         ({ thread: currentThread, to: current } = follow(edge, currentThread));
         continue;
@@ -647,7 +681,10 @@ async function driveGraph(
 
     const branchTargets: NodeId[] = thenEdges(flow.edges, current).map((edge) => edge.to);
     if (branchTargets.length > 1) {
-      appendOutput(runtime, currentThread.id, emit.output);
+      appendOutput(runtime, currentThread.id, emit.output, {
+        stepId: current,
+        ...(node.label ? { stepName: node.label } : {}),
+      });
       const results: { output: unknown; joinTo: NodeId }[] = await Promise.all(
         branchTargets.map((branch: NodeId) =>
           runBranch(
@@ -676,7 +713,10 @@ async function driveGraph(
     }
 
     currentInput = emit.output;
-    const edge = commitOutput(runtime, currentThread.id, flow.edges, current, emit.output);
+    const edge = commitOutput(runtime, currentThread.id, flow.edges, current, emit.output, {
+      stepId: current,
+      ...(node.label ? { stepName: node.label } : {}),
+    });
     reason = edge.reason;
     ({ thread: currentThread, to: current } = follow(edge, currentThread));
   }
