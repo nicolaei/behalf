@@ -20,7 +20,7 @@ export interface SessionStore {
     event: Event[EventType],
     meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId },
   ): void;
-  open(pending: {
+  open(meta: {
     correlationId: string;
     type: EventType;
     stepId: string;

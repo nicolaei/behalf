@@ -47,7 +47,7 @@ export function memoryStore(): SessionStore {
       } as Envelope);
     },
 
-    open(pending: {
+    open(meta: {
       correlationId: string;
       type: EventType;
       stepId: string;
@@ -61,10 +61,10 @@ export function memoryStore(): SessionStore {
         log.push({
           form: "committed",
           sessionId: "" as SessionId,
-          threadId: pending.threadId,
-          stepId: pending.stepId,
-          stepName: pending.stepName,
-          type: pending.type,
+          threadId: meta.threadId,
+          stepId: meta.stepId,
+          stepName: meta.stepName,
+          type: meta.type,
           event,
           sequence,
           at: Date.now(),

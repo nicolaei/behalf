@@ -137,13 +137,22 @@ async function waitForMessage(
   }
 }
 
-/** Parks until an abort message reaches the inbox — same polling shape as `waitForMessage`. */
-async function waitForAbort(store: SessionStore): Promise<UserMessage> {
-  for (;;) {
+/**
+ * Parks until an abort message reaches the inbox — same polling shape as
+ * `waitForMessage` — but stops the moment `isCancelled` says the race that
+ * started it has already been decided some other way, so it doesn't keep
+ * draining the inbox for the rest of the process's life.
+ */
+async function waitForAbort(
+  store: SessionStore,
+  isCancelled: () => boolean,
+): Promise<UserMessage | undefined> {
+  while (!isCancelled()) {
     const message = store.consume((candidate) => candidate.intent === "abort");
     if (message) return message;
     await new Promise((resolve) => setTimeout(resolve, 0));
   }
+  return undefined;
 }
 
 interface InterruptNode {
@@ -254,17 +263,21 @@ async function runModelCall(
     threadId: context.thread.id,
   });
 
+  let modelSettled = false;
   const outcome = await Promise.race([
     port
       .respond(profile, context.thread.messages, stream)
-      .then((message): { kind: "reply"; message: AssistantMessage } => ({
-        kind: "reply",
-        message,
-      })),
-    waitForAbort(runtime.store).then((): { kind: "abort" } => ({ kind: "abort" })),
+      .then((message): { kind: "reply"; message: AssistantMessage } => {
+        modelSettled = true;
+        return { kind: "reply", message };
+      }),
+    waitForAbort(runtime.store, () => modelSettled).then(
+      (message): { kind: "abort" } | { kind: "reply"; message: AssistantMessage } | undefined =>
+        message ? { kind: "abort" } : undefined,
+    ),
   ]);
 
-  if (outcome.kind === "abort") {
+  if (!outcome || outcome.kind === "abort") {
     stream.abort();
     throw new Error("model call aborted");
   }
