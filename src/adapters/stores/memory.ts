@@ -21,9 +21,9 @@ class AsyncQueue<T> implements AsyncIterable<T> {
   [Symbol.asyncIterator](): AsyncIterator<T> {
     return {
       next: (): Promise<IteratorResult<T>> => {
-        const value = this.buffered.shift();
-        if (value !== undefined || this.buffered.length > 0) {
-          return Promise.resolve({ value: value as T, done: false });
+        if (this.buffered.length > 0) {
+          const value = this.buffered.shift() as T;
+          return Promise.resolve({ value, done: false });
         }
         return new Promise((resolve) => this.waiting.push(resolve));
       },
