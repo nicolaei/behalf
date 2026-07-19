@@ -26,5 +26,39 @@ export default defineConfig([
     extends: [tseslint.configs.recommended],
   },
 
+  // Acceptance tests are black-box against the public surface.
+  // They may only import from ../../index.js (public API) or ../../testing
+  // (future public test helpers). Internal engine/flow/adapter/session/gateway
+  // modules are off-limits.
+  {
+    files: ["src/tests/acceptance/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              // Acceptance tests are black-box against the public surface.
+              // That surface is index.ts (@public exports) plus src/testing
+              // (its own public entry point for test authors) — everything
+              // else here is an internal implementation detail these tests
+              // must not reach into directly, even to make a test easier
+              // to write.
+              group: [
+                "../../engine/*",
+                "../../flow/*",
+                "../../adapters/*",
+                "../../session/*",
+                "../../gateway/*",
+              ],
+              message:
+                "Acceptance tests are black-box — import from ../../index.js or ../../testing (both public), not internal modules directly.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   eslintConfigPrettier,
 ]);
