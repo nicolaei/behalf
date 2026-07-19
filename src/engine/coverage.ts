@@ -58,11 +58,11 @@ function personasIn(graph: Graph, profiles: Profile[], seen: Set<Graph>): void {
   seen.add(graph);
 
   for (const node of graph.nodes.values()) {
-    collectFromNode(node, profiles, seen);
+    gatherPersonasFromNode(node, profiles, seen);
   }
 }
 
-function collectFromNode(node: NodeKind, profiles: Profile[], seen: Set<Graph>): void {
+function gatherPersonasFromNode(node: NodeKind, profiles: Profile[], seen: Set<Graph>): void {
   if (node.kind === "step" || node.kind === "interrupt") {
     if (isPersonaStep(node.run)) profiles.push(node.run.persona);
   } else if (node.kind === "use") {

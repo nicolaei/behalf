@@ -21,6 +21,9 @@ import {
   unreachable,
 } from "./errors.js";
 
+/** The unimplemented tool-handler delta sink every StepContext gets until streaming to tools is implemented — one shared instance instead of a fresh literal at each call site. */
+const unimplementedStream: DeltaSink = { delta: () => notImplemented("stream") };
+
 /** What a flow runs against — model resolution, bindings, and store. */
 export interface Runtime {
   readonly models: (model: Model) => ModelPort;
@@ -473,24 +476,16 @@ async function handleStepError(
 interface StepContextConfig {
   getThread: () => Thread;
   inputs: unknown[];
-  stream: DeltaSink;
-  openStream: (type: EventType) => Stream;
+  stream: DeltaSink; // the (currently unimplemented) tool-handler delta sink
+  openStream: (type: EventType) => Stream; // on-demand stream factory model calls and steps use to create a logged event
   modelCall: (profile: Profile) => Promise<ModelCallResult>;
   callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
-  compact: (
-    replace: (messages: Message[]) => Promise<Message[]>,
-    meta?: unknown,
-  ) => Promise<Emit<Message[]>>;
-  invalidate: (
-    target: NodeId,
-    options?: { threadAction?: ThreadAction; reason?: Message },
-  ) => Emit<never>;
 }
 
 /**
  * Builds a `StepContext` from whatever differs between where it runs — the
  * main drive loop or a fan-out branch. Both call this one factory so a later
- * change (filling in a branch's `call`/`compact`/`invalidate` stubs) touches
+ * change (filling in a branch's `call` stub) touches
  * one place instead of two parallel builders.
  */
 function makeStepContext(config: StepContextConfig): StepContext {
@@ -506,8 +501,17 @@ function makeStepContext(config: StepContextConfig): StepContext {
     output<Result>(value: Result): Emit<Result> {
       return { output: value };
     },
-    compact: config.compact,
-    invalidate: config.invalidate,
+    async compact(replace, meta): Promise<Emit<Message[]>> {
+      const messages = await replace(config.getThread().messages);
+      return { compact: messages, ...(meta !== undefined ? { meta } : {}) };
+    },
+    invalidate(target, options): Emit<never> {
+      return {
+        invalidate: target,
+        threadAction: options?.threadAction ?? "same",
+        ...(options?.reason ? { reason: options.reason } : {}),
+      };
+    },
     fail(error: StepError): Emit<never> {
       return { error };
     },
@@ -545,32 +549,22 @@ async function runBranch(
   // machinery only ever builds a step's node.run against a branch context.
   if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
   if (nodeDef.label) branchThread = { ...branchThread, label: nodeDef.label };
+  const nodeIdentity = stepIdentity(node, nodeDef.label);
 
   const branchContext = makeStepContext({
     getThread: () => branchThread,
     inputs: [input],
-    stream: { delta: () => notImplemented("stream") },
+    stream: unimplementedStream,
     openStream: (type) =>
       runtime.store.open({
         correlationId: freshCorrelationId(),
         type,
         threadId: branchThread.id,
-        ...stepIdentity(node, nodeDef.label),
+        ...nodeIdentity,
       }),
     modelCall: (profile) => runModelCall(profile, branchContext, runtime),
     callTool: (tool, toolInput) =>
       callTool(tool, toolInput, branchThread.id, branchContext.stream, runtime),
-    async compact(replace, meta): Promise<Emit<Message[]>> {
-      const messages = await replace(branchThread.messages);
-      return { compact: messages, ...(meta !== undefined ? { meta } : {}) };
-    },
-    invalidate(target, options): Emit<never> {
-      return {
-        invalidate: target,
-        threadAction: options?.threadAction ?? "same",
-        ...(options?.reason ? { reason: options.reason } : {}),
-      };
-    },
   });
 
   const joinEdge = flow.edges.find((edge) => edge.from === node && edge.edge === "join");
@@ -594,7 +588,7 @@ async function runBranch(
     if (!("output" in emit))
       unreachable(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
 
-    appendOutput(runtime, branchThread.id, emit.output, stepIdentity(node, nodeDef.label));
+    appendOutput(runtime, branchThread.id, emit.output, nodeIdentity);
     return { kind: "output", output: emit.output, joinTo: joinEdge.to };
   }
 }
@@ -800,6 +794,18 @@ interface DriveResult {
   output: unknown;
 }
 
+/** Guards that a node is currently running (`current` is set) and looks up its identity — shared by `driveGraph`'s `openStream` and `modelCall`, whose "no running node" guards differ only in their error message. */
+function currentNodeIdentity(
+  current: NodeId | undefined,
+  flow: Graph,
+  errorMessage: string,
+): StepIdentity {
+  if (!current) throw new Error(errorMessage);
+  const node = flow.nodes.get(current);
+  const label = node?.kind === "step" ? node.label : undefined;
+  return stepIdentity(current, label);
+}
+
 /**
  * Drives one graph from its entry node to its `finish` node: runs each step,
  * follows the edge its output selects, mutates the thread as edges and
@@ -829,37 +835,28 @@ async function driveGraph(
   const context = makeStepContext({
     getThread: () => currentThread,
     inputs: [],
-    stream: { delta: () => notImplemented("stream") },
+    stream: unimplementedStream,
     openStream: (type) => {
-      if (!current) throw new Error("openStream called outside a running node");
-      const node = flow.nodes.get(current);
-      const label = node?.kind === "step" ? node.label : undefined;
+      const identity = currentNodeIdentity(
+        current,
+        flow,
+        "openStream called outside a running node",
+      );
       return runtime.store.open({
         correlationId: freshCorrelationId(),
         type,
         threadId: currentThread.id,
-        ...stepIdentity(current, label),
+        ...identity,
       });
     },
     modelCall(profile): Promise<ModelCallResult> {
       // modelCall only ever runs while a node is being processed inside the
       // loop below, so `current` is always set at that point.
-      if (!current) throw new Error("modelCall called outside a running node");
+      currentNodeIdentity(current, flow, "modelCall called outside a running node");
       return runModelCall(profile, context, runtime);
     },
     callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
       return callTool(tool, input, currentThread.id, context.stream, runtime);
-    },
-    async compact(replace, meta): Promise<Emit<Message[]>> {
-      const messages = await replace(currentThread.messages);
-      return { compact: messages, ...(meta !== undefined ? { meta } : {}) };
-    },
-    invalidate(target, options): Emit<never> {
-      return {
-        invalidate: target,
-        threadAction: options?.threadAction ?? "same",
-        ...(options?.reason ? { reason: options.reason } : {}),
-      };
     },
   });
 

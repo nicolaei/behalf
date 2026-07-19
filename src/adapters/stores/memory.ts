@@ -6,6 +6,8 @@ import type { UserMessage, Message } from "../../flow/message.js";
 import type { Envelope, Event, EventType, SessionId, Delta } from "../../session/index.js";
 import type { ThreadId } from "../../flow/thread.js";
 
+// The dev-only store never resolves a real session — every envelope carries this placeholder instead.
+const UNSET_SESSION_ID = "" as SessionId;
 // A pull-based queue: `push` delivers a value immediately to a waiting `next()`
 // caller, or buffers it if nobody is waiting yet. Backs each `changes()`
 // subscriber with its own live feed of envelopes.
@@ -43,7 +45,7 @@ function buildEnvelope(
 ): Envelope {
   return {
     form: "committed",
-    sessionId: "" as SessionId,
+    sessionId: UNSET_SESSION_ID,
     threadId: meta.threadId,
     stepId: meta.stepId,
     stepName: meta.stepName,
@@ -115,7 +117,7 @@ export function memoryStore(): SessionStore {
           deltas.push(part); // accumulated for `abort`, never persisted themselves
           broadcast({
             form: "delta",
-            sessionId: "" as SessionId,
+            sessionId: UNSET_SESSION_ID,
             threadId: meta.threadId,
             stepId: meta.stepId,
             correlationId: meta.correlationId,
