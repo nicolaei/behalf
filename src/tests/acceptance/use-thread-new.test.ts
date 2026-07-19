@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, userText, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
 
-describe.skip("a `use` node reached with threadAction: 'new'", () => {
+describe("a `use` node reached with threadAction: 'new'", () => {
   const inner = defineGraph("inner-fresh", (flow) => {
     const echo = flow.step(outputs((context) => context.thread.messages.length));
     flow.entry(echo);
