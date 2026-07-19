@@ -5,7 +5,7 @@ import { neverCalled, loggedEventTypes } from "./support.js";
 // Every scenario here needs context.openStream to be real — it's currently a
 // notImplemented stub in both the main-loop and branch StepContext builders.
 // Written now so the shape is pinned down before that slice starts.
-describe.skip("a step can open its own stream", () => {
+describe("a step can open its own stream", () => {
   it("commits an event to the log when the opened stream is committed", async () => {
     const graph = defineGraph("opens-and-commits-stream", (flow) => {
       const emit = flow.step((context) => {
