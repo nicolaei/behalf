@@ -40,6 +40,9 @@ export interface Runtime {
 /** Resolves every `kind === "toolset"` binding's members (via its `discover()`, called exactly once) merged with every `kind === "tool"` binding — a single name-keyed lookup `findToolBinding` reads from. Keyed off the returned `Runtime` in a module-scoped `WeakMap` rather than the public type, so this stays an implementation detail (see docs/reference.md's `Runtime` interface). */
 const resolvedTools = new WeakMap<Runtime, Map<string, ToolHandler>>();
 
+/** A `runtime()` config's custom `idFactory`, if it supplied one — same WeakMap-keyed-off-Runtime pattern as `resolvedTools`. Absent means the default counter-based ids (see `defaultCorrelationId`/`defaultThreadId`) apply, unchanged from before ids became injectable. */
+const idFactories = new WeakMap<Runtime, () => string>();
+
 /** Expands every binding into one name -> handler map: direct tool bindings as-is, toolset bindings via their `discover()`, called once each. */
 async function expandToolsets(bindings: Binding[]): Promise<Map<string, ToolHandler>> {
   const resolved = new Map<string, ToolHandler>();
@@ -62,6 +65,7 @@ export async function runtime(config: {
   bindings: Binding[];
   store: SessionStore;
   errorHandlers?: ErrorHandler[]; // consulted on a step error; a default retry handler runs last
+  idFactory?: () => string; // generates every fresh correlation/thread id; omit for the default counters
 }): Promise<Runtime> {
   const ready: Runtime = {
     models: config.models,
@@ -70,6 +74,7 @@ export async function runtime(config: {
     errorHandlers: [...(config.errorHandlers ?? []), defaultErrorHandler],
   };
   resolvedTools.set(ready, await expandToolsets(config.bindings));
+  if (config.idFactory) idFactories.set(ready, config.idFactory);
   return ready;
 }
 
@@ -173,8 +178,39 @@ function commitOutput(
 }
 
 /** Applies an edge's threadAction and reports where it leads — the shared tail of following any edge. */
-function follow(edge: Advance, thread: Thread): { thread: Thread; to: NodeId } {
-  return { thread: applyThreadAction(thread, edge.threadAction, edge.reason), to: edge.to };
+function follow(edge: Advance, thread: Thread, runtime: Runtime): { thread: Thread; to: NodeId } {
+  return {
+    thread: applyThreadAction(thread, edge.threadAction, edge.reason, runtime),
+    to: edge.to,
+  };
+}
+
+/** Advances from a node's output and follows the resulting edge, in one step — the combining query every call site that never uses `advance`'s result for anything but an immediate `follow` was writing out by hand. */
+function route(
+  edges: readonly EdgeDefinition[],
+  from: NodeId,
+  output: unknown,
+  thread: Thread,
+  runtime: Runtime,
+): RouteResult {
+  const edge = advance(edges, from, output);
+  const followed = follow(edge, thread, runtime);
+  return { thread: followed.thread, input: output, reason: edge.reason, to: followed.to };
+}
+
+/** Logs a step's output and routes from it, in one step — `route`, plus the log line `commitOutput` folds in on top of `advance`. */
+function commitRoute(
+  runtime: Runtime,
+  threadId: ThreadId,
+  edges: readonly EdgeDefinition[],
+  from: NodeId,
+  output: unknown,
+  step: StepIdentity,
+  thread: Thread,
+): RouteResult {
+  const edge = commitOutput(runtime, threadId, edges, from, output, step);
+  const followed = follow(edge, thread, runtime);
+  return { thread: followed.thread, input: output, reason: edge.reason, to: followed.to };
 }
 
 /** Appends `message` to both a thread's assembled view and its full history — the shared tail of every path that folds one in. */
@@ -263,7 +299,7 @@ function buildToolContext(
     thread: threadId,
     openStream: (type) =>
       runtime.store.open({
-        correlationId: freshCorrelationId(),
+        correlationId: freshCorrelationId(runtime),
         type,
         threadId,
         ...identity,
@@ -370,15 +406,29 @@ async function runModelCall(
 }
 
 let nextCorrelationId = 0;
-function freshCorrelationId(): string {
+/** The default correlation-id generator: an ever-incrementing module counter, unchanged from before ids became injectable via `runtime()`'s `idFactory`. */
+function defaultCorrelationId(): string {
   nextCorrelationId += 1;
   return `correlation-${String(nextCorrelationId)}`;
 }
 
 let nextThreadId = 0;
-function freshThreadId(): ThreadId {
+/** The default thread-id generator: an ever-incrementing module counter, unchanged from before ids became injectable via `runtime()`'s `idFactory`. */
+function defaultThreadId(): string {
   nextThreadId += 1;
-  return `thread-${String(nextThreadId)}` as ThreadId;
+  return `thread-${String(nextThreadId)}`;
+}
+
+/** A fresh correlation id for a logged event — the runtime's own `idFactory` if `runtime()` was given one, else the default counter. */
+function freshCorrelationId(runtime: Runtime): string {
+  const custom = idFactories.get(runtime);
+  return custom ? custom() : defaultCorrelationId();
+}
+
+/** A fresh thread id — the runtime's own `idFactory` if `runtime()` was given one, else the default counter. */
+function freshThreadId(runtime: Runtime): ThreadId {
+  const custom = idFactories.get(runtime);
+  return (custom ? custom() : defaultThreadId()) as ThreadId;
 }
 
 type Thread = StepContext["thread"];
@@ -394,10 +444,11 @@ function applyThreadAction(
   current: Thread,
   threadAction: ThreadAction,
   reason: Message | undefined,
+  runtime: Runtime,
 ): Thread {
   if (threadAction === "new") {
     const messages = reason ? [reason] : [];
-    return { id: freshThreadId(), messages, history: [...messages] };
+    return { id: freshThreadId(runtime), messages, history: [...messages] };
   }
 
   if (threadAction === "fork") {
@@ -406,7 +457,7 @@ function applyThreadAction(
     const forked = { messages, history };
     if (reason) pushMessage(forked, reason);
     return {
-      id: freshThreadId(),
+      id: freshThreadId(runtime),
       forkedFrom: { thread: current.id, at: current.history.length },
       messages,
       history,
@@ -421,6 +472,22 @@ function applyThreadAction(
 /** The `then` edges leaving a node, in declared order — more than one means a fan-out. */
 function thenEdges(edges: readonly EdgeDefinition[], from: NodeId): EdgeDefinition[] {
   return edges.filter((candidate) => candidate.from === from && candidate.edge === "then");
+}
+
+/** Validates a step's inputs against its join() tagging: a join()-tagged step reached with fewer than two inputs was wired as a plain step; a step reached with two or more inputs (a fan-out's convergence point) but not tagged with join() forgot to declare it. Shared by driveGraph and tick, which each check this the same way right before running a step. */
+function assertJoinTagging(nodeId: NodeId, run: Step, inputs: unknown[]): void {
+  if ((run as { join?: boolean }).join === true && inputs.length < 2) {
+    throw new Error(
+      `node "${nodeId}" is tagged with join() but was reached as a plain step — ` +
+        `it must be the convergence point of a fan-out`,
+    );
+  }
+  if ((run as { join?: boolean }).join !== true && inputs.length >= 2) {
+    throw new Error(
+      `node "${nodeId}" is the convergence point of a fan-out but was not defined with join() — ` +
+        `wrap its step with join(...) to declare it expects every branch's output`,
+    );
+  }
 }
 
 /** Appends a compaction event and replaces a thread's messages/history — shared by the main-loop and branch paths since both commit a `compact` emit the same way. */
@@ -445,7 +512,7 @@ function commitInvalidation(
   emit: Extract<Emit, { invalidate: NodeId }>,
 ): StepOutcome {
   const invalidatedThreadId = thread.id;
-  const nextThread = applyThreadAction(thread, emit.threadAction, emit.reason);
+  const nextThread = applyThreadAction(thread, emit.threadAction, emit.reason, runtime);
   runtime.store.append(
     {
       target: emit.invalidate,
@@ -604,6 +671,13 @@ function findJoinNode(branchTargets: NodeId[], fanOutNodeId: NodeId, flow: Graph
   throw new Error(`fan-out from "${fanOutNodeId}": branches never converge on a common node`);
 }
 
+/** The context a fan-out branch step runs against — its graph, the runtime it calls into, and the shared per-node attempt counter — three values that travel together, unchanged, across a whole branch's run. */
+interface BranchContext {
+  flow: Graph;
+  runtime: Runtime;
+  attemptsByNode: Map<NodeId, number>;
+}
+
 /**
  * Runs one node inside a fan-out branch: builds its `StepContext`, retries on
  * error via the shared `handleStepError` path, commits a `compact` the same
@@ -614,14 +688,13 @@ function findJoinNode(branchTargets: NodeId[], fanOutNodeId: NodeId, flow: Graph
 async function runBranchNode(
   nodeId: NodeId,
   thread: Thread,
-  flow: Graph,
-  runtime: Runtime,
   input: unknown,
-  attemptsByNode: Map<NodeId, number>,
+  ctx: BranchContext,
 ): Promise<
   | { kind: "invalidate"; emit: Extract<Emit, { invalidate: NodeId }> }
   | { kind: "output"; output: unknown }
 > {
+  const { flow, runtime, attemptsByNode } = ctx;
   const nodeDef = flow.nodes.get(nodeId);
   if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${nodeId}"`);
   if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
@@ -632,7 +705,7 @@ async function runBranchNode(
     inputs: [input],
     openStream: (type) =>
       runtime.store.open({
-        correlationId: freshCorrelationId(),
+        correlationId: freshCorrelationId(runtime),
         type,
         threadId: thread.id,
         ...nodeIdentity,
@@ -681,12 +754,11 @@ async function runBranchNode(
 async function runBranch(
   startNode: NodeId,
   initialThread: Thread,
-  flow: Graph,
-  runtime: Runtime,
   input: unknown,
-  attemptsByNode: Map<NodeId, number>,
   joinNodeId: NodeId,
+  ctx: BranchContext,
 ): Promise<BranchResult> {
+  const { flow } = ctx;
   let currentNode = startNode;
   let currentThread = initialThread;
   let currentInput = input;
@@ -697,14 +769,7 @@ async function runBranch(
     if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
     if (nodeDef.label) currentThread = { ...currentThread, label: nodeDef.label };
 
-    const result = await runBranchNode(
-      currentNode,
-      currentThread,
-      flow,
-      runtime,
-      currentInput,
-      attemptsByNode,
-    );
+    const result = await runBranchNode(currentNode, currentThread, currentInput, ctx);
     if (result.kind === "invalidate") return result;
 
     // Follow the step's single outgoing then edge.
@@ -712,13 +777,18 @@ async function runBranch(
     if (!thenEdge)
       throw new Error(`fan-out branch step "${currentNode}" has no outgoing then edge`);
 
-    if (thenEdge.to === joinNodeId) {
-      return { kind: "output", output: result.output };
-    }
+    const branch = {
+      current: currentNode,
+      currentInput,
+      done: false,
+      output: undefined as unknown,
+    };
+    applyBranchEdge(branch, thenEdge, joinNodeId, result.output);
+    if (branch.done) return { kind: "output", output: branch.output };
 
     // Advance to the next step in this branch.
-    currentNode = thenEdge.to;
-    currentInput = result.output;
+    currentNode = branch.current;
+    currentInput = branch.currentInput;
   }
 }
 
@@ -761,16 +831,15 @@ async function driveUseNode(
 
   const result = await driveGraph(node.subgraph, runtime, thread, seed);
 
-  const edge = commitOutput(
+  return commitRoute(
     runtime,
     result.thread.id,
     flow.edges,
     nodeId,
     result.output,
     stepIdentity(nodeId),
+    result.thread,
   );
-  const followed = follow(edge, result.thread);
-  return { thread: followed.thread, input: result.output, reason: edge.reason, to: followed.to };
 }
 
 /**
@@ -805,21 +874,19 @@ async function driveWaitForNode(
     const emit = await runStep(interrupt.run, stepContext);
     // An interrupt step emitting anything but `output` isn't supported yet.
     if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
-    const edge = commitOutput(runtime, thread.id, flow.edges, interrupt.id, emit.output, {
-      stepId: interrupt.id,
-    });
-    const followed = follow(edge, thread);
-    return { thread: followed.thread, input: emit.output, reason: edge.reason, to: followed.to };
+    return commitRoute(
+      runtime,
+      thread.id,
+      flow.edges,
+      interrupt.id,
+      emit.output,
+      { stepId: interrupt.id },
+      thread,
+    );
   }
 
-  const edge = advance(flow.edges, nodeId, message);
-  const followed = follow(edge, thread);
-  return {
-    thread: followed.thread,
-    input: { ok: true } satisfies WaitForResult,
-    reason: edge.reason,
-    to: followed.to,
-  };
+  const routed = route(flow.edges, nodeId, message, thread, runtime);
+  return { ...routed, input: { ok: true } satisfies WaitForResult };
 }
 
 /** What handling a step's `Emit` decided: retry the same node, or advance to the next one. */
@@ -847,15 +914,7 @@ async function driveStepEmit(
 
   if ("compact" in emit) {
     commitCompaction(runtime, thread, emit.compact, emit.meta);
-    const edge = advance(flow.edges, nodeId, undefined);
-    const followed = follow(edge, thread);
-    return {
-      kind: "advance",
-      thread: followed.thread,
-      input: undefined,
-      reason: edge.reason,
-      to: followed.to,
-    };
+    return { kind: "advance", ...route(flow.edges, nodeId, undefined, thread, runtime) };
   }
 
   if ("error" in emit) {
@@ -873,16 +932,15 @@ async function driveStepEmit(
     // validates linearity (no nested fan-out) and that all branches share a
     // single common join, replacing the old per-branch joinEdge lookup.
     const joinNodeId = findJoinNode(branchTargets, nodeId, flow);
+    const ctx: BranchContext = { flow, runtime, attemptsByNode };
     const results: BranchResult[] = await Promise.all(
       branchTargets.map((branch: NodeId) =>
         runBranch(
           branch,
-          applyThreadAction(thread, "fork", undefined),
-          flow,
-          runtime,
+          applyThreadAction(thread, "fork", undefined, runtime),
           emit.output,
-          attemptsByNode,
           joinNodeId,
+          ctx,
         ),
       ),
     );
@@ -912,21 +970,17 @@ async function driveStepEmit(
     };
   }
 
-  const edge = commitOutput(
-    runtime,
-    thread.id,
-    flow.edges,
-    nodeId,
-    emit.output,
-    stepIdentity(nodeId, node.label),
-  );
-  const followed = follow(edge, thread);
   return {
     kind: "advance",
-    thread: followed.thread,
-    input: emit.output,
-    reason: edge.reason,
-    to: followed.to,
+    ...commitRoute(
+      runtime,
+      thread.id,
+      flow.edges,
+      nodeId,
+      emit.output,
+      stepIdentity(nodeId, node.label),
+      thread,
+    ),
   };
 }
 
@@ -972,7 +1026,7 @@ function buildDriveContext(
         "openStream called outside a running node",
       );
       return runtime.store.open({
-        correlationId: freshCorrelationId(),
+        correlationId: freshCorrelationId(runtime),
         type,
         threadId: getThread().id,
         ...identity,
@@ -1102,21 +1156,8 @@ async function driveGraph(
     if (node.label) currentThread = { ...currentThread, label: node.label };
 
     // Validate JoinStep tagging: a join()-tagged step must receive multiple
-    // inputs (from fan-out pendingInputs). Running one with a single input
-    // means it was wired as a plain step, which is a mistake the author
-    // should catch at run time rather than silently get wrong results.
-    if ((node.run as { join?: boolean }).join === true && inputs.length < 2) {
-      throw new Error(
-        `node "${current}" is tagged with join() but was reached as a plain step — ` +
-          `it must be the convergence point of a fan-out`,
-      );
-    }
-    if ((node.run as { join?: boolean }).join !== true && inputs.length >= 2) {
-      throw new Error(
-        `node "${current}" is the convergence point of a fan-out but was not defined with join() — ` +
-          `wrap its step with join(...) to declare it expects every branch's output`,
-      );
-    }
+    // inputs (from fan-out pendingInputs); see assertJoinTagging.
+    assertJoinTagging(current, node.run, inputs);
 
     const stepContext: StepContext = { ...context, inputs };
     const emit = await runStep(node.run, stepContext);
@@ -1154,7 +1195,7 @@ export async function runFlow(
   runtime: Runtime,
   options?: { parentThreadId?: ThreadId },
 ): Promise<unknown> {
-  const threadId = freshThreadId();
+  const threadId = freshThreadId(runtime);
   const thread: Thread = {
     id: threadId,
     ...(options?.parentThreadId ? { parentThreadId: options.parentThreadId } : {}),
@@ -1199,6 +1240,23 @@ interface BranchReplay {
   output?: unknown;
 }
 
+/** Applies a branch step's resolved `then` edge: reaching the join marks the branch done, holding its output and settling `current` on the step that just produced it (`thenEdge.from` — the node the caller just ran) so it stays there per `BranchReplay.current`'s own contract ("once done, it stays at the last chain node the branch actually ran"); otherwise advances `current`/`currentInput` to the edge's target. Shared by `runBranch`'s own loop state, `replayBranchOutput`, and `advanceFanOutGroup` — the three places a branch's step-to-step edge gets resolved — so all three settle a branch reaching its join the same way. */
+function applyBranchEdge(
+  branch: Pick<BranchReplay, "current" | "currentInput" | "done" | "output">,
+  thenEdge: EdgeDefinition,
+  joinNodeId: NodeId,
+  output: unknown,
+): void {
+  if (thenEdge.to === joinNodeId) {
+    branch.done = true;
+    branch.output = output;
+    branch.current = thenEdge.from;
+  } else {
+    branch.current = thenEdge.to;
+    branch.currentInput = output;
+  }
+}
+
 /**
  * A fan-out node's branches, forked off `mainThread` and walked one node at
  * a time across separate `tick()` calls — reconstructed from
@@ -1210,6 +1268,28 @@ interface FanOutGroup {
   joinNodeId: NodeId;
   mainThread: Thread;
   branches: BranchReplay[];
+}
+
+/** Builds a fan-out group from the branches a fan-out step's `then` edges reach: resolves their common join node and seeds one `BranchReplay` per branch, all starting at their own target with the step's output as their first input. Shared by `replayPosition`'s reconstruction of an in-flight fan-out and `tick`'s own live fan-out path, which both build the exact same group when a step's output turns out to fan out. */
+function buildFanOutGroup(
+  branchTargets: NodeId[],
+  fanOutNodeId: NodeId,
+  flow: Graph,
+  mainThread: Thread,
+  initialInput: unknown,
+): FanOutGroup {
+  return {
+    fanOutNodeId,
+    joinNodeId: findJoinNode(branchTargets, fanOutNodeId, flow),
+    mainThread,
+    branches: branchTargets.map((target) => ({
+      target,
+      current: target,
+      currentInput: initialInput,
+      started: false,
+      done: false,
+    })),
+  };
 }
 
 /** One level of a replayed `tick()` position — the outermost flow, or a `use` node's subgraph descended into it. `useNodeId` is the id, in the ENCLOSING frame's own flow, of the `use` node whose subgraph this frame reconstructs; absent only for the outermost (root) frame — which is also why it doubles as the `parent` a nested cursor reports. */
@@ -1278,14 +1358,7 @@ function replayBranchOutput(
   const thenEdge = flow.edges.find((edge) => edge.from === stepId && edge.edge === "then");
   if (!thenEdge) throw new Error(`fan-out branch step "${stepId}" has no outgoing then edge`);
 
-  if (thenEdge.to === group.joinNodeId) {
-    branch.done = true;
-    branch.output = value;
-    branch.current = stepId;
-  } else {
-    branch.current = thenEdge.to;
-    branch.currentInput = value;
-  }
+  applyBranchEdge(branch, thenEdge, group.joinNodeId, value);
 }
 
 /**
@@ -1315,14 +1388,14 @@ function replayBranchOutput(
  * an enclosing frame instead — the completion event `commitOutput` tags with
  * the `use` node's own (outer) id once its subgraph reaches `finish`.
  */
-function replayPosition(flow: Graph, store: SessionStore): ReplayResult {
-  let thread: Thread = { id: freshThreadId(), messages: [], history: [] };
+function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
+  let thread: Thread = { id: freshThreadId(runtime), messages: [], history: [] };
   let group: FanOutGroup | undefined;
   const frames: ReplayFrame[] = [{ flow, current: flow.entry, currentInput: undefined }];
   const root = frames[0];
   if (!root) unreachable("replayPosition: frame stack starts empty");
 
-  for (const envelope of store.events()) {
+  for (const envelope of runtime.store.events()) {
     if (envelope.form !== "committed") continue;
 
     if (group) {
@@ -1333,12 +1406,11 @@ function replayPosition(flow: Graph, store: SessionStore): ReplayResult {
           // The join already ran on an earlier tick call: the group folded
           // in the log itself. Resume ordinary single-line replay from here.
           thread = group.mainThread;
-          const edge = advance(flow.edges, stepId, value);
-          const followed = follow(edge, thread);
-          thread = followed.thread;
-          root.current = followed.to;
-          root.currentInput = value;
-          root.reason = edge.reason;
+          const routed = route(flow.edges, stepId, value, thread, runtime);
+          thread = routed.thread;
+          root.current = routed.to;
+          root.currentInput = routed.input;
+          root.reason = routed.reason;
           group = undefined;
         } else {
           replayBranchOutput(group, envelope.threadId, stepId, value, flow);
@@ -1382,27 +1454,15 @@ function replayPosition(flow: Graph, store: SessionStore): ReplayResult {
         // A fan-out node's own output: hand off to per-branch reconstruction
         // instead of `advance`, which would silently pick just the first
         // branch (see `selectEdge`) and desync from what actually ran.
-        group = {
-          fanOutNodeId: stepId,
-          joinNodeId: findJoinNode(branchTargets, stepId, top.flow),
-          mainThread: thread,
-          branches: branchTargets.map((target) => ({
-            target,
-            current: target,
-            currentInput: value,
-            started: false,
-            done: false,
-          })),
-        };
+        group = buildFanOutGroup(branchTargets, stepId, top.flow, thread, value);
         continue;
       }
 
-      const edge = advance(top.flow.edges, stepId, value);
-      const followed = follow(edge, thread);
-      thread = followed.thread;
-      top.current = followed.to;
-      top.currentInput = value;
-      top.reason = edge.reason;
+      const routed = route(top.flow.edges, stepId, value, thread, runtime);
+      thread = routed.thread;
+      top.current = routed.to;
+      top.currentInput = routed.input;
+      top.reason = routed.reason;
       continue;
     }
 
@@ -1414,12 +1474,11 @@ function replayPosition(flow: Graph, store: SessionStore): ReplayResult {
 
       if (node?.kind === "waitFor") {
         pushMessage(thread, message);
-        const edge = advance(top.flow.edges, top.current, message);
-        const followed = follow(edge, thread);
-        thread = followed.thread;
-        top.current = followed.to;
+        const routed = route(top.flow.edges, top.current, message, thread, runtime);
+        thread = routed.thread;
+        top.current = routed.to;
         top.currentInput = { ok: true } satisfies WaitForResult;
-        top.reason = edge.reason;
+        top.reason = routed.reason;
         continue;
       }
 
@@ -1495,34 +1554,25 @@ async function advanceFanOutGroup(
   const branch = group.branches.find((candidate) => !candidate.done);
   if (!branch) unreachable("advanceFanOutGroup: no unfinished branch in a fan-out group");
 
-  branch.thread ??= applyThreadAction(group.mainThread, "fork", undefined);
+  branch.thread ??= applyThreadAction(group.mainThread, "fork", undefined, runtime);
   let branchThread = branch.thread;
   const nodeDef = flow.nodes.get(branch.current);
   if (nodeDef?.kind === "step" && nodeDef.label)
     branchThread = { ...branchThread, label: nodeDef.label };
   branch.thread = branchThread;
 
-  const result = await runBranchNode(
-    branch.current,
-    branchThread,
+  const result = await runBranchNode(branch.current, branchThread, branch.currentInput, {
     flow,
     runtime,
-    branch.currentInput,
     attemptsByNode,
-  );
+  });
   if (result.kind === "invalidate") notImplemented("tick: fan-out branch invalidate");
 
   const thenEdge = flow.edges.find((edge) => edge.from === branch.current && edge.edge === "then");
   if (!thenEdge)
     throw new Error(`fan-out branch step "${branch.current}" has no outgoing then edge`);
 
-  if (thenEdge.to === group.joinNodeId) {
-    branch.done = true;
-    branch.output = result.output;
-  } else {
-    branch.current = thenEdge.to;
-    branch.currentInput = result.output;
-  }
+  applyBranchEdge(branch, thenEdge, group.joinNodeId, result.output);
 
   const folded = foldGroup(group);
   if (folded) return [{ node: folded.current, status: "active" }];
@@ -1540,22 +1590,27 @@ interface LiveFrame {
   context: StepContext;
 }
 
-/** Builds a `LiveFrame` from a replayed one, wiring its `StepContext` to read this exact frame's own (mutable) `current` through a closure — so a later push/pop only ever touches the frame objects themselves, never anything `buildDriveContext` captured. */
+/** Builds a `LiveFrame` from a replayed one, wiring its `StepContext` to read this exact frame's own (mutable) `current` through a closure over a holder cell — shared by the frame's own `current` accessor and `buildDriveContext`, so a later push/pop only ever touches the frame objects themselves, never anything `buildDriveContext` captured, and the frame is built complete and correctly-typed in one step (no incomplete-object cast). */
 function buildLiveFrame(
   replayFrame: ReplayFrame,
   runtime: Runtime,
   getThread: () => Thread,
 ): LiveFrame {
-  const frame = {
+  const holder = { current: replayFrame.current };
+  return {
     flow: replayFrame.flow,
-    useNodeId: replayFrame.useNodeId,
+    ...(replayFrame.useNodeId !== undefined ? { useNodeId: replayFrame.useNodeId } : {}),
     interrupts: findInterruptNodes(replayFrame.flow),
-    current: replayFrame.current,
+    get current() {
+      return holder.current;
+    },
+    set current(value: NodeId) {
+      holder.current = value;
+    },
     currentInput: replayFrame.currentInput,
-    reason: replayFrame.reason,
-  } as LiveFrame;
-  frame.context = buildDriveContext(frame.flow, runtime, () => frame.current, getThread);
-  return frame;
+    ...(replayFrame.reason !== undefined ? { reason: replayFrame.reason } : {}),
+    context: buildDriveContext(replayFrame.flow, runtime, () => holder.current, getThread),
+  };
 }
 
 /**
@@ -1583,7 +1638,7 @@ function buildLiveFrame(
  */
 export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
   const attemptsByNode = new Map<NodeId, number>();
-  const position = replayPosition(flow, runtime.store);
+  const position = replayPosition(flow, runtime);
 
   if (position.kind === "fanout") {
     return advanceFanOutGroup(position.group, flow, runtime, attemptsByNode);
@@ -1618,19 +1673,19 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       const useNodeId = finished.useNodeId;
       if (!below || useNodeId === undefined)
         unreachable("tick: popped frame missing its enclosing use-node id");
-      const edge = commitOutput(
+      const routed = commitRoute(
         runtime,
         currentThread.id,
         below.flow.edges,
         useNodeId,
         finished.currentInput,
         stepIdentity(useNodeId),
+        currentThread,
       );
-      const followed = follow(edge, currentThread);
-      currentThread = followed.thread;
-      below.current = followed.to;
-      below.currentInput = finished.currentInput;
-      below.reason = edge.reason;
+      currentThread = routed.thread;
+      below.current = routed.to;
+      below.currentInput = routed.input;
+      below.reason = routed.reason;
       continue;
     }
 
@@ -1656,29 +1711,26 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         const stepContext: StepContext = { ...frame.context, inputs: [message] };
         const emit = await runStep(interrupt.run, stepContext);
         if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
-        const edge = commitOutput(
+        const routed = commitRoute(
           runtime,
           currentThread.id,
           frame.flow.edges,
           interrupt.id,
           emit.output,
-          {
-            stepId: interrupt.id,
-          },
+          { stepId: interrupt.id },
+          currentThread,
         );
-        const followed = follow(edge, currentThread);
-        currentThread = followed.thread;
-        frame.current = followed.to;
-        frame.currentInput = emit.output;
+        currentThread = routed.thread;
+        frame.current = routed.to;
+        frame.currentInput = routed.input;
         ranStep = true;
-        frame.reason = edge.reason;
+        frame.reason = routed.reason;
       } else {
-        const edge = advance(frame.flow.edges, frame.current, message);
-        const followed = follow(edge, currentThread);
-        currentThread = followed.thread;
-        frame.current = followed.to;
+        const routed = route(frame.flow.edges, frame.current, message, currentThread, runtime);
+        currentThread = routed.thread;
+        frame.current = routed.to;
         frame.currentInput = { ok: true } satisfies WaitForResult;
-        frame.reason = edge.reason;
+        frame.reason = routed.reason;
       }
       continue;
     }
@@ -1722,21 +1774,8 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     pendingInputs = undefined;
 
     // Validate JoinStep tagging the same way driveGraph does for runFlow —
-    // a join()-tagged node reached with a single input, or a converging
-    // node not tagged with join(), is a wiring mistake worth catching here
-    // too, not only when driven through runFlow.
-    if ((node.run as { join?: boolean }).join === true && inputs.length < 2) {
-      throw new Error(
-        `node "${frame.current}" is tagged with join() but was reached as a plain step — ` +
-          `it must be the convergence point of a fan-out`,
-      );
-    }
-    if ((node.run as { join?: boolean }).join !== true && inputs.length >= 2) {
-      throw new Error(
-        `node "${frame.current}" is the convergence point of a fan-out but was not defined with join() — ` +
-          `wrap its step with join(...) to declare it expects every branch's output`,
-      );
-    }
+    // see assertJoinTagging.
+    assertJoinTagging(frame.current, node.run, inputs);
 
     const stepContext: StepContext = { ...frame.context, inputs };
     const emit = await runStep(node.run, stepContext);
@@ -1755,18 +1794,13 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
           emit.output,
           stepIdentity(frame.current, node.label),
         );
-        const group: FanOutGroup = {
-          fanOutNodeId: frame.current,
-          joinNodeId: findJoinNode(branchTargets, frame.current, frame.flow),
-          mainThread: currentThread,
-          branches: branchTargets.map((target) => ({
-            target,
-            current: target,
-            currentInput: emit.output,
-            started: false,
-            done: false,
-          })),
-        };
+        const group: FanOutGroup = buildFanOutGroup(
+          branchTargets,
+          frame.current,
+          frame.flow,
+          currentThread,
+          emit.output,
+        );
         return group.branches.map((branch) => branchCursorState(branch, group));
       }
     }

@@ -95,15 +95,11 @@ describe("stepUntil", () => {
       store: adapters.stores.memoryStore(),
     });
 
-    await expect(stepUntil(flow, ready, () => false)).rejects.toThrow(StepUntilError);
-
-    try {
-      await stepUntil(flow, ready, () => false);
-      expect.unreachable("expected stepUntil to throw");
-    } catch (error) {
-      expect(error).toBeInstanceOf(StepUntilError);
-      expect((error as StepUntilError).reason).toBe("stalled");
-    }
+    const error: unknown = await stepUntil(flow, ready, () => false).catch(
+      (caught: unknown) => caught,
+    );
+    expect(error).toBeInstanceOf(StepUntilError);
+    expect(error).toMatchObject({ reason: "stalled" });
   });
 
   it("throws StepUntilError('budget-exceeded') when maxSteps is exhausted with lanes still active", async () => {
@@ -124,16 +120,10 @@ describe("stepUntil", () => {
       store: adapters.stores.memoryStore(),
     });
 
-    await expect(stepUntil(flow, ready, () => false, { maxSteps: 5 })).rejects.toThrow(
-      StepUntilError,
+    const error: unknown = await stepUntil(flow, ready, () => false, { maxSteps: 5 }).catch(
+      (caught: unknown) => caught,
     );
-
-    try {
-      await stepUntil(flow, ready, () => false, { maxSteps: 5 });
-      expect.unreachable("expected stepUntil to throw");
-    } catch (error) {
-      expect(error).toBeInstanceOf(StepUntilError);
-      expect((error as StepUntilError).reason).toBe("budget-exceeded");
-    }
+    expect(error).toBeInstanceOf(StepUntilError);
+    expect(error).toMatchObject({ reason: "budget-exceeded" });
   });
 });
