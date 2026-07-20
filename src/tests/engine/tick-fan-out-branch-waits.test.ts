@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { tickUntilSuspended } from "../../engine/runtime.js";
 import { defineGraph, runtime, adapters, join, outputs } from "../../index.js";
-import { neverCalled } from "../acceptance/support.js";
+import { neverCalled, submitApproval } from "../acceptance/support.js";
 
 // Needs a fan-out branch to support a waitFor node — today runBranchNode
 // throws notImplemented("fan-out branch node kind \"waitFor\"") for any
@@ -34,12 +34,7 @@ describe("ticking a fan-out branch that waits for a message", () => {
       ),
     ).toBe(true);
 
-    store.submit({
-      role: "user",
-      intent: "standard",
-      kind: "approval",
-      content: [{ type: "text", text: "yes" }],
-    });
+    submitApproval(store);
 
     const resumed = await tickUntilSuspended(flow, ready);
 

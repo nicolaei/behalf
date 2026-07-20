@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { tickUntilSuspended } from "../../engine/runtime.js";
 import { defineGraph, runtime, userText, adapters, outputs } from "../../index.js";
-import { neverCalled, textOf } from "../acceptance/support.js";
+import { neverCalled, textOf, submitApproval } from "../acceptance/support.js";
 
 // Needs tick() to genuinely suspend inside a used subgraph's own waitFor —
 // today's guard only covers the shallow case (the subgraph's entry node
@@ -39,12 +39,7 @@ describe("ticking a flow through a used subgraph that itself waits", () => {
     expect(parked).toMatchObject([{ status: "parked", waitingFor: ["approval"] }]);
     expect((parked[0] as { parent?: unknown }).parent).toBe(subNodeId);
 
-    store.submit({
-      role: "user",
-      intent: "standard",
-      kind: "approval",
-      content: [{ type: "text", text: "yes" }],
-    });
+    submitApproval(store);
 
     const resumed = await tickUntilSuspended(outer, ready);
     expect(resumed).toHaveLength(1);

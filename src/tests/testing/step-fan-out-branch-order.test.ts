@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { stepUntilBlocked } from "../../testing/index.js";
 import { defineGraph, runtime, adapters, join, outputs } from "../../index.js";
-import { neverCalled } from "../acceptance/support.js";
+import { neverCalled, submitApproval } from "../acceptance/support.js";
 
 describe("a fan-out where the parked branch is declared before the active one", () => {
   // start.then([wait, a]) — wait declared FIRST. Regression: naive
@@ -32,12 +32,7 @@ describe("a fan-out where the parked branch is declared before the active one", 
     expect(parked.some((lane) => lane.status === "parked" && lane.waitingFor)).toBe(true);
     expect(parked.some((lane) => lane.status === "parked" && !lane.waitingFor)).toBe(true);
 
-    store.submit({
-      role: "user",
-      intent: "standard",
-      kind: "approval",
-      content: [{ type: "text", text: "yes" }],
-    });
+    submitApproval(store);
 
     const resumed = await stepUntilBlocked(flow, ready);
     expect(resumed).toHaveLength(1);

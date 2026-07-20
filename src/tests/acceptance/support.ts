@@ -38,6 +38,16 @@ export function textOf(message: Message | undefined): string {
   return block?.type === "text" ? block.text : "";
 }
 
+/** Submits a scripted "approval" message a parked waitFor/branch is waiting on. */
+export function submitApproval(store: SessionStore): void {
+  store.submit({
+    role: "user",
+    intent: "standard",
+    kind: "approval",
+    content: [{ type: "text", text: "yes" }],
+  });
+}
+
 /** A scripted assistant message with a single text block — for hand-rolled test ModelPorts. */
 export function assistantText(text: string): AssistantMessage {
   return {

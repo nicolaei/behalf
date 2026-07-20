@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, adapters, join, outputs } from "../../index.js";
-import { neverCalled, textOf } from "./support.js";
+import { neverCalled, textOf, submitApproval } from "./support.js";
 
 describe("a fan-out branch that waits for a message before joining", () => {
   const flow = defineGraph("fan-out-branch-waits", (flowBuilder) => {
@@ -24,12 +24,7 @@ describe("a fan-out branch that waits for a message before joining", () => {
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
     const done = runFlow(flow, userText("go"), ready);
-    store.submit({
-      role: "user",
-      intent: "standard",
-      kind: "approval",
-      content: [{ type: "text", text: "yes" }],
-    });
+    submitApproval(store);
 
     const result = await done;
 

@@ -235,18 +235,11 @@ export async function runBranch(
     if (!thenEdge)
       throw new Error(`fan-out branch step "${currentNode}" has no outgoing then edge`);
 
-    const branch = {
-      current: currentNode,
-      currentInput,
-      done: false,
-      output: undefined as unknown,
-    };
-    applyBranchEdge(branch, thenEdge, joinNodeId, result.output);
-    if (branch.done) return { kind: "output", output: branch.output };
+    if (thenEdge.to === joinNodeId) return { kind: "output", output: result.output };
 
     // Advance to the next step in this branch.
-    currentNode = branch.current;
-    currentInput = branch.currentInput;
+    currentNode = thenEdge.to;
+    currentInput = result.output;
   }
 }
 

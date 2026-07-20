@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { tickUntilSuspended } from "../../engine/runtime.js";
 import { defineGraph, runtime, adapters, join, outputs } from "../../index.js";
-import { neverCalled } from "../acceptance/support.js";
+import { neverCalled, submitApproval } from "../acceptance/support.js";
 
 // Regression test for advanceFanOutGroup's branch-selection bug: it used to
 // pick the first not-done branch full stop (`Array.find`), so a branch
@@ -51,12 +51,7 @@ describe("ticking a fan-out group whose parked branch is declared before its liv
       parked.some((cursor) => cursor.status === "parked" && cursor.waitingFor === undefined),
     ).toBe(true);
 
-    store.submit({
-      role: "user",
-      intent: "standard",
-      kind: "approval",
-      content: [{ type: "text", text: "yes" }],
-    });
+    submitApproval(store);
 
     const resumed = await tickUntilSuspended(flow, ready);
 
