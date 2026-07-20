@@ -54,5 +54,30 @@ export default defineConfig([
     },
   },
 
+  // src/engine/runtime/ sub-modules (fan-out.ts, drive.ts, execution.ts, ids.ts,
+  // routing.ts, step-runner.ts, tick.ts) are necessarily exported so they can
+  // import each other, but that also makes them reachable directly from
+  // anywhere else in the codebase, bypassing the engine/runtime.js barrel.
+  // This rule blocks that: only files inside src/engine/runtime/ itself, or
+  // src/engine/runtime.ts (the barrel), may import a sub-module directly.
+  {
+    files: ["src/**/*.ts"],
+    ignores: ["src/engine/runtime/**", "src/engine/runtime.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["**/runtime/*"],
+              message:
+                "Import from engine/runtime.js (the barrel), not its internal sub-modules directly.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   eslintConfigPrettier,
 ]);
