@@ -31,8 +31,10 @@ import {
   type InterruptNode,
   buildDriveContext,
   driveStepEmit,
+  driveWaitForMessage,
+  fanOutTargets,
   findInterruptNodes,
-  looksLikeMessage,
+  seedUseNode,
 } from "./drive.js";
 
 /** One cursor's current state within a tick() outcome — node, status, and (for parked) what it's waiting for. */
@@ -490,53 +492,36 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       if (!message)
         return [{ node: frame.current, status: "parked", waitingFor: kinds, ...parent }];
 
-      runtime.store.append({ message }, { type: "message", threadId: currentThread.id });
-      currentThread = withMessage(currentThread, message);
-
-      const interrupt = frame.interrupts.find(
-        (candidate) => candidate.messageKind === message.kind,
+      const routed = await driveWaitForMessage(
+        message,
+        frame.current,
+        frame.interrupts,
+        frame.context,
+        frame.flow,
+        runtime,
+        setThread,
       );
-      if (interrupt) {
-        const stepContext: StepContext = withInputs(frame.context, [message]);
-        const emit = await runStep(interrupt.run, stepContext);
-        if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
-        const routed = commitRoute(
-          runtime,
-          currentThread.id,
-          frame.flow.edges,
-          interrupt.id,
-          emit.output,
-          { stepId: interrupt.id },
-          currentThread,
-        );
-        currentThread = routed.thread;
-        frame.current = routed.to;
-        frame.currentInput = routed.input;
-        ranStep = true;
-        frame.reason = routed.reason;
-      } else {
-        const routed = route(frame.flow.edges, frame.current, message, currentThread, runtime);
-        currentThread = routed.thread;
-        frame.current = routed.to;
-        frame.currentInput = { ok: true } satisfies WaitForResult;
-        frame.reason = routed.reason;
-      }
+      currentThread = routed.thread;
+      frame.current = routed.to;
+      frame.currentInput = routed.input;
+      frame.reason = routed.reason;
+      // A "free" waitFor (consumed a message but no interrupt fired) doesn't
+      // count toward this tick's one-step budget — only an interrupt running
+      // is billable work; see tick()'s own doc comment.
+      if (routed.ranInterruptStep) ranStep = true;
       continue;
     }
 
     if (node.kind === "use") {
       if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
 
-      // The subgraph's initial prompt — same seed rule as driveUseNode's own
-      // (the reaching edge's prompt, a real Message reaching this node
-      // directly, or the thread's last message as fallback) — logged once
-      // here the same way regardless of which of those it came from.
-      const fallback: Message | undefined = currentThread.messages.at(-1);
-      const seed: Message | undefined =
-        frame.reason ?? (looksLikeMessage(frame.currentInput) ? frame.currentInput : fallback);
-      if (!seed) throw new Error("use node has no message to seed its subgraph with");
-      if (!frame.reason) currentThread = withMessage(currentThread, seed);
-      runtime.store.append({ message: seed }, { type: "message", threadId: currentThread.id });
+      const { seed, thread: seededThread } = seedUseNode(
+        frame.reason,
+        frame.currentInput,
+        currentThread,
+        runtime,
+      );
+      currentThread = seededThread;
 
       tree = rebuildFromPath(path, path.length - 1, {
         kind: "use-descent",
@@ -571,11 +556,11 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     const emit = await runStep(node.run, stepContext);
 
     if ("output" in emit) {
-      const branchTargets = thenEdges(frame.flow.edges, frame.current).map((edge) => edge.to);
+      const branchTargets = fanOutTargets(frame.flow, frame.current);
       if (branchTargets.length > 1) {
-        // Same detection driveStepEmit uses, but tick spawns per-branch
-        // cursors instead of running every branch to completion in one
-        // Promise.all — see advanceFanOutGroup. Only ever reconstructed at
+        // Same detection driveStepEmit uses (fanOutTargets), but tick spawns
+        // per-branch cursors instead of running every branch to completion in
+        // one Promise.all — see advanceFanOutGroup. Only ever reconstructed at
         // the outermost level — see replayPosition's own matching guard.
         if (path.length > 1) notImplemented("tick: fan-out inside a used subgraph");
         appendOutput(

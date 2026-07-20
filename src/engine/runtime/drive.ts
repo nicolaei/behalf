@@ -7,7 +7,7 @@
 // time instead of to completion.
 
 import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
-import type { Message, MessageKind } from "../../flow/message.js";
+import type { Message, MessageKind, UserMessage } from "../../flow/message.js";
 import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../../flow/step.js";
 import type { Tool } from "../../flow/tool.js";
 import type { Runtime } from "../runtime.js";
@@ -58,6 +58,33 @@ export function looksLikeMessage(value: unknown): value is Message {
   return typeof value === "object" && value !== null && "role" in value && "content" in value;
 }
 
+/**
+ * Computes a `use` node's subgraph seed and folds it into the thread and
+ * log: the reaching edge's `prompt` output, if it had one (the previous
+ * iteration's `follow` already pushed it onto the thread; logged again here
+ * so it lands in the log too), otherwise the raw incoming value if it's a
+ * real `Message` (never pushed onto the thread, so push it now — this node
+ * is its only source), or — when the incoming value is a non-message marker
+ * such as `waitFor`'s `{ ok: true }` — the message that marker stands for,
+ * already the thread's last message. Shared by `driveUseNode` (runFlow) and
+ * tick()'s own inline `use` handling, which both compute and log a subgraph
+ * seed identically; only how each then drives the subgraph differs.
+ */
+export function seedUseNode(
+  reason: Message | undefined,
+  currentInput: unknown,
+  thread: Thread,
+  runtime: Runtime,
+): { seed: Message; thread: Thread } {
+  const fallback: Message | undefined = thread.messages.at(-1);
+  const seed: Message | undefined =
+    reason ?? (looksLikeMessage(currentInput) ? currentInput : fallback);
+  if (!seed) throw new Error("use node has no message to seed its subgraph with");
+  const seededThread = reason ? thread : withMessage(thread, seed);
+  runtime.store.append({ message: seed }, { type: "message", threadId: seededThread.id });
+  return { seed, thread: seededThread };
+}
+
 /** Runs a `use` node: seeds its subgraph, drives it inline to its own `finish`, and follows the reaching edge with its result. */
 async function driveUseNode(
   node: Extract<NodeKind, { kind: "use" }>,
@@ -67,20 +94,7 @@ async function driveUseNode(
   ctx: ExecutionContext,
 ): Promise<RouteResult> {
   const { flow, runtime } = ctx;
-  let thread = ctx.thread;
-  // The subgraph's initial prompt: the reaching edge's `prompt` output, if it
-  // had one (the previous iteration's `follow` already pushed it onto this
-  // thread; logged again here so it lands in the log too), otherwise the raw
-  // incoming value if it's a real `Message` (never pushed onto the thread, so
-  // push it now — this node is its only source), or — when the incoming value
-  // is a non-message marker such as `waitFor`'s `{ ok: true }` — the message
-  // that marker stands for, already the thread's last message.
-  const fallback: Message | undefined = thread.messages.at(-1);
-  const seed: Message | undefined =
-    reason ?? (looksLikeMessage(currentInput) ? currentInput : fallback);
-  if (!seed) throw new Error("use node has no message to seed its subgraph with");
-  if (!reason) thread = withMessage(thread, seed);
-  runtime.store.append({ message: seed }, { type: "message", threadId: thread.id });
+  const { seed, thread } = seedUseNode(reason, currentInput, ctx.thread, runtime);
 
   const result = await driveGraph(node.subgraph, runtime, thread, seed);
 
@@ -96,14 +110,75 @@ async function driveUseNode(
 }
 
 /**
- * Runs a `waitFor` node: parks until a matching message (or an armed
- * interrupt's) arrives, folds it into the thread, then either hands routing
- * to the interrupt it was for or advances this node's own edge.
+ * Folds a waitFor node's already-obtained message into the thread and
+ * routes it: if the message is what an armed `interrupt` was waiting for,
+ * that step runs and takes over routing — reading `context.thread` live
+ * rather than a local snapshot, so a reply the interrupt's own
+ * `context.modelCall()` folds in is never dropped — otherwise this node's
+ * own edge is followed. Shared by `driveWaitForNode` (runFlow, which blocks
+ * until a message arrives via `waitForMessage`) and tick()'s own waitFor
+ * handling (which consumes non-blockingly and parks if none is ready yet):
+ * the two differ only in how the message is obtained, never in what
+ * happens once it's in hand — this is the single implementation the old
+ * TODO(R2) asked for. `ranInterruptStep` reports whether this call actually
+ * ran a step (the interrupt) or just consumed a message for free, so
+ * tick() can decide whether this counts toward its one-step-per-call budget.
+ */
+export async function driveWaitForMessage(
+  message: UserMessage,
+  nodeId: NodeId,
+  interrupts: InterruptNode[],
+  context: StepContext,
+  flow: Graph,
+  runtime: Runtime,
+  setThread: (thread: Thread) => void,
+): Promise<RouteResult & { ranInterruptStep: boolean }> {
+  // Consuming the message is the same step regardless of who it's for: it
+  // becomes a log event and joins the thread, then whichever node was
+  // actually armed for its kind — the interrupt, or this waitFor itself —
+  // runs and takes over routing.
+  runtime.store.append({ message }, { type: "message", threadId: context.thread.id });
+  const thread = withMessage(context.thread, message);
+  setThread(thread);
+
+  const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
+  if (interrupt) {
+    const stepContext: StepContext = withInputs(context, [message]);
+    const emit = await runStep(interrupt.run, stepContext);
+    // An interrupt step emitting anything but `output` isn't supported yet.
+    if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
+    // Read the thread back live rather than the local `thread` above: if
+    // the interrupt step called `context.modelCall()`, its reply was
+    // folded in via `setThread`, and the local snapshot would otherwise be
+    // stale — silently dropping the reply when `commitRoute` builds the
+    // next thread.
+    const liveThread = context.thread;
+    return {
+      ...commitRoute(
+        runtime,
+        liveThread.id,
+        flow.edges,
+        interrupt.id,
+        emit.output,
+        { stepId: interrupt.id },
+        liveThread,
+      ),
+      ranInterruptStep: true,
+    };
+  }
+
+  const routed = route(flow.edges, nodeId, message, thread, runtime);
+  return { ...routed, input: { ok: true } satisfies WaitForResult, ranInterruptStep: false };
+}
+
+/**
+ * Runs a `waitFor` node: blocks until a matching message (or an armed
+ * interrupt's) arrives, then hands off to `driveWaitForMessage` for the
+ * fold-and-route logic shared with tick()'s own non-blocking equivalent.
  */
 async function driveWaitForNode(
   node: Extract<NodeKind, { kind: "waitFor" }>,
   nodeId: NodeId,
-  thread: Thread,
   interrupts: InterruptNode[],
   context: StepContext,
   flow: Graph,
@@ -114,45 +189,16 @@ async function driveWaitForNode(
     node.messageKind,
     ...interrupts.map((interrupt) => interrupt.messageKind),
   ]);
-
-  // Consuming the message is the same step regardless of who it's for: it
-  // becomes a log event and joins the thread, then whichever node was
-  // actually armed for its kind — the interrupt, or this waitFor itself —
-  // runs and takes over routing.
-  runtime.store.append({ message }, { type: "message", threadId: thread.id });
-  thread = withMessage(thread, message);
-  setThread(thread);
-
-  const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
-  if (interrupt) {
-    const stepContext: StepContext = withInputs(context, [message]);
-    const emit = await runStep(interrupt.run, stepContext);
-    // An interrupt step emitting anything but `output` isn't supported yet.
-    if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
-    // Read the thread back live rather than reuse the `thread` variable
-    // captured above: if the interrupt step called `context.modelCall()`,
-    // its reply was folded in via `setThread` (updating the caller's
-    // `currentThread`), and this local `thread` would otherwise be a stale
-    // snapshot from before that call — silently dropping the reply when
-    // `commitRoute` builds the next thread. `context.thread` is the same
-    // live getter `tick()`'s own inline waitFor+interrupt handling reads
-    // directly, which is why it doesn't have this bug.
-    // TODO(R2): this waitFor+interrupt handling is duplicated between
-    // `driveWaitForNode` (runFlow) and `tick()`'s loop; unify them.
-    const liveThread = context.thread;
-    return commitRoute(
-      runtime,
-      liveThread.id,
-      flow.edges,
-      interrupt.id,
-      emit.output,
-      { stepId: interrupt.id },
-      liveThread,
-    );
-  }
-
-  const routed = route(flow.edges, nodeId, message, thread, runtime);
-  return { ...routed, input: { ok: true } satisfies WaitForResult };
+  const routed = await driveWaitForMessage(
+    message,
+    nodeId,
+    interrupts,
+    context,
+    flow,
+    runtime,
+    setThread,
+  );
+  return { thread: routed.thread, input: routed.input, reason: routed.reason, to: routed.to };
 }
 
 /** What handling a step's `Emit` decided: retry the same node, or advance to the next one. */
@@ -182,6 +228,11 @@ function commitInvalidation(
     reason: undefined,
     to: emit.invalidate,
   };
+}
+
+/** The nodes a step's output can fan out into — more than one `then` edge means a fan-out. Shared by `driveStepEmit` (which runs every branch to completion) and tick() (which must detect a fan-out before `driveStepEmit` runs, since it drives one branch per call instead of `Promise.all`). */
+export function fanOutTargets(flow: Graph, nodeId: NodeId): NodeId[] {
+  return thenEdges(flow.edges, nodeId).map((edge) => edge.to);
 }
 
 /**
@@ -214,7 +265,7 @@ export async function driveStepEmit(
   // ruled out the first three, only "output" remains; anything else is a bug.
   if (!("output" in emit)) unreachable(`emit "${Object.keys(emit).join(", ")}"`);
 
-  const branchTargets: NodeId[] = thenEdges(flow.edges, nodeId).map((edge) => edge.to);
+  const branchTargets: NodeId[] = fanOutTargets(flow, nodeId);
   if (branchTargets.length > 1) {
     appendOutput(runtime, thread.id, emit.output, stepIdentity(nodeId, node.label));
     // Resolve the convergence node before spawning branches — findJoinNode
@@ -422,7 +473,6 @@ export async function driveGraph(
       const routed = await driveWaitForNode(
         node,
         current,
-        currentThread,
         interrupts,
         context,
         flow,
