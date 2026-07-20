@@ -15,10 +15,10 @@ import {
   appendOutput,
   route,
   commitRoute,
-  pushMessage,
+  withMessage,
   thenEdges,
 } from "./routing.js";
-import { runStep, assertJoinTagging } from "./step-runner.js";
+import { runStep, assertJoinTagging, withInputs } from "./step-runner.js";
 import {
   type FanOutGroup,
   buildFanOutGroup,
@@ -185,7 +185,7 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
       const node = top.flow.nodes.get(top.current);
 
       if (node?.kind === "waitFor") {
-        pushMessage(thread, message);
+        thread = withMessage(thread, message);
         const routed = route(top.flow.edges, top.current, message, thread, runtime);
         thread = routed.thread;
         top.current = routed.to;
@@ -201,7 +201,7 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
         // and descends a frame at the subgraph's own entry, seeded with this
         // exact message — the same value `driveGraph`'s own `input`
         // parameter would carry.
-        if (!top.reason) pushMessage(thread, message);
+        if (!top.reason) thread = withMessage(thread, message);
         frames.push({
           flow: node.subgraph,
           useNodeId: top.current,
@@ -251,6 +251,7 @@ function buildLiveFrame(
   replayFrame: ReplayFrame,
   runtime: Runtime,
   getThread: () => Thread,
+  setThread: (thread: Thread) => void,
 ): LiveFrame {
   const holder = { current: replayFrame.current };
   return {
@@ -265,7 +266,13 @@ function buildLiveFrame(
     },
     currentInput: replayFrame.currentInput,
     ...(replayFrame.reason !== undefined ? { reason: replayFrame.reason } : {}),
-    context: buildDriveContext(replayFrame.flow, runtime, () => holder.current, getThread),
+    context: buildDriveContext(
+      replayFrame.flow,
+      runtime,
+      () => holder.current,
+      getThread,
+      setThread,
+    ),
   };
 }
 
@@ -305,8 +312,11 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
   let ranStep = false;
 
   const getThread = (): Thread => currentThread;
+  const setThread = (next: Thread): void => {
+    currentThread = next;
+  };
   const frames: LiveFrame[] = position.frames.map((replayFrame) =>
-    buildLiveFrame(replayFrame, runtime, getThread),
+    buildLiveFrame(replayFrame, runtime, getThread, setThread),
   );
 
   for (;;) {
@@ -358,13 +368,13 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         return [{ node: frame.current, status: "parked", waitingFor: kinds, ...parent }];
 
       runtime.store.append({ message }, { type: "message", threadId: currentThread.id });
-      pushMessage(currentThread, message);
+      currentThread = withMessage(currentThread, message);
 
       const interrupt = frame.interrupts.find(
         (candidate) => candidate.messageKind === message.kind,
       );
       if (interrupt) {
-        const stepContext: StepContext = { ...frame.context, inputs: [message] };
+        const stepContext: StepContext = withInputs(frame.context, [message]);
         const emit = await runStep(interrupt.run, stepContext);
         if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
         const routed = commitRoute(
@@ -402,7 +412,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       const seed: Message | undefined =
         frame.reason ?? (looksLikeMessage(frame.currentInput) ? frame.currentInput : fallback);
       if (!seed) throw new Error("use node has no message to seed its subgraph with");
-      if (!frame.reason) pushMessage(currentThread, seed);
+      if (!frame.reason) currentThread = withMessage(currentThread, seed);
       runtime.store.append({ message: seed }, { type: "message", threadId: currentThread.id });
 
       frames.push(
@@ -415,6 +425,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
           },
           runtime,
           getThread,
+          setThread,
         ),
       );
       continue;
@@ -433,7 +444,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     // see assertJoinTagging.
     assertJoinTagging(frame.current, node.run, inputs);
 
-    const stepContext: StepContext = { ...frame.context, inputs };
+    const stepContext: StepContext = withInputs(frame.context, inputs);
     const emit = await runStep(node.run, stepContext);
 
     if ("output" in emit) {

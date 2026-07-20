@@ -18,7 +18,7 @@ import type { Runtime } from "../runtime.js";
 import { runFlow } from "../runtime.js";
 import { freshCorrelationId } from "./ids.js";
 import { unreachable } from "../errors.js";
-import { pushMessage, type StepIdentity } from "./routing.js";
+import { withMessage, type Thread, type StepIdentity } from "./routing.js";
 
 /**
  * Parks until `poll` returns a value, checking on a timer tick so a
@@ -107,6 +107,7 @@ export async function runToolCall(
   context: StepContext,
   runtime: Runtime,
   identity: StepIdentity,
+  setThread: (thread: Thread) => void,
 ): Promise<void> {
   const handler = findToolBinding(runtime, call.name);
 
@@ -127,7 +128,7 @@ export async function runToolCall(
     role: "tool",
     content: [{ type: "toolResult", correlationId: call.correlationId, output }],
   };
-  pushMessage(context.thread, toolMessage);
+  setThread(withMessage(context.thread, toolMessage));
 }
 
 /**
@@ -158,6 +159,7 @@ export async function runModelCall(
   context: StepContext,
   runtime: Runtime,
   identity: StepIdentity,
+  setThread: (thread: Thread) => void,
 ): Promise<ModelCallResult> {
   const port = runtime.models(profile.model);
   const stream = context.openStream("message");
@@ -183,11 +185,11 @@ export async function runModelCall(
 
   const { message: reply } = outcome;
   stream.commit({ message: reply });
-  pushMessage(context.thread, reply);
+  setThread(withMessage(context.thread, reply));
 
   const toolCalls = reply.content.filter(isToolCall);
   for (const call of toolCalls) {
-    await runToolCall(call, context, runtime, identity);
+    await runToolCall(call, context, runtime, identity, setThread);
   }
 
   return { usedTools: toolCalls.length > 0, usage: reply.usage };

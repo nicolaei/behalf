@@ -57,19 +57,18 @@ export function assertJoinTagging(nodeId: NodeId, run: Step, inputs: unknown[]):
   }
 }
 
-/** Appends a compaction event and replaces a thread's messages/history — shared by the main-loop and branch paths since both commit a `compact` emit the same way. */
+/** Appends a compaction event and returns a thread with its messages replaced and its history extended — never mutates the thread passed in. Shared by the main-loop and branch paths since both commit a `compact` emit the same way. */
 export function commitCompaction(
   runtime: Runtime,
   thread: Thread,
   compact: Message[],
   meta: unknown,
-): void {
+): Thread {
   runtime.store.append(
     { messages: compact, ...(meta !== undefined ? { meta } : {}) },
     { type: "compaction", threadId: thread.id },
   );
-  thread.messages = compact;
-  thread.history.push(...compact);
+  return { ...thread, messages: compact, history: [...thread.history, ...compact] };
 }
 
 /**
@@ -164,5 +163,32 @@ export function makeStepContext(config: StepContextConfig): StepContext {
     fail(error: StepError): Emit<never> {
       return { error };
     },
+  };
+}
+
+/**
+ * Derives a `StepContext` that shares everything with `context` except its
+ * `inputs` — used everywhere a node needs to rerun the same context with
+ * different inputs (an interrupt's own message, a join's per-branch array).
+ * `thread` is re-exposed through a delegating getter rather than copied by
+ * value: a plain object spread (`{ ...context, inputs }`) would evaluate
+ * `context.thread` once at spread time and freeze that snapshot, missing any
+ * later replacement (e.g. a model or tool call folding a message in) that
+ * happens while the derived context's own step is still running.
+ */
+export function withInputs(context: StepContext, inputs: unknown[]): StepContext {
+  return {
+    get thread() {
+      return context.thread;
+    },
+    inputs,
+    openStream: (type) => context.openStream(type),
+    modelCall: (profile) => context.modelCall(profile),
+    callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) =>
+      context.callTool(tool, input),
+    output: <Result>(value: Result) => context.output(value),
+    compact: (replace, meta) => context.compact(replace, meta),
+    invalidate: (target, options) => context.invalidate(target, options),
+    fail: (error) => context.fail(error),
   };
 }

@@ -134,13 +134,13 @@ export function commitRoute(
   return { thread: followed.thread, input: output, reason: edge.reason, to: followed.to };
 }
 
-/** Appends `message` to both a thread's assembled view and its full history — the shared tail of every path that folds one in. */
-export function pushMessage(
-  thread: { messages: Message[]; history: Message[] },
-  message: Message,
-): void {
-  thread.messages.push(message);
-  thread.history.push(message);
+/** Returns a new thread with `message` appended to both its assembled view and its full history — never mutates the thread passed in. The shared tail of every path that folds one in. */
+export function withMessage(thread: Thread, message: Message): Thread {
+  return {
+    ...thread,
+    messages: [...thread.messages, message],
+    history: [...thread.history, message],
+  };
 }
 
 /**
@@ -162,21 +162,17 @@ export function applyThreadAction(
   }
 
   if (threadAction === "fork") {
-    const messages = [...current.messages];
-    const history = [...current.history];
-    const forked = { messages, history };
-    if (reason) pushMessage(forked, reason);
-    return {
+    const forked: Thread = {
       id: freshThreadId(runtime),
       forkedFrom: { thread: current.id, at: current.history.length },
-      messages,
-      history,
+      messages: [...current.messages],
+      history: [...current.history],
     };
+    return reason ? withMessage(forked, reason) : forked;
   }
 
-  // "same": no new thread — push the reason onto the one already running.
-  if (reason) pushMessage(current, reason);
-  return current;
+  // "same": no new thread — return it as-is, or with reason appended.
+  return reason ? withMessage(current, reason) : current;
 }
 
 /** The `then` edges leaving a node, in declared order — more than one means a fan-out. */

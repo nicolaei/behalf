@@ -22,12 +22,13 @@ import {
   route,
   commitRoute,
   applyThreadAction,
-  pushMessage,
+  withMessage,
   thenEdges,
 } from "./routing.js";
 import {
   runStep,
   makeStepContext,
+  withInputs,
   assertJoinTagging,
   commitCompaction,
   handleStepError,
@@ -65,7 +66,8 @@ async function driveUseNode(
   currentInput: unknown,
   ctx: ExecutionContext,
 ): Promise<RouteResult> {
-  const { thread, flow, runtime } = ctx;
+  const { flow, runtime } = ctx;
+  let thread = ctx.thread;
   // The subgraph's initial prompt: the reaching edge's `prompt` output, if it
   // had one (the previous iteration's `follow` already pushed it onto this
   // thread; logged again here so it lands in the log too), otherwise the raw
@@ -77,7 +79,7 @@ async function driveUseNode(
   const seed: Message | undefined =
     reason ?? (looksLikeMessage(currentInput) ? currentInput : fallback);
   if (!seed) throw new Error("use node has no message to seed its subgraph with");
-  if (!reason) pushMessage(thread, seed);
+  if (!reason) thread = withMessage(thread, seed);
   runtime.store.append({ message: seed }, { type: "message", threadId: thread.id });
 
   const result = await driveGraph(node.subgraph, runtime, thread, seed);
@@ -106,6 +108,7 @@ async function driveWaitForNode(
   context: StepContext,
   flow: Graph,
   runtime: Runtime,
+  setThread: (thread: Thread) => void,
 ): Promise<RouteResult> {
   const message = await waitForMessage(runtime.store, [
     node.messageKind,
@@ -117,22 +120,34 @@ async function driveWaitForNode(
   // actually armed for its kind — the interrupt, or this waitFor itself —
   // runs and takes over routing.
   runtime.store.append({ message }, { type: "message", threadId: thread.id });
-  pushMessage(thread, message);
+  thread = withMessage(thread, message);
+  setThread(thread);
 
   const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
   if (interrupt) {
-    const stepContext: StepContext = { ...context, inputs: [message] };
+    const stepContext: StepContext = withInputs(context, [message]);
     const emit = await runStep(interrupt.run, stepContext);
     // An interrupt step emitting anything but `output` isn't supported yet.
     if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
+    // Read the thread back live rather than reuse the `thread` variable
+    // captured above: if the interrupt step called `context.modelCall()`,
+    // its reply was folded in via `setThread` (updating the caller's
+    // `currentThread`), and this local `thread` would otherwise be a stale
+    // snapshot from before that call — silently dropping the reply when
+    // `commitRoute` builds the next thread. `context.thread` is the same
+    // live getter `tick()`'s own inline waitFor+interrupt handling reads
+    // directly, which is why it doesn't have this bug.
+    // TODO(R2): this waitFor+interrupt handling is duplicated between
+    // `driveWaitForNode` (runFlow) and `tick()`'s loop; unify them.
+    const liveThread = context.thread;
     return commitRoute(
       runtime,
-      thread.id,
+      liveThread.id,
       flow.edges,
       interrupt.id,
       emit.output,
       { stepId: interrupt.id },
-      thread,
+      liveThread,
     );
   }
 
@@ -187,8 +202,8 @@ export async function driveStepEmit(
   }
 
   if ("compact" in emit) {
-    commitCompaction(runtime, thread, emit.compact, emit.meta);
-    return { kind: "advance", ...route(flow.edges, nodeId, undefined, thread, runtime) };
+    const nextThread = commitCompaction(runtime, thread, emit.compact, emit.meta);
+    return { kind: "advance", ...route(flow.edges, nodeId, undefined, nextThread, runtime) };
   }
 
   if ("error" in emit) {
@@ -285,6 +300,7 @@ export function buildDriveContext(
   runtime: Runtime,
   getCurrent: () => NodeId | undefined,
   getThread: () => Thread,
+  setThread: (thread: Thread) => void,
 ): StepContext {
   const context = makeStepContext({
     getThread,
@@ -310,7 +326,7 @@ export function buildDriveContext(
         flow,
         "modelCall called outside a running node",
       );
-      return runModelCall(profile, context, runtime, identity);
+      return runModelCall(profile, context, runtime, identity, setThread);
     },
     callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
       const identity = currentNodeIdentity(
@@ -356,6 +372,9 @@ export async function driveGraph(
     runtime,
     () => current,
     () => currentThread,
+    (next) => {
+      currentThread = next;
+    },
   );
 
   const interrupts = findInterruptNodes(flow);
@@ -408,6 +427,9 @@ export async function driveGraph(
         context,
         flow,
         runtime,
+        (next) => {
+          currentThread = next;
+        },
       );
       currentThread = routed.thread;
       currentInput = routed.input;
@@ -426,7 +448,7 @@ export async function driveGraph(
     // inputs (from fan-out pendingInputs); see assertJoinTagging.
     assertJoinTagging(current, node.run, inputs);
 
-    const stepContext: StepContext = { ...context, inputs };
+    const stepContext: StepContext = withInputs(context, inputs);
     const emit = await runStep(node.run, stepContext);
 
     const outcome = await driveStepEmit(emit, node, current, {

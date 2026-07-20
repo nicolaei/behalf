@@ -77,14 +77,19 @@ export async function runBranchNode(
   input: unknown,
   ctx: ExecutionContext,
 ): Promise<
-  | { kind: "invalidate"; emit: Extract<Emit, { invalidate: NodeId }> }
-  | { kind: "output"; output: unknown }
+  | { kind: "invalidate"; emit: Extract<Emit, { invalidate: NodeId }>; thread: Thread }
+  | { kind: "output"; output: unknown; thread: Thread }
 > {
-  const { flow, runtime, thread } = ctx;
+  const { flow, runtime } = ctx;
+  let thread = ctx.thread;
   const nodeDef = flow.nodes.get(nodeId);
   if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${nodeId}"`);
   if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
   const nodeIdentity = stepIdentity(nodeId, nodeDef.label);
+
+  const setThread = (next: Thread): void => {
+    thread = next;
+  };
 
   const branchContext: StepContext = makeStepContext({
     getThread: () => thread,
@@ -96,7 +101,7 @@ export async function runBranchNode(
         threadId: thread.id,
         ...nodeIdentity,
       }),
-    modelCall: (profile) => runModelCall(profile, branchContext, runtime, nodeIdentity),
+    modelCall: (profile) => runModelCall(profile, branchContext, runtime, nodeIdentity, setThread),
     callTool: (tool, toolInput) => callTool(tool, toolInput, thread.id, runtime, nodeIdentity),
   });
 
@@ -104,10 +109,10 @@ export async function runBranchNode(
   for (;;) {
     const emit = await runStep(nodeDef.run, branchContext);
 
-    if ("invalidate" in emit) return { kind: "invalidate", emit };
+    if ("invalidate" in emit) return { kind: "invalidate", emit, thread };
 
     if ("compact" in emit) {
-      commitCompaction(runtime, thread, emit.compact, emit.meta);
+      thread = commitCompaction(runtime, thread, emit.compact, emit.meta);
       break; // stepOutput stays undefined; advance to next node
     }
 
@@ -123,7 +128,7 @@ export async function runBranchNode(
     stepOutput = emit.output;
     break;
   }
-  return { kind: "output", output: stepOutput };
+  return { kind: "output", output: stepOutput, thread };
 }
 
 /**
@@ -158,6 +163,7 @@ export async function runBranch(
       ...ctx,
       thread: currentThread,
     });
+    currentThread = result.thread;
     if (result.kind === "invalidate") return result;
 
     // Follow the step's single outgoing then edge.
@@ -340,6 +346,7 @@ export async function advanceFanOutGroup(
     thread: branchThread,
     attemptsByNode,
   });
+  branch.thread = result.thread;
   if (result.kind === "invalidate") notImplemented("tick: fan-out branch invalidate");
 
   const thenEdge = flow.edges.find((edge) => edge.from === branch.current && edge.edge === "then");
