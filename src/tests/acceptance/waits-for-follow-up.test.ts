@@ -30,11 +30,14 @@ describe("a graph that waits for the next prompt", () => {
     // inbox reactively so this resolves regardless of when `submit` is called,
     // not because of lucky ordering.
     const done = runFlow(twoTurns, userText("first"), ready);
-    store.submit({
-      role: "user",
-      intent: "standard",
-      kind: "follow-up",
-      content: [{ type: "text", text: "second" }],
+    store.receive({
+      kind: "message",
+      message: {
+        role: "user",
+        intent: "standard",
+        kind: "follow-up",
+        content: [{ type: "text", text: "second" }],
+      },
     });
 
     expect(await done).toBe("second");
@@ -45,11 +48,14 @@ describe("a graph that waits for the next prompt", () => {
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
     const done = runFlow(twoTurns, userText("first"), ready);
-    store.submit({
-      role: "user",
-      intent: "standard",
-      kind: "follow-up",
-      content: [{ type: "text", text: "second" }],
+    store.receive({
+      kind: "message",
+      message: {
+        role: "user",
+        intent: "standard",
+        kind: "follow-up",
+        content: [{ type: "text", text: "second" }],
+      },
     });
     await done;
 

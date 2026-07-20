@@ -36,7 +36,10 @@ describe("interrupt fires wherever the graph currently is", () => {
     // parked at `waitFor("resume")`; a "cancel" message (the interrupt's kind) arrives instead
     // NOTE: submit timing is the same known open concern as waitFor's own test.
     done = runFlow(withInterrupt, userText("go"), ready);
-    store.submit({ role: "user", intent: "standard", kind: "cancel", content: [] });
+    store.receive({
+      kind: "message",
+      message: { role: "user", intent: "standard", kind: "cancel", content: [] },
+    });
   });
 
   it("bypasses the waiting path when the interrupt's kind arrives instead of the waited-for kind", async () => {

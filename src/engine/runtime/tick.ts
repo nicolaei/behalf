@@ -297,7 +297,7 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
           frame: {
             flow: leaf.flow,
             current: routed.to,
-            currentInput: { ok: true } satisfies WaitForResult,
+            currentInput: { ok: true, result: message } satisfies WaitForResult,
             reason: routed.reason,
           },
         });
@@ -540,9 +540,13 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         messageKindOf(node.waitable),
         ...frame.interrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
       ];
-      const message = runtime.store.consume(
-        (candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind),
+      const entry = runtime.store.consume(
+        (candidate) =>
+          candidate.kind === "message" &&
+          candidate.message.kind !== undefined &&
+          kinds.includes(candidate.message.kind),
       );
+      const message = entry?.kind === "message" ? entry.message : undefined;
       if (!message)
         return [{ node: frame.current, status: "parked", waitingFor: kinds, ...parent }];
 

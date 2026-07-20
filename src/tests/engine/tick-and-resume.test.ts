@@ -27,10 +27,13 @@ describe("ticking a flow one node at a time and resuming it from the store alone
 
   function followUp(text: string) {
     return {
-      role: "user" as const,
-      intent: "standard" as const,
-      kind: "follow-up",
-      content: [{ type: "text" as const, text }],
+      kind: "message" as const,
+      message: {
+        role: "user" as const,
+        intent: "standard" as const,
+        kind: "follow-up",
+        content: [{ type: "text" as const, text }],
+      },
     };
   }
 
@@ -57,7 +60,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
     expect(parked).toHaveLength(1);
     expect(parked).toMatchObject([{ status: "parked", waitingFor: ["follow-up"] }]);
 
-    store.submit(followUp("approved"));
+    store.receive(followUp("approved"));
 
     // a brand new call, same runtime object, same store: proves position came
     // from the store, not from any state tick() carried in its own closures
@@ -85,7 +88,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
     expect(second).toHaveLength(1);
     expect(second).toMatchObject([{ status: "parked", waitingFor: ["follow-up"] }]);
 
-    store.submit(followUp("approved"));
+    store.receive(followUp("approved"));
 
     const third = await freshTick(); // runs `finish`
     expect(third).toHaveLength(1);
@@ -114,7 +117,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
     await tickUntilSuspended(graph, ready); // suspends at gate
-    store.submit(followUp("approved"));
+    store.receive(followUp("approved"));
     const result = await tickUntilSuspended(graph, ready);
 
     expect(result).toHaveLength(1);

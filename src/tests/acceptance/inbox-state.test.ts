@@ -17,9 +17,9 @@ describe("the inbox reflects pending and consumed input", () => {
     const store = adapters.stores.memoryStore();
     const message = userText("hello");
 
-    store.submit(message);
+    store.receive({ kind: "message", message });
 
-    expect(store.inbox()).toEqual([message]);
+    expect(store.inbox()).toEqual([{ kind: "message", message }]);
   });
 
   it("empties once a waitFor step consumes the message", async () => {
@@ -34,11 +34,14 @@ describe("the inbox reflects pending and consumed input", () => {
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
     const done = runFlow(consumeInbox, userText("go"), ready);
-    store.submit({
-      role: "user",
-      intent: "standard",
-      kind: "follow-up",
-      content: [{ type: "text", text: "resume" }],
+    store.receive({
+      kind: "message",
+      message: {
+        role: "user",
+        intent: "standard",
+        kind: "follow-up",
+        content: [{ type: "text", text: "resume" }],
+      },
     });
     await done;
 

@@ -42,12 +42,17 @@ export async function waitForMessage(
   store: SessionStore,
   kinds: readonly MessageKind[],
 ): Promise<UserMessage> {
-  const message = await pollInbox(() =>
-    store.consume((candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind)),
+  const entry = await pollInbox(() =>
+    store.consume(
+      (candidate) =>
+        candidate.kind === "message" &&
+        candidate.message.kind !== undefined &&
+        kinds.includes(candidate.message.kind),
+    ),
   );
   // pollInbox only returns undefined when given a `stop` predicate, which this call omits.
-  if (!message) unreachable("waitForMessage resolved without a message");
-  return message;
+  if (entry?.kind !== "message") unreachable("waitForMessage resolved without a message");
+  return entry.message;
 }
 
 /**
@@ -60,7 +65,14 @@ async function waitForAbort(
   store: SessionStore,
   isCancelled: () => boolean,
 ): Promise<UserMessage | undefined> {
-  return pollInbox(() => store.consume((candidate) => candidate.intent === "abort"), isCancelled);
+  const entry = await pollInbox(
+    () =>
+      store.consume(
+        (candidate) => candidate.kind === "message" && candidate.message.intent === "abort",
+      ),
+    isCancelled,
+  );
+  return entry?.kind === "message" ? entry.message : undefined;
 }
 
 function isToolCall(block: ContentBlock): block is Extract<ContentBlock, { type: "toolCall" }> {

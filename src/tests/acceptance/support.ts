@@ -40,11 +40,14 @@ export function textOf(message: Message | undefined): string {
 
 /** Submits a scripted "approval" message a parked waitFor/branch is waiting on. */
 export function submitApproval(store: SessionStore): void {
-  store.submit({
-    role: "user",
-    intent: "standard",
-    kind: "approval",
-    content: [{ type: "text", text: "yes" }],
+  store.receive({
+    kind: "message",
+    message: {
+      role: "user",
+      intent: "standard",
+      kind: "approval",
+      content: [{ type: "text", text: "yes" }],
+    },
   });
 }
 

@@ -23,11 +23,16 @@ export interface StepError {
 }
 
 /**
- * What a `waitFor` node hands downstream once it consumes a matching message — a plain marker, not the message itself; the message is already pushed onto the thread.
+ * What a `waitFor` node hands downstream once it consumes a matching event — `ok` is always
+ * true (routing only reaches here on a match); `result` is whatever the armed `Waitable`'s
+ * `match()` produced. For `userInput`, that's the `UserMessage` (also already on the thread);
+ * for a signal-based `Waitable`, `result` is the only place its payload is reachable, since a
+ * signal is deliberately never folded into `thread.messages`.
  * @public
  */
-export interface WaitForResult {
+export interface WaitForResult<T = unknown> {
   ok: true;
+  result: T;
 }
 
 /** The one outcome a step returns. Only `output` is routed by edges. @public */

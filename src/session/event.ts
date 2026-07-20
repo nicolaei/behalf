@@ -13,6 +13,11 @@ export interface Event {
   compaction: { messages: Message[]; meta?: unknown };
   invalidation: { target: NodeId; threadAction: ThreadAction; reason?: Message };
   error: { type: string; message: string; retryable?: boolean; cause?: unknown };
+  // A non-conversational fact a Waitable can match on — never folded into
+  // Thread.messages, unlike `message`. `name` is open like MessageKind, since
+  // Waitables are user-extensible and the library can't enumerate every
+  // possible external fact an app might define.
+  signal: { name: string; payload?: unknown };
 }
 
 /** Union of all event type keys. @public */

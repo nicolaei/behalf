@@ -32,7 +32,7 @@ describe("aborting an in-flight run", () => {
     // (best-effort design — confirm the exact abort/streaming contract against
     // reference.md's Gateway behaviour when this slice is active)
     const done = runFlow(graph, userText("hi"), ready).catch(() => undefined);
-    store.submit({ role: "user", intent: "abort", content: [] });
+    store.receive({ kind: "message", message: { role: "user", intent: "abort", content: [] } });
     await done;
 
     const aborted = store

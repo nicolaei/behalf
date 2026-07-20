@@ -32,11 +32,14 @@ describe("re-entering a subgraph after waitFor (the chat pattern)", () => {
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
     const done = runFlow(twoTurnChat, userText("first"), ready);
-    store.submit({
-      role: "user",
-      intent: "standard",
-      kind: "follow-up",
-      content: [{ type: "text", text: "second" }],
+    store.receive({
+      kind: "message",
+      message: {
+        role: "user",
+        intent: "standard",
+        kind: "follow-up",
+        content: [{ type: "text", text: "second" }],
+      },
     });
 
     expect(await done).toBe("second");

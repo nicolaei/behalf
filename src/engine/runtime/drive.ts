@@ -171,7 +171,11 @@ export async function driveWaitForMessage(
   }
 
   const routed = route(flow.edges, nodeId, message, thread, runtime);
-  return { ...routed, input: { ok: true } satisfies WaitForResult, ranInterruptStep: false };
+  return {
+    ...routed,
+    input: { ok: true, result: message } satisfies WaitForResult,
+    ranInterruptStep: false,
+  };
 }
 
 /**

@@ -1,8 +1,8 @@
 // Adapter — an in-memory SessionStore. For tests and local dev, not production.
 
-import type { SessionStore } from "../../engine/session-store.js";
+import type { SessionStore, PendingEntry } from "../../engine/session-store.js";
 import type { Stream } from "../../session/index.js";
-import type { UserMessage, Message } from "../../flow/message.js";
+import type { Message } from "../../flow/message.js";
 import type { Envelope, Event, EventType, SessionId, Delta } from "../../session/index.js";
 import type { ThreadId } from "../../flow/thread.js";
 
@@ -60,7 +60,7 @@ function buildEnvelope(
 /** In-memory SessionStore implementation for tests and local development. @public */
 export function memoryStore(): SessionStore {
   const log: Envelope[] = [];
-  const pending: UserMessage[] = [];
+  const pending: PendingEntry[] = [];
   const subscribers = new Set<AsyncQueue<Envelope>>();
   let sequence = 0;
 
@@ -73,15 +73,15 @@ export function memoryStore(): SessionStore {
       return [...log];
     },
 
-    inbox(): UserMessage[] {
+    inbox(): PendingEntry[] {
       return [...pending];
     },
 
-    submit(message: UserMessage): void {
-      pending.push(message);
+    receive(entry: PendingEntry): void {
+      pending.push(entry);
     },
 
-    consume(matches: (message: UserMessage) => boolean): UserMessage | undefined {
+    consume(matches: (entry: PendingEntry) => boolean): PendingEntry | undefined {
       const index = pending.findIndex(matches);
       if (index === -1) return undefined;
       return pending.splice(index, 1)[0];

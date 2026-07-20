@@ -26,11 +26,14 @@ describe("waitFor(userInput(kind)) behaves identically to today's waitFor(kind)"
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
     const done = runFlow(twoTurns, userText("first"), ready);
-    store.submit({
-      role: "user",
-      intent: "standard",
-      kind: "follow-up",
-      content: [{ type: "text", text: "second" }],
+    store.receive({
+      kind: "message",
+      message: {
+        role: "user",
+        intent: "standard",
+        kind: "follow-up",
+        content: [{ type: "text", text: "second" }],
+      },
     });
 
     expect(await done).toBe("second");
@@ -41,11 +44,14 @@ describe("waitFor(userInput(kind)) behaves identically to today's waitFor(kind)"
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
     const done = runFlow(twoTurns, userText("first"), ready);
-    store.submit({
-      role: "user",
-      intent: "standard",
-      kind: "follow-up",
-      content: [{ type: "text", text: "second" }],
+    store.receive({
+      kind: "message",
+      message: {
+        role: "user",
+        intent: "standard",
+        kind: "follow-up",
+        content: [{ type: "text", text: "second" }],
+      },
     });
     await done;
 

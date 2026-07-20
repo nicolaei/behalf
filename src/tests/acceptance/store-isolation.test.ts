@@ -7,7 +7,7 @@ describe("two stores don't share state", () => {
     const storeB = adapters.stores.memoryStore();
 
     storeA.append({ message: { role: "system", content: [] } }, { type: "message" });
-    storeA.submit({ role: "user", intent: "standard", content: [] });
+    storeA.receive({ kind: "message", message: { role: "user", intent: "standard", content: [] } });
 
     expect(storeB.events()).toEqual([]);
     expect(storeB.inbox()).toEqual([]);

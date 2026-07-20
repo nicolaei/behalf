@@ -137,9 +137,15 @@ export async function runBranchNode(
     const message: UserMessage | undefined =
       waitMode === "block"
         ? await waitForMessage(runtime.store, kinds)
-        : runtime.store.consume(
-            (candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind),
-          );
+        : (() => {
+            const entry = runtime.store.consume(
+              (candidate) =>
+                candidate.kind === "message" &&
+                candidate.message.kind !== undefined &&
+                kinds.includes(candidate.message.kind),
+            );
+            return entry?.kind === "message" ? entry.message : undefined;
+          })();
     if (!message) return { kind: "parked", waitingFor: kinds, thread };
 
     const routed = await driveWaitForMessage(
@@ -390,7 +396,10 @@ export function replayBranchMessage(
   const thenEdge = flow.edges.find((edge) => edge.from === waitNodeId && edge.edge === "then");
   if (!thenEdge) throw new Error(`fan-out branch step "${waitNodeId}" has no outgoing then edge`);
 
-  applyBranchEdge(branch, thenEdge, group.joinNodeId, { ok: true } satisfies WaitForResult);
+  applyBranchEdge(branch, thenEdge, group.joinNodeId, {
+    ok: true,
+    result: message,
+  } satisfies WaitForResult);
 }
 
 /** One branch cursor's outward `CursorState` — `parked` (not `done`, reserved for the root) once it has folded its own output in or is waiting on its own `waitFor` (with `waitingFor` set, mirroring the root/use-descent cases), `active` while it still has work of its own left. */
