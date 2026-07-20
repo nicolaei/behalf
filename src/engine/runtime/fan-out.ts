@@ -4,11 +4,18 @@
 
 import type { Graph, NodeId, EdgeDefinition } from "../../flow/graph.js";
 import type { ThreadId } from "../../flow/thread.js";
-import type { Emit, StepContext } from "../../flow/step.js";
+import type { Message, MessageKind, UserMessage } from "../../flow/message.js";
+import type { Emit, StepContext, WaitForResult } from "../../flow/step.js";
 import type { Runtime } from "../runtime.js";
 import { freshCorrelationId } from "./ids.js";
 import { notImplemented, unreachable } from "../errors.js";
-import { type Thread, stepIdentity, appendOutput, applyThreadAction } from "./routing.js";
+import {
+  type Thread,
+  stepIdentity,
+  appendOutput,
+  applyThreadAction,
+  withMessage,
+} from "./routing.js";
 import {
   runStep,
   makeStepContext,
@@ -16,7 +23,8 @@ import {
   handleStepError,
   type ExecutionContext,
 } from "./step-runner.js";
-import { runModelCall, callTool } from "./execution.js";
+import { runModelCall, callTool, waitForMessage } from "./execution.js";
+import { driveWaitForMessage, findInterruptNodes } from "./drive.js";
 import type { CursorState, TickOutcome } from "./tick.js";
 
 /** What running one fan-out branch to completion settled with — a normal reach of its convergence node, or a nested `invalidate` emit that means the fan-out step itself must be rerun instead of joining. */
@@ -68,29 +76,43 @@ export function findJoinNode(branchTargets: NodeId[], fanOutNodeId: NodeId, flow
 /**
  * Runs one node inside a fan-out branch: builds its `StepContext`, retries on
  * error via the shared `handleStepError` path, commits a `compact` the same
- * way the main loop does, and logs a plain output. Never follows an edge —
- * that's the caller's job, since `runBranch` walks a whole chain to the join
- * while tick's per-call branch advance stops after this one node.
+ * way the main loop does, and logs a plain output. A `waitFor` node is
+ * consumed the same way `driveWaitForMessage` handles it everywhere else —
+ * folding the message into the branch's own thread and (if armed) running an
+ * interrupt — but obtaining the message itself differs by `waitMode`:
+ * `"block"` (runBranch/runFlow) waits for one to arrive via the shared
+ * `waitForMessage`; `"peek"` (tick's `advanceFanOutGroup`, the default) takes
+ * one non-blocking shot at the inbox and reports `{ kind: "parked" }` if
+ * nothing is there yet, mirroring how tick's own top-level waitFor handling
+ * never blocks. `use`/`interrupt`/`finish` reached as a branch node stay
+ * notImplemented — out of scope for a branch. Only a plain `step`'s result
+ * never follows an edge (that's the caller's job, since `runBranch` walks a
+ * whole chain to the join while tick's per-call branch advance stops after
+ * one node); a `waitFor`'s result already names the routed next node — its
+ * own edge (or an armed interrupt's) — since folding the message and routing
+ * off it is one inseparable step, same as everywhere else in the engine.
  */
 export async function runBranchNode(
   nodeId: NodeId,
   input: unknown,
   ctx: ExecutionContext,
+  waitMode: "block" | "peek" = "peek",
 ): Promise<
   | { kind: "invalidate"; emit: Extract<Emit, { invalidate: NodeId }>; thread: Thread }
   | { kind: "output"; output: unknown; thread: Thread }
+  | { kind: "routed"; thread: Thread; to: NodeId; input: unknown }
+  | { kind: "parked"; waitingFor: MessageKind[]; thread: Thread }
 > {
   const { flow, runtime } = ctx;
   let thread = ctx.thread;
   const nodeDef = flow.nodes.get(nodeId);
   if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${nodeId}"`);
-  if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
-  const nodeIdentity = stepIdentity(nodeId, nodeDef.label);
 
   const setThread = (next: Thread): void => {
     thread = next;
   };
 
+  const nodeIdentity = stepIdentity(nodeId, nodeDef.kind === "step" ? nodeDef.label : undefined);
   const branchContext: StepContext = makeStepContext({
     getThread: () => thread,
     inputs: [input],
@@ -104,6 +126,31 @@ export async function runBranchNode(
     modelCall: (profile) => runModelCall(profile, branchContext, runtime, nodeIdentity, setThread),
     callTool: (tool, toolInput) => callTool(tool, toolInput, thread.id, runtime, nodeIdentity),
   });
+
+  if (nodeDef.kind === "waitFor") {
+    const interrupts = findInterruptNodes(flow);
+    const kinds = [nodeDef.messageKind, ...interrupts.map((interrupt) => interrupt.messageKind)];
+    const message: UserMessage | undefined =
+      waitMode === "block"
+        ? await waitForMessage(runtime.store, kinds)
+        : runtime.store.consume(
+            (candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind),
+          );
+    if (!message) return { kind: "parked", waitingFor: kinds, thread };
+
+    const routed = await driveWaitForMessage(
+      message,
+      nodeId,
+      interrupts,
+      branchContext,
+      flow,
+      runtime,
+      setThread,
+    );
+    return { kind: "routed", thread: routed.thread, to: routed.to, input: routed.input };
+  }
+
+  if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
 
   let stepOutput: unknown = undefined;
   for (;;) {
@@ -137,9 +184,12 @@ export async function runBranchNode(
  * `callTool`/`compact`/`invalidate`/`error` behave the same as the main loop
  * at every step; `invalidate` bubbles up to the caller instead of being acted
  * on locally (see the fan-out handling in `driveStepEmit`), and errors go
- * through the same retry-or-fail path. Only `step` nodes are supported inside
- * a branch; `waitFor`, `use`, or a nested fan-out are notImplemented. Each
- * step's own work is delegated to `runBranchNode`, shared with tick's
+ * through the same retry-or-fail path. `step` and `waitFor` nodes are
+ * supported inside a branch — a `waitFor` genuinely blocks this branch (via
+ * `runBranchNode`'s `"block"` mode) until a matching message arrives, same
+ * as the top-level drive loop's own `waitFor` handling, but scoped to this
+ * branch's own forked thread; `use` or a nested fan-out are notImplemented.
+ * Each node's own work is delegated to `runBranchNode`, shared with tick's
  * per-call branch advance so both drive the exact same node logic.
  */
 export async function runBranch(
@@ -156,15 +206,29 @@ export async function runBranch(
   for (;;) {
     const nodeDef = flow.nodes.get(currentNode);
     if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${currentNode}"`);
-    if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
-    if (nodeDef.label) currentThread = { ...currentThread, label: nodeDef.label };
+    if (nodeDef.kind !== "step" && nodeDef.kind !== "waitFor")
+      notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
+    if (nodeDef.kind === "step" && nodeDef.label)
+      currentThread = { ...currentThread, label: nodeDef.label };
 
-    const result = await runBranchNode(currentNode, currentInput, {
-      ...ctx,
-      thread: currentThread,
-    });
+    const result = await runBranchNode(
+      currentNode,
+      currentInput,
+      { ...ctx, thread: currentThread },
+      "block",
+    );
     currentThread = result.thread;
     if (result.kind === "invalidate") return result;
+    if (result.kind === "parked") unreachable("runBranch: blocking waitFor reported parked");
+
+    if (result.kind === "routed") {
+      // driveWaitForMessage already resolved the routed edge (this node's own,
+      // or an armed interrupt's) — nothing left to look up.
+      if (result.to === joinNodeId) return { kind: "output", output: result.input };
+      currentNode = result.to;
+      currentInput = result.input;
+      continue;
+    }
 
     // Follow the step's single outgoing then edge.
     const thenEdge = flow.edges.find((e) => e.from === currentNode && e.edge === "then");
@@ -186,10 +250,10 @@ export async function runBranch(
   }
 }
 
-/** Applies a branch step's resolved `then` edge: reaching the join marks the branch done, holding its output and settling `current` on the step that just produced it (`thenEdge.from` — the node the caller just ran) so it stays there per `BranchReplay.current`'s own contract ("once done, it stays at the last chain node the branch actually ran"); otherwise advances `current`/`currentInput` to the edge's target. Shared by `runBranch`'s own loop state, `replayBranchOutput`, and `advanceFanOutGroup` — the three places a branch's step-to-step edge gets resolved — so all three settle a branch reaching its join the same way. */
+/** Applies a branch step's resolved `then` edge (or an already-resolved `{ from, to }` pair, e.g. a `waitFor`'s routed target): reaching the join marks the branch done, holding its output and settling `current` on the step that just produced it (`from` — the node the caller just ran) so it stays there per `BranchReplay.current`'s own contract ("once done, it stays at the last chain node the branch actually ran"); otherwise advances `current`/`currentInput` to `to`. Shared by `runBranch`'s own loop state, `replayBranchOutput`/`replayBranchMessage`, and `advanceFanOutGroup` — every place a branch's step-to-step edge gets resolved — so all of them settle a branch reaching its join the same way. */
 export function applyBranchEdge(
   branch: Pick<BranchReplay, "current" | "currentInput" | "done" | "output">,
-  thenEdge: EdgeDefinition,
+  thenEdge: Pick<EdgeDefinition, "to" | "from">,
   joinNodeId: NodeId,
   output: unknown,
 ): void {
@@ -210,7 +274,10 @@ export function applyBranchEdge(
  * `runFlow`) — absent while the branch hasn't been picked yet. `current` is
  * the node this branch will run next; once `done`, it stays at the last
  * chain node the branch actually ran, and `output` holds what it reported
- * to the join.
+ * to the join. `waitingFor` is set only while this branch is parked at its
+ * own `waitFor` node with nothing in the inbox yet — the same shape
+ * `CursorState.waitingFor` carries for the root and use-descent cases —
+ * and cleared the moment a message resolves it.
  */
 export interface BranchReplay {
   target: NodeId;
@@ -220,6 +287,7 @@ export interface BranchReplay {
   started: boolean;
   done: boolean;
   output?: unknown;
+  waitingFor?: MessageKind[];
 }
 
 /**
@@ -268,7 +336,7 @@ export function foldGroup(
   };
 }
 
-/** Reconstructs a forked branch thread from its observed thread id — an approximation of `applyThreadAction(mainThread, "fork", ...)` sufficient for a branch, which (like `runBranch`) never runs a node that folds a further message into its thread. */
+/** Reconstructs a forked branch thread from its observed thread id — an approximation of `applyThreadAction(mainThread, "fork", ...)` sufficient for a branch: a branch CAN fold a further message into its own thread now (via a `waitFor` node, same as `driveWaitForMessage` everywhere else), but that fold is replayed onto the reconstructed thread separately, by `replayBranchMessage` (`withMessage`) — this function only ever needs to approximate the fork point itself, not any fold that happened after it. */
 export function replayForkedThread(mainThread: Thread, threadId: ThreadId): Thread {
   return {
     id: threadId,
@@ -302,8 +370,42 @@ export function replayBranchOutput(
   applyBranchEdge(branch, thenEdge, group.joinNodeId, value);
 }
 
-/** One branch cursor's outward `CursorState` — `parked` (not `done`, reserved for the root) once it has folded its own output in, `active` while it still has work of its own left. */
+/** Folds one committed message event into whichever branch of `group` it belongs to — mirrors `replayBranchOutput`, but a `waitFor` node's own consumed message carries no `stepId` of its own (unlike a step's output event), so first touch for such a branch is instead recognized as the earliest not-yet-touched one: tick's one-branch-at-a-time model guarantees at most one branch is ever mid-flight, so an unrecognized thread id can only belong to it. Doesn't check whether the message would have armed an interrupt instead of this waitFor's own edge — the top-level single-line replay (`replayPosition`'s own `message`/`waitFor` handling) makes the same simplification, so this stays at parity rather than adding a capability replay doesn't have anywhere else yet. */
+export function replayBranchMessage(
+  group: FanOutGroup,
+  threadId: ThreadId | undefined,
+  message: Message,
+  flow: Graph,
+): void {
+  let branch = threadId
+    ? group.branches.find((candidate) => candidate.thread?.id === threadId)
+    : undefined;
+  if (!branch) {
+    branch = group.branches.find((candidate) => !candidate.done && !candidate.started);
+    if (!branch) return; // not a node this fan-out group owns
+    branch.started = true;
+    if (threadId) branch.thread = replayForkedThread(group.mainThread, threadId);
+  }
+  branch.thread = withMessage(branch.thread ?? group.mainThread, message);
+  delete branch.waitingFor;
+
+  const waitNodeId = branch.current;
+  const thenEdge = flow.edges.find((edge) => edge.from === waitNodeId && edge.edge === "then");
+  if (!thenEdge) throw new Error(`fan-out branch step "${waitNodeId}" has no outgoing then edge`);
+
+  applyBranchEdge(branch, thenEdge, group.joinNodeId, { ok: true } satisfies WaitForResult);
+}
+
+/** One branch cursor's outward `CursorState` — `parked` (not `done`, reserved for the root) once it has folded its own output in or is waiting on its own `waitFor` (with `waitingFor` set, mirroring the root/use-descent cases), `active` while it still has work of its own left. */
 export function branchCursorState(branch: BranchReplay, group: FanOutGroup): CursorState {
+  if (branch.waitingFor) {
+    return {
+      node: branch.current,
+      status: "parked",
+      waitingFor: branch.waitingFor,
+      parent: group.fanOutNodeId,
+    };
+  }
   return {
     node: branch.current,
     status: branch.done ? "parked" : "active",
@@ -312,17 +414,39 @@ export function branchCursorState(branch: BranchReplay, group: FanOutGroup): Cur
 }
 
 /**
- * Advances one not-yet-done branch of a fan-out group by exactly one node —
- * tick's per-call granularity applied to `runBranchNode` instead of
- * `runBranch`'s run-to-completion loop. Forks the branch's own thread off
- * the group's `mainThread` the first time it's picked, same as `runBranch`
- * forks per branch. Once every branch has reported, cursor-tracking
- * collapses: the caller sees a single active cursor at the join node,
- * exactly as if replay had found the fold already in the log. Picks the
- * first not-done branch in the group's declared order (`Array.find`,
- * sequential, not round-robin) — a documented contract observable at
- * tick()'s entrypoint, since it decides which branch each tick() call
- * advances when more than one still has work left.
+ * Advances a fan-out group by exactly one node of real work — tick's
+ * per-call granularity applied to `runBranchNode` instead of `runBranch`'s
+ * run-to-completion loop. Tries each not-yet-done branch in the group's
+ * declared order (plain sequential loop, not round-robin): a peek at a
+ * branch parked on its own `waitFor` that still finds nothing is a no-op
+ * (nothing committed to the log, since `runBranchNode`'s `"peek"` mode
+ * never blocks), so this keeps trying the NEXT not-done branch in the same
+ * call instead of stopping there — a branch declared before an active
+ * sibling (e.g. `start.then([wait, a])`) must not starve that sibling
+ * forever. This has to happen within a single call, not by remembering
+ * which branch was parked last time: `FanOutGroup` is rebuilt from scratch
+ * on every `tick()` call (see `replayPosition`), so a `BranchReplay`'s own
+ * `waitingFor` never survives between calls — only what actually got
+ * committed to `runtime.store` does. The loop stops the moment a branch
+ * does real work (consumes a message, runs a step) and returns right away,
+ * preserving tick's one-step-of-work-per-call budget; only once EVERY
+ * not-done branch has been peeked and found parked this call does it
+ * return the whole group as parked. In the ordinary case (the very first
+ * not-done branch can make progress) this behaves exactly like the old
+ * `Array.find`-and-stop code: one iteration, one branch touched, same
+ * order as always.
+ *
+ * Forks the branch's own thread off the group's `mainThread` the first
+ * time it's picked, same as `runBranch` forks per branch. Once every
+ * branch has reported, cursor-tracking collapses: the caller sees a single
+ * active cursor at the join node, exactly as if replay had found the fold
+ * already in the log.
+ *
+ * A branch parked at its own `waitFor` (`runBranchNode`'s default `"peek"`
+ * mode finding nothing in the inbox) reports back via `waitingFor` on its
+ * `BranchReplay` — the same shape a parked root or use-descent cursor
+ * already carries — purely for this call's own `CursorState` output; the
+ * next call reconstructs the group from scratch and tries again.
  */
 export async function advanceFanOutGroup(
   group: FanOutGroup,
@@ -330,32 +454,55 @@ export async function advanceFanOutGroup(
   runtime: Runtime,
   attemptsByNode: Map<NodeId, number>,
 ): Promise<TickOutcome> {
-  const branch = group.branches.find((candidate) => !candidate.done);
-  if (!branch) unreachable("advanceFanOutGroup: no unfinished branch in a fan-out group");
+  const notDone = group.branches.filter((candidate) => !candidate.done);
+  if (notDone.length === 0)
+    unreachable("advanceFanOutGroup: no unfinished branch in a fan-out group");
 
-  branch.thread ??= applyThreadAction(group.mainThread, "fork", undefined, runtime);
-  let branchThread = branch.thread;
-  const nodeDef = flow.nodes.get(branch.current);
-  if (nodeDef?.kind === "step" && nodeDef.label)
-    branchThread = { ...branchThread, label: nodeDef.label };
-  branch.thread = branchThread;
+  for (const branch of notDone) {
+    branch.thread ??= applyThreadAction(group.mainThread, "fork", undefined, runtime);
+    let branchThread = branch.thread;
+    const nodeDef = flow.nodes.get(branch.current);
+    if (nodeDef?.kind === "step" && nodeDef.label)
+      branchThread = { ...branchThread, label: nodeDef.label };
+    branch.thread = branchThread;
 
-  const result = await runBranchNode(branch.current, branch.currentInput, {
-    flow,
-    runtime,
-    thread: branchThread,
-    attemptsByNode,
-  });
-  branch.thread = result.thread;
-  if (result.kind === "invalidate") notImplemented("tick: fan-out branch invalidate");
+    const result = await runBranchNode(branch.current, branch.currentInput, {
+      flow,
+      runtime,
+      thread: branchThread,
+      attemptsByNode,
+    });
+    branch.thread = result.thread;
+    if (result.kind === "invalidate") notImplemented("tick: fan-out branch invalidate");
 
-  const thenEdge = flow.edges.find((edge) => edge.from === branch.current && edge.edge === "then");
-  if (!thenEdge)
-    throw new Error(`fan-out branch step "${branch.current}" has no outgoing then edge`);
+    if (result.kind === "parked") {
+      branch.waitingFor = result.waitingFor;
+      continue; // this branch has nothing to do yet; try the next one
+    }
+    delete branch.waitingFor;
 
-  applyBranchEdge(branch, thenEdge, group.joinNodeId, result.output);
+    if (result.kind === "routed") {
+      // driveWaitForMessage already resolved the routed edge — nothing left to look up.
+      applyBranchEdge(
+        branch,
+        { from: branch.current, to: result.to },
+        group.joinNodeId,
+        result.input,
+      );
+    } else {
+      const thenEdge = flow.edges.find(
+        (edge) => edge.from === branch.current && edge.edge === "then",
+      );
+      if (!thenEdge)
+        throw new Error(`fan-out branch step "${branch.current}" has no outgoing then edge`);
+      applyBranchEdge(branch, thenEdge, group.joinNodeId, result.output);
+    }
 
-  const folded = foldGroup(group);
-  if (folded) return [{ node: folded.current, status: "active" }];
+    const folded = foldGroup(group);
+    if (folded) return [{ node: folded.current, status: "active" }];
+    return group.branches.map((candidate) => branchCursorState(candidate, group));
+  }
+
+  // Every not-done branch was peeked this call and found parked.
   return group.branches.map((candidate) => branchCursorState(candidate, group));
 }

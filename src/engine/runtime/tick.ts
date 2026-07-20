@@ -24,6 +24,7 @@ import {
   buildFanOutGroup,
   foldGroup,
   replayBranchOutput,
+  replayBranchMessage,
   advanceFanOutGroup,
   branchCursorState,
 } from "./fan-out.js";
@@ -218,9 +219,13 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
           replayBranchOutput(group, envelope.threadId, stepId, value, ownerFlow);
         }
       }
-      // toolCall/toolResult/compaction/invalidation/error/message inside a
-      // branch aren't produced by any node kind `runBranchNode` supports —
-      // out of scope for this slice's replay, same as the single-line path.
+      if (envelope.type === "message") {
+        const { message } = envelope.event as Event["message"];
+        replayBranchMessage(group, envelope.threadId, message, ownerFlow);
+      }
+      // toolCall/toolResult/compaction/invalidation/error inside a branch aren't
+      // produced by any node kind `runBranchNode` supports — out of scope for
+      // this slice's replay, same as the single-line path.
       continue;
     }
 
