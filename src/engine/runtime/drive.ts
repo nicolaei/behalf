@@ -31,9 +31,10 @@ import {
   assertJoinTagging,
   commitCompaction,
   handleStepError,
+  type ExecutionContext,
 } from "./step-runner.js";
 import { runModelCall, callTool, waitForMessage } from "./execution.js";
-import { findJoinNode, runBranch, type BranchContext, type BranchResult } from "./fan-out.js";
+import { findJoinNode, runBranch, type BranchResult } from "./fan-out.js";
 
 export interface InterruptNode {
   id: NodeId;
@@ -60,12 +61,11 @@ export function looksLikeMessage(value: unknown): value is Message {
 async function driveUseNode(
   node: Extract<NodeKind, { kind: "use" }>,
   nodeId: NodeId,
-  thread: Thread,
   reason: Message | undefined,
   currentInput: unknown,
-  flow: Graph,
-  runtime: Runtime,
+  ctx: ExecutionContext,
 ): Promise<RouteResult> {
+  const { thread, flow, runtime } = ctx;
   // The subgraph's initial prompt: the reaching edge's `prompt` output, if it
   // had one (the previous iteration's `follow` already pushed it onto this
   // thread; logged again here so it lands in the log too), otherwise the raw
@@ -179,11 +179,9 @@ export async function driveStepEmit(
   emit: Emit,
   node: Extract<NodeKind, { kind: "step" }>,
   nodeId: NodeId,
-  thread: Thread,
-  flow: Graph,
-  runtime: Runtime,
-  attemptsByNode: Map<NodeId, number>,
+  ctx: ExecutionContext,
 ): Promise<StepOutcome> {
+  const { thread, flow, runtime } = ctx;
   if ("invalidate" in emit) {
     return commitInvalidation(runtime, thread, emit);
   }
@@ -194,7 +192,7 @@ export async function driveStepEmit(
   }
 
   if ("error" in emit) {
-    return handleStepError(emit, nodeId, thread.id, runtime, attemptsByNode);
+    return handleStepError(emit, nodeId, ctx);
   }
 
   // Emit's variants are exactly invalidate/compact/error/output — having
@@ -208,16 +206,12 @@ export async function driveStepEmit(
     // validates linearity (no nested fan-out) and that all branches share a
     // single common join, replacing the old per-branch joinEdge lookup.
     const joinNodeId = findJoinNode(branchTargets, nodeId, flow);
-    const ctx: BranchContext = { flow, runtime, attemptsByNode };
     const results: BranchResult[] = await Promise.all(
       branchTargets.map((branch: NodeId) =>
-        runBranch(
-          branch,
-          applyThreadAction(thread, "fork", undefined, runtime),
-          emit.output,
-          joinNodeId,
-          ctx,
-        ),
+        runBranch(branch, emit.output, joinNodeId, {
+          ...ctx,
+          thread: applyThreadAction(thread, "fork", undefined, runtime),
+        }),
       ),
     );
 
@@ -392,15 +386,12 @@ export async function driveGraph(
     if (node.kind === "finish") return { thread: currentThread, output: currentInput };
 
     if (node.kind === "use") {
-      const routed = await driveUseNode(
-        node,
-        current,
-        currentThread,
-        reason,
-        currentInput,
+      const routed = await driveUseNode(node, current, reason, currentInput, {
         flow,
         runtime,
-      );
+        thread: currentThread,
+        attemptsByNode,
+      });
       currentThread = routed.thread;
       currentInput = routed.input;
       reason = routed.reason;
@@ -438,15 +429,12 @@ export async function driveGraph(
     const stepContext: StepContext = { ...context, inputs };
     const emit = await runStep(node.run, stepContext);
 
-    const outcome = await driveStepEmit(
-      emit,
-      node,
-      current,
-      currentThread,
+    const outcome = await driveStepEmit(emit, node, current, {
       flow,
       runtime,
+      thread: currentThread,
       attemptsByNode,
-    );
+    });
     if (outcome.kind === "retry") continue;
 
     currentThread = outcome.thread;

@@ -461,15 +461,12 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       }
     }
 
-    const outcome = await driveStepEmit(
-      emit,
-      node,
-      frame.current,
-      currentThread,
-      frame.flow,
+    const outcome = await driveStepEmit(emit, node, frame.current, {
+      flow: frame.flow,
       runtime,
+      thread: currentThread,
       attemptsByNode,
-    );
+    });
 
     if (outcome.kind === "retry") continue;
     if (outcome.pendingInputs)

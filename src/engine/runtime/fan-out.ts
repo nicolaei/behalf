@@ -9,7 +9,13 @@ import type { Runtime } from "../runtime.js";
 import { freshCorrelationId } from "./ids.js";
 import { notImplemented, unreachable } from "../errors.js";
 import { type Thread, stepIdentity, appendOutput, applyThreadAction } from "./routing.js";
-import { runStep, makeStepContext, commitCompaction, handleStepError } from "./step-runner.js";
+import {
+  runStep,
+  makeStepContext,
+  commitCompaction,
+  handleStepError,
+  type ExecutionContext,
+} from "./step-runner.js";
 import { runModelCall, callTool } from "./execution.js";
 import type { CursorState, TickOutcome } from "./tick.js";
 
@@ -59,13 +65,6 @@ export function findJoinNode(branchTargets: NodeId[], fanOutNodeId: NodeId, flow
   throw new Error(`fan-out from "${fanOutNodeId}": branches never converge on a common node`);
 }
 
-/** The context a fan-out branch step runs against — its graph, the runtime it calls into, and the shared per-node attempt counter — three values that travel together, unchanged, across a whole branch's run. */
-export interface BranchContext {
-  flow: Graph;
-  runtime: Runtime;
-  attemptsByNode: Map<NodeId, number>;
-}
-
 /**
  * Runs one node inside a fan-out branch: builds its `StepContext`, retries on
  * error via the shared `handleStepError` path, commits a `compact` the same
@@ -75,14 +74,13 @@ export interface BranchContext {
  */
 export async function runBranchNode(
   nodeId: NodeId,
-  thread: Thread,
   input: unknown,
-  ctx: BranchContext,
+  ctx: ExecutionContext,
 ): Promise<
   | { kind: "invalidate"; emit: Extract<Emit, { invalidate: NodeId }> }
   | { kind: "output"; output: unknown }
 > {
-  const { flow, runtime, attemptsByNode } = ctx;
+  const { flow, runtime, thread } = ctx;
   const nodeDef = flow.nodes.get(nodeId);
   if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${nodeId}"`);
   if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
@@ -114,7 +112,7 @@ export async function runBranchNode(
     }
 
     if ("error" in emit) {
-      await handleStepError(emit, nodeId, thread.id, runtime, attemptsByNode);
+      await handleStepError(emit, nodeId, ctx);
       continue;
     }
 
@@ -141,14 +139,13 @@ export async function runBranchNode(
  */
 export async function runBranch(
   startNode: NodeId,
-  initialThread: Thread,
   input: unknown,
   joinNodeId: NodeId,
-  ctx: BranchContext,
+  ctx: ExecutionContext,
 ): Promise<BranchResult> {
   const { flow } = ctx;
   let currentNode = startNode;
-  let currentThread = initialThread;
+  let currentThread = ctx.thread;
   let currentInput = input;
 
   for (;;) {
@@ -157,7 +154,10 @@ export async function runBranch(
     if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
     if (nodeDef.label) currentThread = { ...currentThread, label: nodeDef.label };
 
-    const result = await runBranchNode(currentNode, currentThread, currentInput, ctx);
+    const result = await runBranchNode(currentNode, currentInput, {
+      ...ctx,
+      thread: currentThread,
+    });
     if (result.kind === "invalidate") return result;
 
     // Follow the step's single outgoing then edge.
@@ -334,9 +334,10 @@ export async function advanceFanOutGroup(
     branchThread = { ...branchThread, label: nodeDef.label };
   branch.thread = branchThread;
 
-  const result = await runBranchNode(branch.current, branchThread, branch.currentInput, {
+  const result = await runBranchNode(branch.current, branch.currentInput, {
     flow,
     runtime,
+    thread: branchThread,
     attemptsByNode,
   });
   if (result.kind === "invalidate") notImplemented("tick: fan-out branch invalidate");
