@@ -65,12 +65,11 @@ interface ReplayFrame {
  * side-channel: `step` is ordinary mid-flight progress; `use-descent` is a
  * `use` node's subgraph, entered but not yet finished, wrapping whatever
  * position is current inside it; `fan-out` is an in-flight fan-out group,
- * replacing the position entirely (fan-out is only ever reconstructed at the
- * outermost level — see the `notImplemented` guards below and in `tick`'s own
- * live loop — so today it can only appear as the tree's root, never nested
- * under a `use-descent`, even though the type itself doesn't forbid that
- * combination). Parameterized over the frame shape so the same shape serves
- * both replay (`ReplayFrame`) and tick's live walk (`LiveFrame`).
+ * replacing the position at whatever depth it occurred — the tree's root
+ * for a top-level fan-out, or nested under one or more `use-descent`s for a
+ * fan-out inside a used subgraph. Parameterized over the frame shape so the
+ * same shape serves both replay (`ReplayFrame`) and tick's live walk
+ * (`LiveFrame`).
  */
 export type CursorTree<TFrame = ReplayFrame> =
   | { kind: "step"; frame: TFrame }
@@ -137,8 +136,9 @@ interface ReplayPosition {
   tree: CursorTree;
   // Set only when replay landed on a join node whose fan-out group just
   // folded (every branch reported) — one entry per branch, in declared
-  // order, mirroring driveStepEmit's own `pendingInputs`. Fan-out is only
-  // ever reconstructed at the outermost level — see `advanceFanOutGroup`.
+  // order, mirroring driveStepEmit's own `pendingInputs`. Set regardless of
+  // whether that fan-out was at the outermost level or nested inside a
+  // used subgraph — see `advanceFanOutGroup`.
   pendingInputs?: unknown[];
 }
 
@@ -157,9 +157,10 @@ type ReplayResult = ({ kind: "single" } & ReplayPosition) | { kind: "fanout"; gr
  * every branch has reported (folding back to a single position at the join
  * node, `pendingInputs` set) or the join node's own output event shows the
  * fold already ran on an earlier tick call — the log-level signal to resume
- * ordinary single-line replay from there. Fan-out is only ever reconstructed
- * at the outermost level — a fan-out inside a used subgraph is
- * notImplemented, matching tick()'s own live handling.
+ * ordinary single-line replay from there. This works at any depth — a
+ * fan-out reconstructed while inside a use-descent builds the group as that
+ * level's own tree node (see the `leaf.node.kind === "fan-out"` handling
+ * below), matching tick()'s own live handling of the same nesting.
  *
  * A `use` node's subgraph shares its parent's thread (never forked), so
  * thread identity says nothing about whether a given event belongs to the
@@ -183,23 +184,38 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
   for (const envelope of runtime.store.events()) {
     if (envelope.form !== "committed") continue;
 
-    if (tree.kind === "fan-out") {
-      const group = tree.group;
+    // Resolve the current position's innermost node before anything else —
+    // it may be a still-in-flight fan-out (root or nested inside one or more
+    // use-descents), which needs its own per-branch handling below instead of
+    // the ordinary step/message dispatch.
+    const path: PathLevel<ReplayFrame>[] = cursorPath(flow, tree);
+    const leaf = path[path.length - 1];
+    if (!leaf) unreachable("replayPosition: position path is empty");
+
+    if (leaf.node.kind === "fan-out") {
+      const group = leaf.node.group;
+      const ownerFlow = leaf.flow;
       if (envelope.type === "output") {
         const { value } = envelope.event as Event["output"];
         const stepId = envelope.stepId as NodeId;
         if (stepId === group.joinNodeId) {
           // The join already ran on an earlier tick call: the group folded
-          // in the log itself. Resume ordinary single-line replay from here.
+          // in the log itself. Resume ordinary single-line replay from here,
+          // rebuilding whatever use-descent wrapping led to this depth.
           thread = group.mainThread;
-          const routed = route(flow.edges, stepId, value, thread, runtime);
+          const routed = route(ownerFlow.edges, stepId, value, thread, runtime);
           thread = routed.thread;
-          tree = {
+          tree = rebuildFromPath(path, path.length - 1, {
             kind: "step",
-            frame: { flow, current: routed.to, currentInput: routed.input, reason: routed.reason },
-          };
+            frame: {
+              flow: ownerFlow,
+              current: routed.to,
+              currentInput: routed.input,
+              reason: routed.reason,
+            },
+          });
         } else {
-          replayBranchOutput(group, envelope.threadId, stepId, value, flow);
+          replayBranchOutput(group, envelope.threadId, stepId, value, ownerFlow);
         }
       }
       // toolCall/toolResult/compaction/invalidation/error/message inside a
@@ -221,7 +237,6 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
       // above it already reached its own `finish` — each logged its own
       // such completion event first — so rebuilding the tree back to that
       // depth is simply catching up on pops a live tick() call already made.
-      const path: PathLevel<ReplayFrame>[] = cursorPath(flow, tree);
       let depth = path.length - 1;
       for (; depth >= 0; depth -= 1) {
         if (path[depth]?.flow.nodes.has(stepId)) break;
@@ -233,14 +248,16 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
 
       const branchTargets = thenEdges(ownerFlow.edges, stepId).map((edge) => edge.to);
       if (branchTargets.length > 1) {
-        if (depth > 0) notImplemented("tick: fan-out inside a used subgraph");
         // A fan-out node's own output: hand off to per-branch reconstruction
         // instead of `advance`, which would silently pick just the first
         // branch (see `selectEdge`) and desync from what actually ran.
-        tree = {
+        // `rebuildFromPath` rewraps whatever use-descents sit above this
+        // depth unchanged, so this works whether the fan-out is at the
+        // outermost level or nested inside a used subgraph.
+        tree = rebuildFromPath(path, depth, {
           kind: "fan-out",
           group: buildFanOutGroup(branchTargets, stepId, ownerFlow, thread, value),
-        };
+        });
         continue;
       }
 
@@ -260,21 +277,19 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
 
     if (envelope.type === "message") {
       const { message } = envelope.event as Event["message"];
-      const path = cursorPath(flow, tree);
-      const top = path[path.length - 1];
-      if (!top) unreachable("replayPosition: position path is empty");
-      if (top.node.kind !== "step") unreachable("replayPosition: innermost position is not a step");
-      const topFrame = top.node.frame;
-      const node = top.flow.nodes.get(topFrame.current);
+      if (leaf.node.kind !== "step")
+        unreachable("replayPosition: innermost position is not a step");
+      const topFrame = leaf.node.frame;
+      const node = leaf.flow.nodes.get(topFrame.current);
 
       if (node?.kind === "waitFor") {
         thread = withMessage(thread, message);
-        const routed = route(top.flow.edges, topFrame.current, message, thread, runtime);
+        const routed = route(leaf.flow.edges, topFrame.current, message, thread, runtime);
         thread = routed.thread;
         tree = rebuildFromPath(path, path.length - 1, {
           kind: "step",
           frame: {
-            flow: top.flow,
+            flow: leaf.flow,
             current: routed.to,
             currentInput: { ok: true } satisfies WaitForResult,
             reason: routed.reason,
@@ -310,17 +325,32 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     // position on their own — out of scope for this slice's replay.
   }
 
-  if (tree.kind === "fan-out") {
-    const folded = foldGroup(tree.group);
+  const finalPath = cursorPath(flow, tree);
+  const finalLeaf = finalPath[finalPath.length - 1];
+  if (!finalLeaf) unreachable("replayPosition: final position path is empty");
+
+  if (finalLeaf.node.kind === "fan-out") {
+    const group = finalLeaf.node.group;
+    const folded = foldGroup(group);
     if (folded) {
       return {
         kind: "single",
-        thread: tree.group.mainThread,
-        tree: { kind: "step", frame: { flow, current: folded.current, currentInput: undefined } },
+        thread: group.mainThread,
+        tree: rebuildFromPath(finalPath, finalPath.length - 1, {
+          kind: "step",
+          frame: { flow: finalLeaf.flow, current: folded.current, currentInput: undefined },
+        }),
         pendingInputs: folded.pendingInputs,
       };
     }
-    return { kind: "fanout", group: tree.group };
+    // Still in flight once the log runs out. At the outermost level tick()
+    // has a dedicated fast path (`position.kind === "fanout"`, see `tick`
+    // below) that skips the live tree entirely; nested inside a used
+    // subgraph, the tree already carries the fan-out in place and tick()'s
+    // own live loop advances it from there (see its matching
+    // `leaf.node.kind === "fan-out"` branch).
+    if (finalPath.length === 1) return { kind: "fanout", group };
+    return { kind: "single", thread, tree };
   }
 
   return { kind: "single", thread, tree };
@@ -365,7 +395,7 @@ function buildLiveFrame(
   };
 }
 
-/** Converts a replayed position tree into a live one, wiring each `step` leaf's `LiveFrame` and preserving every `use-descent` wrapper unchanged. A `fan-out` node can't appear here: `tick` already returns straight out of `advanceFanOutGroup` before ever building a live tree — see `tick`'s own `position.kind === "fanout"` branch. */
+/** Converts a replayed position tree into a live one, wiring each `step` leaf's `LiveFrame` and preserving every `use-descent` wrapper unchanged. A `fan-out` node is passed through as-is — its `group` doesn't depend on the frame type parameter, and `tick`'s own live loop (not this function) is what advances it, whether it's the tree's root or nested inside a `use-descent`. */
 function toLiveTree(
   tree: CursorTree,
   runtime: Runtime,
@@ -380,7 +410,7 @@ function toLiveTree(
       outerNode: tree.outerNode,
       inner: toLiveTree(tree.inner, runtime, getThread, setThread),
     };
-  unreachable("toLiveTree: fan-out cannot appear inside a single-line position");
+  return { kind: "fan-out", group: tree.group };
 }
 
 /** The node (in the enclosing level's own flow) that a position's innermost `use-descent` wrapper — if any — folds into; `undefined` at the root. Mirrors what `ReplayFrame.useNodeId` used to carry directly on the frame itself. */
@@ -435,6 +465,24 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     const path = cursorPath(flow, tree);
     const leaf = path[path.length - 1];
     if (!leaf) unreachable("tick: position path is empty");
+
+    if (leaf.node.kind === "fan-out") {
+      // A still-in-flight fan-out, root or nested inside a use-descent:
+      // advance exactly one branch (or fold to the join once every branch
+      // has reported), the same one-tick-call unit of work the outermost
+      // fast path above uses. Branch cursors already carry their own
+      // `parent` (the fan-out node id, from `branchCursorState`); only the
+      // folded, parent-less "active" cursor needs tagging with this level's
+      // own enclosing use node, matching how an ordinary step cursor at
+      // this depth would be tagged (see `parentOf`).
+      const outcome = await advanceFanOutGroup(leaf.node.group, leaf.flow, runtime, attemptsByNode);
+      const parentNode = parentOf(path);
+      if (parentNode === undefined) return outcome;
+      return outcome.map((cursor) =>
+        cursor.parent !== undefined ? cursor : { ...cursor, parent: parentNode },
+      );
+    }
+
     if (leaf.node.kind !== "step") unreachable("tick: innermost position is not a step");
     const frame = leaf.node.frame;
     const node = frame.flow.nodes.get(frame.current);
@@ -560,9 +608,11 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       if (branchTargets.length > 1) {
         // Same detection driveStepEmit uses (fanOutTargets), but tick spawns
         // per-branch cursors instead of running every branch to completion in
-        // one Promise.all — see advanceFanOutGroup. Only ever reconstructed at
-        // the outermost level — see replayPosition's own matching guard.
-        if (path.length > 1) notImplemented("tick: fan-out inside a used subgraph");
+        // one Promise.all — see advanceFanOutGroup. Works at any depth: the
+        // returned branch cursors already carry their own `parent` (the
+        // fan-out node id), and a resumed reconstruction of this same group
+        // is handled by replayPosition's matching `leaf.node.kind === "fan-out"`
+        // branch.
         appendOutput(
           runtime,
           currentThread.id,
