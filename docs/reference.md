@@ -1036,7 +1036,11 @@ how the engine drains it at a `waitFor` node (a matched message is folded into
 `signal` event and never folded into the thread); `append` commits an event
 (the store stamps sequence, time, session); `open` begins a streaming event
 that broadcasts deltas and commits (or aborts) at the end; `changes` yields
-envelopes of every form.
+envelopes of every form; `awaitReceive` resolves once, the next time `receive`
+adds a fresh pending entry — a wake-only signal carrying no payload, letting
+the engine's own `waitFor`-style polling park on a genuine event instead of a
+timer. A caller re-checks `inbox()`/`consume()` after it resolves; it makes no
+promise about which entry arrived, only that one did.
 
 ```ts
 type PendingEntry =
@@ -1047,6 +1051,7 @@ interface SessionStore {
   events(): Envelope[]; // committed envelopes
   inbox(): PendingEntry[]; // pending input, not yet applied
   receive(entry: PendingEntry): void;
+  awaitReceive(): Promise<void>; // resolves once, on the next receive() call
   consume(matches: (entry: PendingEntry) => boolean): PendingEntry | undefined; // find-and-remove a pending entry
   append(event: Event[EventType], meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId }): void;
   open(pending: { correlationId: string; type: EventType; stepId: string; stepName?: string; threadId: ThreadId }): Stream;

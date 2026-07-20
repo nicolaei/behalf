@@ -23,18 +23,20 @@ import { unreachable } from "../errors.js";
 import { withMessage, type Thread, type StepIdentity } from "./routing.js";
 
 /**
- * Parks until `poll` returns a value, checking on a timer tick so a
- * synchronous `store.submit()` racing this call — before or after it starts
- * — is never missed. Stops early once `stop` says so, if given.
+ * Parks until `poll` returns a value, waking on `store.awaitReceive()` so a
+ * `store.receive()` racing this call — before or after it starts — is never
+ * missed, without spinning a timer while nothing's ready. Stops early once
+ * `stop` says so, if given.
  */
 async function pollInbox<T>(
+  store: SessionStore,
   poll: () => T | undefined,
   stop?: () => boolean,
 ): Promise<T | undefined> {
   while (!stop?.()) {
     const value = poll();
     if (value) return value;
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await store.awaitReceive();
   }
   return undefined;
 }
@@ -44,7 +46,7 @@ export async function waitForMessage(
   store: SessionStore,
   kinds: readonly MessageKind[],
 ): Promise<UserMessage> {
-  const entry = await pollInbox(() =>
+  const entry = await pollInbox(store, () =>
     store.consume(
       (candidate) =>
         candidate.kind === "message" &&
@@ -70,7 +72,7 @@ export async function waitForMessage(
  * anything message-shaped.
  */
 export async function waitForSignal<T>(store: SessionStore, waitable: Waitable<T>): Promise<T> {
-  const result = await pollInbox(() => {
+  const result = await pollInbox(store, () => {
     for (;;) {
       const matched = waitable.match(store.events());
       if (matched !== undefined) return { value: matched };
@@ -135,7 +137,7 @@ export async function waitForRace(
   ];
   const signalInterrupts = interrupts.filter((interrupt) => interrupt.messageKind === undefined);
 
-  const result = await pollInbox(() => {
+  const result = await pollInbox(store, () => {
     for (;;) {
       const message = store.consume(
         (candidate) =>
@@ -188,6 +190,7 @@ async function waitForAbort(
   isCancelled: () => boolean,
 ): Promise<UserMessage | undefined> {
   const entry = await pollInbox(
+    store,
     () =>
       store.consume(
         (candidate) => candidate.kind === "message" && candidate.message.intent === "abort",

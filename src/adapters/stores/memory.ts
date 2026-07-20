@@ -62,7 +62,12 @@ export function memoryStore(): SessionStore {
   const log: Envelope[] = [];
   const pending: PendingEntry[] = [];
   const subscribers = new Set<AsyncQueue<Envelope>>();
+  // Wake-only resolvers for `awaitReceive` — parked `pollInbox` loops, one per
+  // outstanding call. Registration and the `receive()` that resolves them are
+  // both synchronous, so there's no window where a wake can be missed between
+  // a caller's last poll and its subscribe.
   let sequence = 0;
+  let receiveWaiters: (() => void)[] = [];
 
   function broadcast(envelope: Envelope): void {
     for (const subscriber of subscribers) subscriber.push(envelope);
@@ -79,6 +84,13 @@ export function memoryStore(): SessionStore {
 
     receive(entry: PendingEntry): void {
       pending.push(entry);
+      const waiters = receiveWaiters;
+      receiveWaiters = [];
+      for (const resolve of waiters) resolve();
+    },
+
+    awaitReceive(): Promise<void> {
+      return new Promise((resolve) => receiveWaiters.push(resolve));
     },
 
     consume(matches: (entry: PendingEntry) => boolean): PendingEntry | undefined {
