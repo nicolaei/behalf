@@ -4,7 +4,7 @@
 
 import type { Graph, NodeId } from "../../flow/graph.js";
 import type { Message, MessageKind } from "../../flow/message.js";
-import { messageKindOf } from "../../flow/waitable.js";
+import { messageKindOf, tryMessageKindOf } from "../../flow/waitable.js";
 import type { StepContext, WaitForResult } from "../../flow/step.js";
 import type { Event } from "../../session/event.js";
 import type { Runtime } from "../runtime.js";
@@ -327,6 +327,39 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
       // `current` — safe to skip; it never needs to move a level's position.
       continue;
     }
+    if (envelope.type === "signal") {
+      // A committed signal: only ever moves the position when the innermost
+      // node is a non-message waitFor whose Waitable now matches the log up
+      // to and including this event — mirrors the `message` branch above,
+      // but the value routed downstream is match()'s own result rather than
+      // the raw event.
+      if (leaf.node.kind !== "step") continue;
+      const topFrame = leaf.node.frame;
+      const node = leaf.flow.nodes.get(topFrame.current);
+      if (node?.kind !== "waitFor" || tryMessageKindOf(node.waitable) !== undefined) continue;
+
+      const matched = node.waitable.match(runtime.store.events());
+      if (matched === undefined) continue;
+
+      const routed = route(
+        leaf.flow.edges,
+        topFrame.current,
+        { ok: true, result: matched } satisfies WaitForResult,
+        thread,
+        runtime,
+      );
+      thread = routed.thread;
+      tree = rebuildFromPath(path, path.length - 1, {
+        kind: "step",
+        frame: {
+          flow: leaf.flow,
+          current: routed.to,
+          currentInput: { ok: true, result: matched } satisfies WaitForResult,
+          reason: routed.reason,
+        },
+      });
+      continue;
+    }
     // toolCall/toolResult/compaction/invalidation/error don't move the main
     // position on their own — out of scope for this slice's replay.
   }
@@ -536,8 +569,49 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
 
     if (node.kind === "waitFor") {
       if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
+      const waitKind = tryMessageKindOf(node.waitable);
+
+      if (waitKind === undefined) {
+        // A non-message Waitable (e.g. signal-based): check its own match()
+        // against the committed log, same as waitForSignal's blocking check,
+        // but never poll — drain and commit at most one pending signal entry
+        // before re-checking, then park if it's still unmatched.
+        let matched = node.waitable.match(runtime.store.events());
+
+        if (matched === undefined) {
+          const pending = runtime.store.consume((candidate) => candidate.kind === "signal");
+          if (pending?.kind === "signal") {
+            runtime.store.append(
+              {
+                name: pending.name,
+                ...(pending.payload !== undefined ? { payload: pending.payload } : {}),
+              },
+              { type: "signal" },
+            );
+            matched = node.waitable.match(runtime.store.events());
+          }
+        }
+        if (matched === undefined)
+          return [
+            { node: frame.current, status: "parked", waitingFor: [node.waitable.label], ...parent },
+          ];
+
+        const routed = route(
+          frame.flow.edges,
+          frame.current,
+          { ok: true, result: matched } satisfies WaitForResult,
+          currentThread,
+          runtime,
+        );
+        currentThread = routed.thread;
+        frame.current = routed.to;
+        frame.currentInput = routed.input;
+        frame.reason = routed.reason;
+        continue;
+      }
+
       const kinds = [
-        messageKindOf(node.waitable),
+        waitKind,
         ...frame.interrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
       ];
       const entry = runtime.store.consume(

@@ -755,7 +755,10 @@ returns; `tickUntilSuspended` calls `tick` in a loop until every cursor is
 parked or done. Both reconstruct where the flow is purely from `runtime.store`
 — no position survives in a JS closure between calls, so a fresh `Runtime`
 (same store) resumes exactly like the original one. A `waitFor` with a
-message already waiting is consumed inline, without counting as a step.
+message already waiting is consumed inline, without counting as a step. A
+non-message `Waitable` (e.g. signal-based) is checked directly against the
+committed log instead, draining and committing at most one pending signal
+per call before re-checking — never blocking/polling.
 **Internal** — neither is exported from `src/index.ts`; the `behalf/testing`
 module (below) wraps them in a test author's vocabulary.
 
@@ -763,7 +766,7 @@ module (below) wraps them in a test author's vocabulary.
 interface CursorState {
   node: NodeId;
   status: "active" | "parked" | "done";
-  waitingFor?: MessageKind[]; // present only when status is "parked"
+  waitingFor?: MessageKind[]; // present only when status is "parked" — a non-message Waitable reports its own `label` here, same shape (MessageKind is just `string`)
   result?: unknown; // present only when status is "done" (root cursor only)
   parent?: string; // absent = the root cursor; present = which cursor this folds into (a fan-out branch or a `use` subgraph)
 }
