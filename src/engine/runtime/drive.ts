@@ -9,7 +9,7 @@
 import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
 import type { Message, UserMessage } from "../../flow/message.js";
 import type { Waitable } from "../../flow/waitable.js";
-import { messageKindOf } from "../../flow/waitable.js";
+import { messageKindOf, tryMessageKindOf } from "../../flow/waitable.js";
 import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../../flow/step.js";
 import type { Tool } from "../../flow/tool.js";
 import type { Runtime } from "../runtime.js";
@@ -36,7 +36,7 @@ import {
   handleStepError,
   type ExecutionContext,
 } from "./step-runner.js";
-import { runModelCall, callTool, waitForMessage } from "./execution.js";
+import { runModelCall, callTool, waitForMessage, waitForSignal } from "./execution.js";
 import { findJoinNode, runBranch, type BranchResult } from "./fan-out.js";
 
 export interface InterruptNode {
@@ -179,9 +179,14 @@ export async function driveWaitForMessage(
 }
 
 /**
- * Runs a `waitFor` node: blocks until a matching message (or an armed
- * interrupt's) arrives, then hands off to `driveWaitForMessage` for the
- * fold-and-route logic shared with tick()'s own non-blocking equivalent.
+ * Runs a `waitFor` node: blocks until its `Waitable` is satisfied, then
+ * routes off the result. A `userInput`-shaped `Waitable` (today's only
+ * message-backed provider) goes through `driveWaitForMessage` — folding the
+ * message into the thread and giving an armed `interrupt` first refusal —
+ * shared with tick()'s own non-blocking equivalent. Any other provider (e.g.
+ * a signal-based one) has no message to fold and no interrupt-arming yet
+ * (out of scope for this slice, see waitable.ts); it blocks on `waitForSignal`
+ * instead and routes directly on the `Waitable`'s own `match()` result.
  */
 async function driveWaitForNode(
   node: Extract<NodeKind, { kind: "waitFor" }>,
@@ -192,8 +197,20 @@ async function driveWaitForNode(
   runtime: Runtime,
   setThread: (thread: Thread) => void,
 ): Promise<RouteResult> {
+  const waitKind = tryMessageKindOf(node.waitable);
+  if (waitKind === undefined) {
+    const result = await waitForSignal(runtime.store, node.waitable);
+    return route(
+      flow.edges,
+      nodeId,
+      { ok: true, result } satisfies WaitForResult,
+      context.thread,
+      runtime,
+    );
+  }
+
   const message = await waitForMessage(runtime.store, [
-    messageKindOf(node.waitable),
+    waitKind,
     ...interrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
   ]);
   const routed = await driveWaitForMessage(

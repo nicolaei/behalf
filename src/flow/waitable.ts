@@ -46,7 +46,19 @@ export function userInput(kind: MessageKind): Waitable<UserMessage> {
  * not exported from `flow/index.ts`.
  */
 export function messageKindOf(waitable: Waitable<unknown>): MessageKind {
-  if (waitable.provider !== "userInput")
+  const kind = tryMessageKindOf(waitable);
+  if (kind === undefined)
     throw new Error(`waitable provider "${waitable.provider}" has no message kind`);
-  return waitable.label;
+  return kind;
+}
+
+/**
+ * Same as `messageKindOf`, but reports absence instead of throwing — the
+ * engine's waitFor/interrupt-arming paths need to tell a `userInput`-shaped
+ * `Waitable` apart from any other provider (e.g. a signal-based one) without
+ * a try/catch, since only the former ever has a message kind to check the
+ * live inbox against.
+ */
+export function tryMessageKindOf(waitable: Waitable<unknown>): MessageKind | undefined {
+  return waitable.provider === "userInput" ? waitable.label : undefined;
 }

@@ -933,7 +933,7 @@ it and appends outcomes; state is the fold of the log.
 
 ```mermaid
 flowchart LR
-  Submit["submit<br/>(gateway)"] --> Inbox[["inbox"]]
+  Receive["receive<br/>(gateway)"] --> Inbox[["inbox"]]
   Inbox -->|"drained by engine"| Append["append"]
   Outcomes["outcomes<br/>(engine)"] --> Append
   Append --> Log[("Envelope log")]
@@ -948,6 +948,10 @@ flowchart LR
 
 The payload of a durable fact. Each event is a named, typed shape; it carries no
 `type` field — the envelope names it. A session begins with a user `message`.
+`signal` is a non-conversational fact a `Waitable` can match on — never folded
+into `Thread.messages`, unlike `message`; `name` is open like `MessageKind`,
+since `Waitable`s are user-extensible and the library can't enumerate every
+external fact an app might define.
 
 ```ts
 type Event = {
@@ -958,6 +962,7 @@ type Event = {
   compaction: { messages: Message[]; meta?: unknown };
   invalidation: { target: NodeId; threadAction: ThreadAction; reason?: Message };
   error: { type: string; message: string; retryable?: boolean; cause?: unknown };
+  signal: { name: string; payload?: unknown };
 };
 
 type EventType = keyof Event;
@@ -1007,23 +1012,38 @@ type Delta =
 
 ### SessionStore
 
-The log, the inbox, and the delta stream. `submit` adds an input to the inbox;
-`consume` finds and removes a pending message in one call — how the engine
-drains the inbox at a `waitFor` node; `append` commits an event (the store
-stamps sequence, time, session); `open` begins a streaming event that
-broadcasts deltas and commits (or aborts) at the end; `changes` yields
+The log, the pending queue, and the delta stream. `receive` adds a pending
+entry — a real conversational `message` or a non-conversational `signal` a
+`Waitable` can match on — to one shared queue that preserves arrival order
+across both kinds; `consume` finds and removes a pending entry in one call —
+how the engine drains it at a `waitFor` node (a matched message is folded into
+`Thread.messages` and logged as a `message` event; a signal is logged as a
+`signal` event and never folded into the thread); `append` commits an event
+(the store stamps sequence, time, session); `open` begins a streaming event
+that broadcasts deltas and commits (or aborts) at the end; `changes` yields
 envelopes of every form.
 
 ```ts
+type PendingEntry =
+  | { kind: "message"; message: UserMessage }
+  | { kind: "signal"; name: string; payload?: unknown };
+
 interface SessionStore {
   events(): Envelope[]; // committed envelopes
-  inbox(): UserMessage[]; // pending input, not yet applied
-  submit(message: UserMessage): void;
-  consume(matches: (message: UserMessage) => boolean): UserMessage | undefined; // find-and-remove a pending message
+  inbox(): PendingEntry[]; // pending input, not yet applied
+  receive(entry: PendingEntry): void;
+  consume(matches: (entry: PendingEntry) => boolean): PendingEntry | undefined; // find-and-remove a pending entry
   append(event: Event[EventType], meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId }): void;
   open(pending: { correlationId: string; type: EventType; stepId: string; stepName?: string; threadId: ThreadId }): Stream;
   changes(): AsyncIterable<Envelope>;
 }
+
+type Stream = {
+  delta(part: Delta): void; // broadcast partial content — not persisted
+  commit(event: Event[EventType]): void; // finalize into the log
+  abort(): void; // commit what streamed, mark the envelope aborted
+};
+```
 
 type Stream = {
   delta(part: Delta): void; // broadcast partial content — not persisted

@@ -9,6 +9,7 @@ import type {
   AssistantMessage,
   ContentBlock,
 } from "../../flow/message.js";
+import type { Waitable } from "../../flow/waitable.js";
 import type { ThreadId } from "../../flow/thread.js";
 import type { Profile } from "../../flow/profile.js";
 import type { StepContext, ModelCallResult } from "../../flow/step.js";
@@ -53,6 +54,39 @@ export async function waitForMessage(
   // pollInbox only returns undefined when given a `stop` predicate, which this call omits.
   if (entry?.kind !== "message") unreachable("waitForMessage resolved without a message");
   return entry.message;
+}
+
+/**
+ * Parks until a non-`userInput` `Waitable` (a signal-based one, today's only
+ * other provider) is satisfied: drains one pending `signal` entry at a time,
+ * committing each as a `signal` event — a durable fact, never folded into
+ * `thread.messages` — then re-checks the `Waitable`'s own `match()` against
+ * the committed log. A signal that doesn't satisfy this waitFor still gets
+ * committed (so a later, different waitFor or a replay can see it) and
+ * polling continues. Mirrors `waitForMessage`'s polling shape, but the match
+ * itself is delegated to the `Waitable` rather than a kind check against the
+ * live inbox, since a signal's identity lives in its committed event, not in
+ * anything message-shaped.
+ */
+export async function waitForSignal<T>(store: SessionStore, waitable: Waitable<T>): Promise<T> {
+  const result = await pollInbox(() => {
+    for (;;) {
+      const matched = waitable.match(store.events());
+      if (matched !== undefined) return { value: matched };
+
+      const entry = store.consume((candidate) => candidate.kind === "signal");
+      if (!entry) return undefined;
+      if (entry.kind !== "signal") unreachable("waitForSignal: consumed a non-signal entry");
+      store.append(
+        { name: entry.name, ...(entry.payload !== undefined ? { payload: entry.payload } : {}) },
+        { type: "signal" },
+      );
+      // Loop back around: the freshly committed signal may or may not be
+      // what `waitable` is looking for — either way, re-check `match()`
+      // before trying to drain another pending entry.
+    }
+  });
+  return result?.value as T;
 }
 
 /**
