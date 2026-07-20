@@ -6,12 +6,30 @@ import type { Graph, NodeKind } from "../flow/graph.js";
 import type { Binding, Tool, Toolset } from "../flow/tool.js";
 import type { ModelPort } from "./model-port.js";
 import type { PersonaStep } from "../flow/step.js";
+import type { WaitableSource } from "./waitable-source.js";
 
 /** Everything a persona needs that is not provided. Empty means ready. @public */
 export type Missing =
   | { kind: "model"; model: string }
   | { kind: "tool"; model: string; tool: string }
-  | { kind: "reasoning"; model: string; level: ReasoningLevel };
+  | { kind: "reasoning"; model: string; level: ReasoningLevel }
+  | { kind: "waitable"; provider: string };
+
+/**
+ * Thrown by an app's own boot check when `satisfiesFlows`/`satisfiesPersonas` reports anything
+ * missing — not thrown by those functions themselves, which stay pure reporters. Carries the
+ * full `Missing[]` list so a caller can inspect exactly what's absent, not just that something is.
+ * @public
+ */
+export class FlowNotReadyError extends Error {
+  readonly missing: Missing[];
+
+  constructor(missing: Missing[]) {
+    super(`flow not ready: ${JSON.stringify(missing)}`);
+    this.name = "FlowNotReadyError";
+    this.missing = missing;
+  }
+}
 
 /** Whether some binding backs a tool or toolset reference, by name. */
 function isBound(ref: Tool | Toolset, bindings: Binding[]): boolean {
@@ -86,7 +104,17 @@ export function satisfiesFlows(
   flows: Graph[],
   models: (model: Model) => ModelPort | undefined,
   bindings: Binding[],
+  // Resolver for a Waitable's provider, mirroring `models`'s shape. Not yet
+  // consulted below — collecting a flow's Waitable providers and diffing
+  // them against this resolver is the new behavior this signature is
+  // pinned down ahead of.
+  waitableSources: (provider: string) => WaitableSource | undefined = () => undefined,
 ): Missing[] {
+  // TODO(Story 6 implementer): walk each flow collecting every waitFor/interrupt
+  // node's Waitable.provider (recursing into use subgraphs, same shape as
+  // personasIn below), then report { kind: "waitable", provider } for any
+  // provider !== "userInput" that waitableSources(provider) doesn't resolve.
+  void waitableSources;
   const profiles: Profile[] = [];
   const seen = new Set<Graph>();
 
