@@ -447,7 +447,13 @@ node reached by converging fan-out edges without `join()` tagging is rejected,
 and a `join()`-tagged node reached as a plain single-input step is rejected too.
 `waitFor` parks until its `Waitable` resolves — for the built-in `userInput`,
 a matching message, then applies it to the thread. `interrupt` fires wherever the
-graph currently is. Routing a value into `finish` ends the flow — that value is the
+graph currently is: while a `waitFor` node is parked on a message-based `Waitable`,
+every armed `interrupt` races it too, whichever provider it's built on — a
+message-based interrupt is resolved by kind, a signal-based one by its own
+`match()` against the committed log — and whichever condition is satisfied first
+wins; the loser keeps waiting. `runFlow`'s blocking driver runs this race for real
+(`waitForRace` in `src/engine/runtime/execution.ts`); `tick()`'s non-blocking
+equivalent still only checks message-based interrupts each call (see § tick()).
 result, which is also the output of a `use` node and what `runFlow` resolves with.
 A `use` node seeds its subgraph with the incoming value as its initial prompt.
 Edges may form cycles: an edge back to an earlier node re-enables it as a new run,

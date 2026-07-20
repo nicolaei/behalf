@@ -9,7 +9,7 @@
 import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
 import type { Message, UserMessage } from "../../flow/message.js";
 import type { Waitable } from "../../flow/waitable.js";
-import { messageKindOf, tryMessageKindOf } from "../../flow/waitable.js";
+import { tryMessageKindOf } from "../../flow/waitable.js";
 import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../../flow/step.js";
 import type { Tool } from "../../flow/tool.js";
 import type { Runtime } from "../runtime.js";
@@ -36,7 +36,7 @@ import {
   handleStepError,
   type ExecutionContext,
 } from "./step-runner.js";
-import { runModelCall, callTool, waitForMessage, waitForSignal } from "./execution.js";
+import { runModelCall, callTool, waitForSignal, waitForRace } from "./execution.js";
 import { findJoinNode, runBranch, type BranchResult } from "./fan-out.js";
 
 export interface InterruptNode {
@@ -143,7 +143,7 @@ export async function driveWaitForMessage(
   setThread(thread);
 
   const interrupt = interrupts.find(
-    (candidate) => messageKindOf(candidate.waitable) === message.kind,
+    (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,
   );
   if (interrupt) {
     const stepContext: StepContext = withInputs(context, [message]);
@@ -181,12 +181,15 @@ export async function driveWaitForMessage(
 /**
  * Runs a `waitFor` node: blocks until its `Waitable` is satisfied, then
  * routes off the result. A `userInput`-shaped `Waitable` (today's only
- * message-backed provider) goes through `driveWaitForMessage` — folding the
- * message into the thread and giving an armed `interrupt` first refusal —
- * shared with tick()'s own non-blocking equivalent. Any other provider (e.g.
- * a signal-based one) has no message to fold and no interrupt-arming yet
- * (out of scope for this slice, see waitable.ts); it blocks on `waitForSignal`
- * instead and routes directly on the `Waitable`'s own `match()` result.
+ * message-backed provider) races `waitForRace` against every armed
+ * `interrupt` — message-based or signal-based alike — and folds in
+ * whichever wins via `driveWaitForMessage` (a message win, whether this
+ * node's own or a message-based interrupt's) or the signal-interrupt path
+ * below (a signal-based interrupt's own `match()` won instead). Any other
+ * provider for this node's own Waitable (e.g. a signal-based one) has no
+ * message to fold and no interrupt-arming yet (out of scope for this slice,
+ * see waitable.ts); it blocks on `waitForSignal` instead and routes
+ * directly on the `Waitable`'s own `match()` result.
  */
 async function driveWaitForNode(
   node: Extract<NodeKind, { kind: "waitFor" }>,
@@ -209,20 +212,65 @@ async function driveWaitForNode(
     );
   }
 
-  const message = await waitForMessage(runtime.store, [
+  const winner = await waitForRace(
+    runtime.store,
     waitKind,
-    ...interrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
-  ]);
-  const routed = await driveWaitForMessage(
-    message,
-    nodeId,
-    interrupts,
-    context,
-    flow,
-    runtime,
-    setThread,
+    interrupts.map((interrupt) => ({
+      id: interrupt.id,
+      waitable: interrupt.waitable,
+      messageKind: tryMessageKindOf(interrupt.waitable),
+    })),
   );
-  return { thread: routed.thread, input: routed.input, reason: routed.reason, to: routed.to };
+
+  if (winner.kind === "self") {
+    const routed = await driveWaitForMessage(
+      winner.message,
+      nodeId,
+      interrupts,
+      context,
+      flow,
+      runtime,
+      setThread,
+    );
+    return { thread: routed.thread, input: routed.input, reason: routed.reason, to: routed.to };
+  }
+
+  const wonMessageKind = tryMessageKindOf(winner.interrupt.waitable);
+  if (wonMessageKind !== undefined) {
+    // A message-based interrupt won the race: fold the message into the
+    // thread and run its step, exactly as `driveWaitForMessage` does when
+    // called from the plain (non-racing) path.
+    const routed = await driveWaitForMessage(
+      winner.value as UserMessage,
+      nodeId,
+      interrupts,
+      context,
+      flow,
+      runtime,
+      setThread,
+    );
+    return { thread: routed.thread, input: routed.input, reason: routed.reason, to: routed.to };
+  }
+
+  // A signal-based interrupt won: there's no message to fold into the
+  // thread — same as `waitForSignal`'s own path — so its step runs with the
+  // Waitable's `match()` result as its only input, and its output routes
+  // exactly like a message-based interrupt's does in `driveWaitForMessage`.
+  const interrupt = interrupts.find((candidate) => candidate.id === winner.interrupt.id);
+  if (!interrupt) unreachable(`waitForRace resolved to unknown interrupt "${winner.interrupt.id}"`);
+  const stepContext: StepContext = withInputs(context, [winner.value]);
+  const emit = await runStep(interrupt.run, stepContext);
+  if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
+  const liveThread = context.thread;
+  return commitRoute(
+    runtime,
+    liveThread.id,
+    flow.edges,
+    interrupt.id,
+    emit.output,
+    { stepId: interrupt.id },
+    liveThread,
+  );
 }
 
 /** What handling a step's `Emit` decided: retry the same node, or advance to the next one. */

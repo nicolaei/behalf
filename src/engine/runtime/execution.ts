@@ -10,6 +10,7 @@ import type {
   ContentBlock,
 } from "../../flow/message.js";
 import type { Waitable } from "../../flow/waitable.js";
+import type { NodeId } from "../../flow/graph.js";
 import type { ThreadId } from "../../flow/thread.js";
 import type { Profile } from "../../flow/profile.js";
 import type { StepContext, ModelCallResult } from "../../flow/step.js";
@@ -87,6 +88,93 @@ export async function waitForSignal<T>(store: SessionStore, waitable: Waitable<T
     }
   });
   return result?.value as T;
+}
+
+/** One armed `interrupt` node together with its message kind, if it has one — precomputed once per race so `waitForRace` never calls `tryMessageKindOf` per poll tick. */
+interface ArmedInterrupt {
+  id: NodeId;
+  waitable: Waitable<unknown>;
+  messageKind: MessageKind | undefined;
+}
+
+/** Which armed Waitable a race settled on: the waitFor node's own ("self"), or a specific `interrupt` node — never both, since `waitForRace` stops polling the instant either is satisfied. */
+export type RaceWinner =
+  | { kind: "self"; message: UserMessage }
+  | { kind: "interrupt"; interrupt: { id: NodeId; waitable: Waitable<unknown> }; value: unknown };
+
+/**
+ * Races a `waitFor` node's own message-based `Waitable` against every armed
+ * `interrupt` — message-based or signal-based alike — resolving with
+ * whichever is satisfied first. Each poll tick:
+ *  1. checks the pending inbox for a message matching the node's own kind
+ *     or any message-based interrupt's kind (same shape as `waitForMessage`);
+ *  2. checks every signal-based interrupt's own `match()` against the
+ *     committed log;
+ *  3. if neither is ready, drains one pending signal, commits it (so a
+ *     match on step 2 sees it next tick, or a different Waitable's later
+ *     race can), and loops.
+ * A signal-based interrupt's `match()` — not a kind string — decides
+ * whether it fired, since a signal has no message kind to compare; a
+ * message-based interrupt is still resolved by kind, same as today,
+ * because `waitForMessage`'s inbox check needs a kind to look for before
+ * any message has arrived to call `match()` on. Only interrupt nodes ever
+ * feed the signal branch — the waitFor node's own Waitable is always
+ * message-based here, `driveWaitForNode` having already routed a
+ * non-message Waitable through `waitForSignal` directly with no race.
+ */
+export async function waitForRace(
+  store: SessionStore,
+  waitKind: MessageKind,
+  interrupts: readonly ArmedInterrupt[],
+): Promise<RaceWinner> {
+  const messageKinds = [
+    waitKind,
+    ...interrupts
+      .map((interrupt) => interrupt.messageKind)
+      .filter((kind): kind is MessageKind => kind !== undefined),
+  ];
+  const signalInterrupts = interrupts.filter((interrupt) => interrupt.messageKind === undefined);
+
+  const result = await pollInbox(() => {
+    for (;;) {
+      const message = store.consume(
+        (candidate) =>
+          candidate.kind === "message" &&
+          candidate.message.kind !== undefined &&
+          messageKinds.includes(candidate.message.kind),
+      );
+      if (message?.kind === "message") {
+        const interrupt = interrupts.find(
+          (candidate) => candidate.messageKind === message.message.kind,
+        );
+        return {
+          value: interrupt
+            ? ({ kind: "interrupt", interrupt, value: message.message } satisfies RaceWinner)
+            : ({ kind: "self", message: message.message } satisfies RaceWinner),
+        };
+      }
+
+      for (const interrupt of signalInterrupts) {
+        const matched = interrupt.waitable.match(store.events());
+        if (matched !== undefined) {
+          return { value: { kind: "interrupt", interrupt, value: matched } satisfies RaceWinner };
+        }
+      }
+
+      const signal = store.consume((candidate) => candidate.kind === "signal");
+      if (!signal) return undefined;
+      if (signal.kind !== "signal") unreachable("waitForRace: consumed a non-signal entry");
+      store.append(
+        { name: signal.name, ...(signal.payload !== undefined ? { payload: signal.payload } : {}) },
+        { type: "signal" },
+      );
+      // Loop back around: re-check every signal-based interrupt's match()
+      // against the freshly committed signal before draining another one.
+    }
+  });
+  // pollInbox only returns undefined when given a `stop` predicate, which this call omits.
+  if (!result) unreachable("waitForRace resolved without a winner");
+  return result.value;
 }
 
 /**
