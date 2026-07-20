@@ -4,6 +4,7 @@
 
 import type { Graph, NodeId } from "../../flow/graph.js";
 import type { Message, MessageKind } from "../../flow/message.js";
+import { messageKindOf } from "../../flow/waitable.js";
 import type { StepContext, WaitForResult } from "../../flow/step.js";
 import type { Event } from "../../session/event.js";
 import type { Runtime } from "../runtime.js";
@@ -536,8 +537,8 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     if (node.kind === "waitFor") {
       if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
       const kinds = [
-        node.messageKind,
-        ...frame.interrupts.map((interrupt) => interrupt.messageKind),
+        messageKindOf(node.waitable),
+        ...frame.interrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
       ];
       const message = runtime.store.consume(
         (candidate) => candidate.kind !== undefined && kinds.includes(candidate.kind),

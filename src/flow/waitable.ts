@@ -34,3 +34,19 @@ export function userInput(kind: MessageKind): Waitable<UserMessage> {
     },
   };
 }
+
+/**
+ * The message kind a `userInput` Waitable parks on — the engine's bridge to
+ * `SessionStore.consume`/`waitForMessage`'s pending-inbox check, which reads
+ * one live `UserMessage` at a time rather than replaying committed
+ * `Envelope`s the way `match` does. Only meaningful for a `userInput`
+ * Waitable today (its `label` is exactly the kind it was built from); a
+ * future non-message `Waitable` won't have a message kind at all, so this
+ * stays engine-internal rather than part of the public `Waitable` contract —
+ * not exported from `flow/index.ts`.
+ */
+export function messageKindOf(waitable: Waitable<unknown>): MessageKind {
+  if (waitable.provider !== "userInput")
+    throw new Error(`waitable provider "${waitable.provider}" has no message kind`);
+  return waitable.label;
+}

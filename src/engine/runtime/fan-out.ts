@@ -5,6 +5,7 @@
 import type { Graph, NodeId, EdgeDefinition } from "../../flow/graph.js";
 import type { ThreadId } from "../../flow/thread.js";
 import type { Message, MessageKind, UserMessage } from "../../flow/message.js";
+import { messageKindOf } from "../../flow/waitable.js";
 import type { Emit, StepContext, WaitForResult } from "../../flow/step.js";
 import type { Runtime } from "../runtime.js";
 import { freshCorrelationId } from "./ids.js";
@@ -129,7 +130,10 @@ export async function runBranchNode(
 
   if (nodeDef.kind === "waitFor") {
     const interrupts = findInterruptNodes(flow);
-    const kinds = [nodeDef.messageKind, ...interrupts.map((interrupt) => interrupt.messageKind)];
+    const kinds = [
+      messageKindOf(nodeDef.waitable),
+      ...interrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
+    ];
     const message: UserMessage | undefined =
       waitMode === "block"
         ? await waitForMessage(runtime.store, kinds)

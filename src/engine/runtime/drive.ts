@@ -7,7 +7,9 @@
 // time instead of to completion.
 
 import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
-import type { Message, MessageKind, UserMessage } from "../../flow/message.js";
+import type { Message, UserMessage } from "../../flow/message.js";
+import type { Waitable } from "../../flow/waitable.js";
+import { messageKindOf } from "../../flow/waitable.js";
 import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../../flow/step.js";
 import type { Tool } from "../../flow/tool.js";
 import type { Runtime } from "../runtime.js";
@@ -39,7 +41,7 @@ import { findJoinNode, runBranch, type BranchResult } from "./fan-out.js";
 
 export interface InterruptNode {
   id: NodeId;
-  messageKind: MessageKind;
+  waitable: Waitable<unknown>;
   run: Step;
 }
 
@@ -47,8 +49,7 @@ export interface InterruptNode {
 export function findInterruptNodes(flow: Graph): InterruptNode[] {
   const interrupts: InterruptNode[] = [];
   for (const [id, node] of flow.nodes) {
-    if (node.kind === "interrupt")
-      interrupts.push({ id, messageKind: node.messageKind, run: node.run });
+    if (node.kind === "interrupt") interrupts.push({ id, waitable: node.waitable, run: node.run });
   }
   return interrupts;
 }
@@ -141,7 +142,9 @@ export async function driveWaitForMessage(
   const thread = withMessage(context.thread, message);
   setThread(thread);
 
-  const interrupt = interrupts.find((candidate) => candidate.messageKind === message.kind);
+  const interrupt = interrupts.find(
+    (candidate) => messageKindOf(candidate.waitable) === message.kind,
+  );
   if (interrupt) {
     const stepContext: StepContext = withInputs(context, [message]);
     const emit = await runStep(interrupt.run, stepContext);
@@ -186,8 +189,8 @@ async function driveWaitForNode(
   setThread: (thread: Thread) => void,
 ): Promise<RouteResult> {
   const message = await waitForMessage(runtime.store, [
-    node.messageKind,
-    ...interrupts.map((interrupt) => interrupt.messageKind),
+    messageKindOf(node.waitable),
+    ...interrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
   ]);
   const routed = await driveWaitForMessage(
     message,

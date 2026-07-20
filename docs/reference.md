@@ -65,7 +65,7 @@ flowchart LR
   Edges -->|"enable"| Nodes
 ```
 
-- **Nodes**: `step` (one effect), `waitFor` (park for a message), `interrupt`
+- **Nodes**: `step` (one effect), `waitFor` (park for a `Waitable`), `interrupt`
   (always-armed handler), `use` (a subgraph), `finish` (the terminal — its incoming
   value is the flow's result).
 - **Edges** (forward only): `when` (route on output), `otherwise` (fallthrough),
@@ -385,6 +385,26 @@ Forking from an earlier `at` is how you revert and branch: split at that point
 onto a new id and the tail is left behind. `flow.step(run, { label: "coder" })`
 gives a thread a stable label you can address.
 
+### Waitable
+
+What a `waitFor`/`interrupt` node parks on. `provider` names which kind of
+thing can satisfy it (checked at boot by `satisfiesFlows` against registered
+`WaitableSource`s); `label` is a human-readable identity for logs/debugging;
+`match` is a pure function over the committed session log — no IO of its own.
+`userInput` is the one built-in `Waitable`: it parks until a message of the
+given `kind` arrives, so `waitFor(userInput(kind))` behaves exactly like the
+bare-`kind` form did before `Waitable` existed.
+
+```ts
+interface Waitable<T> {
+  readonly provider: string;
+  readonly label: string;
+  match(events: readonly Envelope[]): T | undefined;
+}
+
+function userInput(kind: MessageKind): Waitable<UserMessage>;
+```
+
 ### defineGraph
 
 Composes steps into a runnable flow. Nodes: `step`, `use`, `waitFor`, `interrupt`,
@@ -398,8 +418,8 @@ function defineGraph(name: string, build: (flow: Flow) => void): Graph;
 interface Flow {
   step<Result>(run: Step<Result>, options?: { label?: string }): Handle;
   use(subgraph: Graph): Handle; // compose a graph as a node; runs on the reaching edge's thread (default same)
-  waitFor(kind: MessageKind): Handle; // park until a matching message is in the inbox
-  interrupt(kind: MessageKind, run: Step): Handle; // always armed
+  waitFor<T>(waitable: Waitable<T>): Handle; // park until `waitable`'s condition is met
+  interrupt<T>(waitable: Waitable<T>, run: Step): Handle; // always armed
   entry(node: Handle): void;
   readonly finish: Handle; // route a value in to end the flow; that value is the result
 }
@@ -425,7 +445,8 @@ fan-out — must be built with the `join()` step builder (see `JoinStep`/`join()
 in src/flow/step.ts), so the engine can validate the wiring structurally: a
 node reached by converging fan-out edges without `join()` tagging is rejected,
 and a `join()`-tagged node reached as a plain single-input step is rejected too.
-matching message, then applies it to the thread. `interrupt` fires wherever the
+`waitFor` parks until its `Waitable` resolves — for the built-in `userInput`,
+a matching message, then applies it to the thread. `interrupt` fires wherever the
 graph currently is. Routing a value into `finish` ends the flow — that value is the
 result, which is also the output of a `use` node and what `runFlow` resolves with.
 A `use` node seeds its subgraph with the incoming value as its initial prompt.
@@ -485,7 +506,7 @@ const agentTurn = (persona: Profile) =>
 // across turns. Steering arriving mid-turn is folded in by the runtime.
 export const chat = defineGraph("chat", (flow) => {
   const loop = flow.use(agentTurn(assistant));
-  const waitForPrompt = flow.waitFor("follow-up");
+  const waitForPrompt = flow.waitFor(userInput("follow-up"));
   flow.entry(loop);
   loop.then(waitForPrompt); // turn finished → wait for the next prompt
   waitForPrompt.then(loop); // new prompt → run another turn, same thread

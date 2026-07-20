@@ -1,7 +1,7 @@
 // Flow authoring — defineGraph. See docs/reference.md § "defineGraph".
 
 import type { Step } from "./step.js";
-import type { Message, MessageKind } from "./message.js";
+import type { Message } from "./message.js";
 import type { Waitable } from "./waitable.js";
 import type { ThreadAction } from "./thread.js";
 
@@ -18,8 +18,8 @@ export interface EdgeOptions {
 export type NodeKind =
   | { kind: "step"; run: Step; label?: string }
   | { kind: "use"; subgraph: Graph }
-  | { kind: "waitFor"; messageKind: MessageKind }
-  | { kind: "interrupt"; messageKind: MessageKind; run: Step }
+  | { kind: "waitFor"; waitable: Waitable<unknown> }
+  | { kind: "interrupt"; waitable: Waitable<unknown>; run: Step }
   | { kind: "finish" };
 
 /** One edge's declaration, as captured by `Handle.when`/`.otherwise`/`.then`. */
@@ -141,11 +141,15 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
       nodes.set(id, { kind: "use", subgraph });
       return makeHandle(id);
     },
-    waitFor(_waitable) {
-      throw new Error("waitFor accepting a Waitable is not implemented yet");
+    waitFor(waitable) {
+      const id = freshNodeId();
+      nodes.set(id, { kind: "waitFor", waitable });
+      return makeHandle(id);
     },
-    interrupt(_waitable, _run) {
-      throw new Error("interrupt accepting a Waitable is not implemented yet");
+    interrupt(waitable, run) {
+      const id = freshNodeId();
+      nodes.set(id, { kind: "interrupt", waitable, run });
+      return makeHandle(id);
     },
     entry(node) {
       entry = node.id;
