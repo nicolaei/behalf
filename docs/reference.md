@@ -701,13 +701,18 @@ The coverage check. Given the model resolver and the tool bindings, it returns
 everything the personas need that is not provided: a missing model port, a missing
 tool, or an unsupported reasoning level. `satisfiesFlows` walks each flow's graph
 statically — every `step`/`interrupt` node, recursing into `use` subgraphs — to
-find every persona in play, then checks it across all of them. Empty means ready.
+find every persona in play, then checks it across all of them. It also walks every
+`waitFor`/`interrupt` node's `.waitable.provider` the same way, and checks each
+distinct provider (other than the built-in `"userInput"`, which is always
+satisfied) against the optional `waitableSources` resolver; an unresolved provider
+is reported as `{ kind: "waitable", provider }`. Empty means ready.
 
 ```ts
 type Missing =
   | { kind: "model"; model: string }
   | { kind: "tool"; model: string; tool: string }
-  | { kind: "reasoning"; model: string; level: ReasoningLevel };
+  | { kind: "reasoning"; model: string; level: ReasoningLevel }
+  | { kind: "waitable"; provider: string };
 
 function satisfiesPersonas(
   personas: Profile[],
@@ -719,11 +724,12 @@ function satisfiesFlows(
   flows: Graph[],
   models: (model: Model) => ModelPort | undefined,
   bindings: Binding[],
+  waitableSources?: (provider: string) => WaitableSource | undefined,
 ): Missing[];
 ```
 
 ```ts
-const missing = satisfiesFlows([feature, chat], resolveModel, bindings);
+const missing = satisfiesFlows([feature, chat], resolveModel, bindings, waitableSources);
 if (missing.length) throw new Error(JSON.stringify(missing));
 ```
 
