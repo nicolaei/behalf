@@ -5,7 +5,7 @@
 import type { Graph, NodeId, EdgeDefinition } from "../../flow/graph.js";
 import type { ThreadId } from "../../flow/thread.js";
 import type { Message, MessageKind, UserMessage } from "../../flow/message.js";
-import { messageKindOf } from "../../flow/waitable.js";
+import { messageKindOf, tryMessageKindOf } from "../../flow/waitable.js";
 import type { Emit, StepContext, WaitForResult } from "../../flow/step.js";
 import type { Runtime } from "../runtime.js";
 import { freshCorrelationId } from "./ids.js";
@@ -16,6 +16,7 @@ import {
   appendOutput,
   applyThreadAction,
   withMessage,
+  route,
 } from "./routing.js";
 import {
   runStep,
@@ -24,7 +25,7 @@ import {
   handleStepError,
   type ExecutionContext,
 } from "./step-runner.js";
-import { runModelCall, callTool, waitForMessage } from "./execution.js";
+import { runModelCall, callTool, waitForMessage, waitForSignal } from "./execution.js";
 import { driveWaitForMessage, findInterruptNodes } from "./drive.js";
 import type { CursorState, TickOutcome } from "./tick.js";
 
@@ -85,7 +86,14 @@ export function findJoinNode(branchTargets: NodeId[], fanOutNodeId: NodeId, flow
  * `waitForMessage`; `"peek"` (tick's `advanceFanOutGroup`, the default) takes
  * one non-blocking shot at the inbox and reports `{ kind: "parked" }` if
  * nothing is there yet, mirroring how tick's own top-level waitFor handling
- * never blocks. `use`/`interrupt`/`finish` reached as a branch node stay
+ * never blocks. A non-message (e.g. signal-based) `Waitable` on the branch's
+ * own `waitFor` node takes the same non-message branch `driveWaitForNode`
+ * and tick's own waitFor handling do: `"block"` parks on `waitForSignal`;
+ * `"peek"` checks `match()` against the committed log, draining and
+ * committing at most one pending signal before re-checking, and reports
+ * `{ kind: "parked" }` if still unmatched — never extending to interrupt
+ * racing inside a branch, which stays out of scope here just as it did for
+ * the top-level non-message waitFor path.
  * notImplemented — out of scope for a branch. Only a plain `step`'s result
  * never follows an edge (that's the caller's job, since `runBranch` walks a
  * whole chain to the join while tick's per-call branch advance stops after
@@ -130,10 +138,54 @@ export async function runBranchNode(
 
   if (nodeDef.kind === "waitFor") {
     const interrupts = findInterruptNodes(flow);
-    const kinds = [
-      messageKindOf(nodeDef.waitable),
-      ...interrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
-    ];
+    const waitKind = tryMessageKindOf(nodeDef.waitable);
+
+    // A non-message (e.g. signal-based) Waitable: no message to fold, so
+    // this mirrors driveWaitForNode's own non-message branch (waitForSignal)
+    // for "block" mode, and tick's peek-and-drain-one-signal shape for
+    // "peek" mode — same scope as Story 2/3, not extending to interrupt
+    // racing inside a branch.
+    if (waitKind === undefined) {
+      if (waitMode === "block") {
+        const result = await waitForSignal(runtime.store, nodeDef.waitable);
+        const routed = route(
+          flow.edges,
+          nodeId,
+          { ok: true, result } satisfies WaitForResult,
+          thread,
+          runtime,
+        );
+        return { kind: "routed", thread: routed.thread, to: routed.to, input: routed.input };
+      }
+
+      let matched = nodeDef.waitable.match(runtime.store.events());
+      if (matched === undefined) {
+        const pending = runtime.store.consume((candidate) => candidate.kind === "signal");
+        if (pending?.kind === "signal") {
+          runtime.store.append(
+            {
+              name: pending.name,
+              ...(pending.payload !== undefined ? { payload: pending.payload } : {}),
+            },
+            { type: "signal" },
+          );
+          matched = nodeDef.waitable.match(runtime.store.events());
+        }
+      }
+      if (matched === undefined)
+        return { kind: "parked", waitingFor: [nodeDef.waitable.label], thread };
+
+      const routed = route(
+        flow.edges,
+        nodeId,
+        { ok: true, result: matched } satisfies WaitForResult,
+        thread,
+        runtime,
+      );
+      return { kind: "routed", thread: routed.thread, to: routed.to, input: routed.input };
+    }
+
+    const kinds = [waitKind, ...interrupts.map((interrupt) => messageKindOf(interrupt.waitable))];
     const message: UserMessage | undefined =
       waitMode === "block"
         ? await waitForMessage(runtime.store, kinds)
