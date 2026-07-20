@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters, outputs, userInput } from "../../index.js";
+import {
+  defineGraph,
+  runFlow,
+  runtime,
+  userText,
+  adapters,
+  outputs,
+  userInput,
+} from "../../index.js";
 import { neverCalled, textOf, loggedEventTypes } from "./support.js";
 
 describe("a graph that waits for the next prompt", () => {

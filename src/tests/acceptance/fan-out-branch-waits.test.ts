@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters, join, outputs, userInput } from "../../index.js";
+import {
+  defineGraph,
+  runFlow,
+  runtime,
+  userText,
+  adapters,
+  join,
+  outputs,
+  userInput,
+} from "../../index.js";
 import { neverCalled, textOf, submitApproval } from "./support.js";
 
 describe("a fan-out branch that waits for a message before joining", () => {

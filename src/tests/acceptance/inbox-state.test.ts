@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters, outputs, userInput } from "../../index.js";
+import {
+  defineGraph,
+  runFlow,
+  runtime,
+  userText,
+  adapters,
+  outputs,
+  userInput,
+} from "../../index.js";
 import { neverCalled } from "./support.js";
 
 describe("the inbox reflects pending and consumed input", () => {

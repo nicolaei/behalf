@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters, outputs, userInput } from "../../index.js";
+import {
+  defineGraph,
+  runFlow,
+  runtime,
+  userText,
+  adapters,
+  outputs,
+  userInput,
+} from "../../index.js";
 import { neverCalled, textOf } from "./support.js";
 
 describe("re-entering a subgraph after waitFor (the chat pattern)", () => {
