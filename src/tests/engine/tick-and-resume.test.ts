@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { tick, tickUntilSuspended } from "../../engine/runtime.js";
 import type { TickOutcome } from "../../engine/runtime.js";
-import { defineGraph, runtime, adapters } from "../../index.js";
+import { defineGraph, runtime, adapters, userInput } from "../../index.js";
 import type { Graph, Runtime, WaitForResult } from "../../index.js";
 import { neverCalled, textOf } from "../acceptance/support.js";
 
@@ -14,7 +14,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
   function fixture(name: string): Graph {
     return defineGraph(name, (flow) => {
       const start = flow.step((context) => Promise.resolve(context.output("go")));
-      const gate = flow.waitFor("follow-up");
+      const gate = flow.waitFor(userInput("follow-up"));
       const finish = flow.step((context) =>
         Promise.resolve(context.output(`got: ${textOf(context.thread.messages.at(-1))}`)),
       );
@@ -95,7 +95,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
   it("gives the waitFor's result as { ok: true }, matching runFlow, with the message already on the thread", async () => {
     const graph = defineGraph("tick-waitfor-ok", (flow) => {
       const start = flow.step((context) => Promise.resolve(context.output("go")));
-      const gate = flow.waitFor("follow-up");
+      const gate = flow.waitFor(userInput("follow-up"));
       const finish = flow.step((context) => {
         const result = context.inputs[0] as WaitForResult;
         return Promise.resolve(

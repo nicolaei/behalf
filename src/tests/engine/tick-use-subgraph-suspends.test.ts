@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { tickUntilSuspended } from "../../engine/runtime.js";
-import { defineGraph, runtime, userText, adapters, outputs } from "../../index.js";
+import { defineGraph, runtime, userText, adapters, outputs, userInput } from "../../index.js";
 import { neverCalled, textOf, submitApproval } from "../acceptance/support.js";
 
 // Needs tick() to genuinely suspend inside a used subgraph's own waitFor —
@@ -12,7 +12,7 @@ describe("ticking a flow through a used subgraph that itself waits", () => {
     const echo = flow.step(
       outputs((context) => textOf(context.thread.messages.at(-1)).toUpperCase()),
     );
-    const wait = flow.waitFor("approval");
+    const wait = flow.waitFor(userInput("approval"));
     const respond = flow.step(outputs(() => "approved-done"));
     flow.entry(echo);
     echo.then(wait);

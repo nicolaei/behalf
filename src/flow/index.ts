@@ -17,6 +17,8 @@ export { tool, toolset, provide, expand } from "./tool.js";
 export type { Profile } from "./profile.js";
 export type { NodeId, Graph, EdgeOptions, Handle, Flow } from "./graph.js";
 export { defineGraph } from "./graph.js";
+export type { Waitable } from "./waitable.js";
+export { userInput } from "./waitable.js";
 export type {
   ModelCallResult,
   StepError,

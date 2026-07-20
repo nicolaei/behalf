@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
+import { defineGraph, runFlow, runtime, userText, adapters, outputs, userInput } from "../../index.js";
 import { neverCalled } from "./support.js";
 
 describe("the inbox reflects pending and consumed input", () => {
@@ -16,7 +16,7 @@ describe("the inbox reflects pending and consumed input", () => {
 
   it("empties once a waitFor step consumes the message", async () => {
     const consumeInbox = defineGraph("consume-inbox", (flow) => {
-      const wait = flow.waitFor("follow-up");
+      const wait = flow.waitFor(userInput("follow-up"));
       const after = flow.step(outputs(() => "done"));
       flow.entry(wait);
       wait.then(after);

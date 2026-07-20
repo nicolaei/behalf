@@ -2,6 +2,7 @@
 
 import type { Step } from "./step.js";
 import type { Message, MessageKind } from "./message.js";
+import type { Waitable } from "./waitable.js";
 import type { ThreadAction } from "./thread.js";
 
 /** Opaque brand for node identifiers within a graph. @public */
@@ -50,8 +51,8 @@ export interface Handle {
 export interface Flow {
   step<Result>(run: Step<Result>, options?: { label?: string }): Handle;
   use(subgraph: Graph): Handle; // compose a graph as a node; runs on the reaching edge's thread
-  waitFor(kind: MessageKind): Handle; // park until a matching message is in the inbox
-  interrupt(kind: MessageKind, run: Step): Handle; // always armed
+  waitFor<T>(waitable: Waitable<T>): Handle; // park until `waitable`'s condition is met
+  interrupt<T>(waitable: Waitable<T>, run: Step): Handle; // always armed
   entry(node: Handle): void;
   readonly finish: Handle; // route a value in to end the flow; that value is the result
 }
@@ -140,15 +141,11 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
       nodes.set(id, { kind: "use", subgraph });
       return makeHandle(id);
     },
-    waitFor(kind) {
-      const id = freshNodeId();
-      nodes.set(id, { kind: "waitFor", messageKind: kind });
-      return makeHandle(id);
+    waitFor(_waitable) {
+      throw new Error("waitFor accepting a Waitable is not implemented yet");
     },
-    interrupt(kind, run) {
-      const id = freshNodeId();
-      nodes.set(id, { kind: "interrupt", messageKind: kind, run });
-      return makeHandle(id);
+    interrupt(_waitable, _run) {
+      throw new Error("interrupt accepting a Waitable is not implemented yet");
     },
     entry(node) {
       entry = node.id;

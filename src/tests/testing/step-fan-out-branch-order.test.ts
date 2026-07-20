@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { stepUntilBlocked } from "../../testing/index.js";
-import { defineGraph, runtime, adapters, join, outputs } from "../../index.js";
+import { defineGraph, runtime, adapters, join, outputs, userInput } from "../../index.js";
 import { neverCalled, submitApproval } from "../acceptance/support.js";
 
 describe("a fan-out where the parked branch is declared before the active one", () => {
@@ -9,7 +9,7 @@ describe("a fan-out where the parked branch is declared before the active one", 
   // wait branch forever, starving `a`, hanging stepUntilBlocked.
   const flow = defineGraph("fan-out-parked-first", (flowBuilder) => {
     const start = flowBuilder.step(outputs(() => "go"));
-    const wait = flowBuilder.waitFor("approval");
+    const wait = flowBuilder.waitFor(userInput("approval"));
     const a = flowBuilder.step(outputs(() => "a"));
     const joinStep = flowBuilder.step(join((context) => context.inputs));
     flowBuilder.entry(start);

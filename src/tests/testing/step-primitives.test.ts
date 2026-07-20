@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { stepOnce, stepUntilBlocked, stepUntil, atNode } from "../../testing/index.js";
 import { StepUntilError } from "../../testing/errors.js";
-import { defineGraph, runtime, adapters, outputs } from "../../index.js";
+import { defineGraph, runtime, adapters, outputs, userInput } from "../../index.js";
 import type { Handle } from "../../index.js";
 import { neverCalled, textOf } from "../acceptance/support.js";
 
@@ -34,7 +34,7 @@ describe("stepOnce", () => {
 describe("stepUntilBlocked", () => {
   const flow = defineGraph("step-until-blocked", (flowBuilder) => {
     const first = flowBuilder.step(outputs(() => "go"));
-    const wait = flowBuilder.waitFor("follow-up");
+    const wait = flowBuilder.waitFor(userInput("follow-up"));
     const second = flowBuilder.step(outputs((context) => textOf(context.thread.messages.at(-1))));
     flowBuilder.entry(first);
     first.then(wait);
@@ -84,7 +84,7 @@ describe("stepUntil", () => {
   it("throws StepUntilError('stalled') when every lane is parked/done and condition never met", async () => {
     const flow = defineGraph("step-until-stalled", (flowBuilder) => {
       const first = flowBuilder.step(outputs(() => "go"));
-      const wait = flowBuilder.waitFor("follow-up");
+      const wait = flowBuilder.waitFor(userInput("follow-up"));
       flowBuilder.entry(first);
       first.then(wait);
       wait.then(flowBuilder.finish);

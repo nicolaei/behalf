@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
+import { defineGraph, runFlow, runtime, userText, adapters, outputs, userInput } from "../../index.js";
 import { neverCalled, textOf } from "./support.js";
 
 describe("re-entering a subgraph after waitFor (the chat pattern)", () => {
@@ -11,7 +11,7 @@ describe("re-entering a subgraph after waitFor (the chat pattern)", () => {
 
   const twoTurnChat = defineGraph("two-turn-chat", (flow) => {
     const first = flow.use(turn);
-    const wait = flow.waitFor("follow-up");
+    const wait = flow.waitFor(userInput("follow-up"));
     const second = flow.use(turn);
     flow.entry(first);
     first.then(wait);

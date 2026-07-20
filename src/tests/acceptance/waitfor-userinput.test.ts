@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, adapters, outputs, userInput } from "../../index.js";
 import { neverCalled, textOf, loggedEventTypes } from "./support.js";
 
-describe("a graph that waits for the next prompt", () => {
-  const twoTurns = defineGraph("two-turns", (flow) => {
+describe("waitFor(userInput(kind)) behaves identically to today's waitFor(kind)", () => {
+  const twoTurns = defineGraph("two-turns-userinput", (flow) => {
     const first = flow.step(outputs((context) => textOf(context.thread.messages.at(-1))));
     const wait = flow.waitFor(userInput("follow-up"));
     const second = flow.step(outputs((context) => textOf(context.thread.messages.at(-1))));
@@ -17,10 +17,6 @@ describe("a graph that waits for the next prompt", () => {
     const store = adapters.stores.memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
-    // parked at `waitFor`, a follow-up is submitted
-    // NOTE: submit timing here is a known open concern — `waitFor` must check the
-    // inbox reactively so this resolves regardless of when `submit` is called,
-    // not because of lucky ordering.
     const done = runFlow(twoTurns, userText("first"), ready);
     store.submit({
       role: "user",
@@ -45,8 +41,6 @@ describe("a graph that waits for the next prompt", () => {
     });
     await done;
 
-    // loose on exact interleaving — confirm against reference.md's inbox-drain behaviour
-    // when this slice is active
     const types = loggedEventTypes(store);
     expect(types.filter((type) => type === "message")).toHaveLength(2);
     expect(types.filter((type) => type === "output")).toHaveLength(2);

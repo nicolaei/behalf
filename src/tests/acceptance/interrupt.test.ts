@@ -1,14 +1,14 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters, outputs } from "../../index.js";
+import { defineGraph, runFlow, runtime, userText, adapters, outputs, userInput } from "../../index.js";
 import type { SessionStore } from "../../index.js";
 import { neverCalled, loggedEventTypes } from "./support.js";
 
 describe("interrupt fires wherever the graph currently is", () => {
   const withInterrupt = defineGraph("with-interrupt", (flow) => {
-    const wait = flow.waitFor("resume");
+    const wait = flow.waitFor(userInput("resume"));
     const afterWait = flow.step(outputs(() => "resumed"));
     const cancelled = flow.interrupt(
-      "cancel",
+      userInput("cancel"),
       outputs(() => "cancelled"),
     );
 

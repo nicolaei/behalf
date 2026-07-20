@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, adapters, join, outputs } from "../../index.js";
+import { defineGraph, runFlow, runtime, userText, adapters, join, outputs, userInput } from "../../index.js";
 import { neverCalled, textOf, submitApproval } from "./support.js";
 
 describe("a fan-out branch that waits for a message before joining", () => {
   const flow = defineGraph("fan-out-branch-waits", (flowBuilder) => {
     const start = flowBuilder.step(outputs(() => "go"));
     const a = flowBuilder.step(outputs(() => "a"));
-    const wait = flowBuilder.waitFor("approval");
+    const wait = flowBuilder.waitFor(userInput("approval"));
     const afterWait = flowBuilder.step(
       outputs((context) => textOf(context.thread.messages.at(-1))),
     );

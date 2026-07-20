@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { tickUntilSuspended } from "../../engine/runtime.js";
-import { defineGraph, runtime, adapters, join, outputs } from "../../index.js";
+import { defineGraph, runtime, adapters, join, outputs, userInput } from "../../index.js";
 import { neverCalled, submitApproval } from "../acceptance/support.js";
 
 // Needs a fan-out branch to support a waitFor node — today runBranchNode
@@ -13,7 +13,7 @@ describe("ticking a fan-out branch that waits for a message", () => {
   const flow = defineGraph("tick-fan-out-branch-waits", (flowBuilder) => {
     const start = flowBuilder.step(outputs(() => "go"));
     const a = flowBuilder.step(outputs(() => "a"));
-    const wait = flowBuilder.waitFor("approval");
+    const wait = flowBuilder.waitFor(userInput("approval"));
     const joinStep = flowBuilder.step(join((context) => context.inputs));
     flowBuilder.entry(start);
     start.then([a, wait]);

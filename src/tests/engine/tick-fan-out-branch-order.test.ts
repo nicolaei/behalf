@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { tickUntilSuspended } from "../../engine/runtime.js";
-import { defineGraph, runtime, adapters, join, outputs } from "../../index.js";
+import { defineGraph, runtime, adapters, join, outputs, userInput } from "../../index.js";
 import { neverCalled, submitApproval } from "../acceptance/support.js";
 
 // Regression test for advanceFanOutGroup's branch-selection bug: it used to
@@ -19,7 +19,7 @@ import { neverCalled, submitApproval } from "../acceptance/support.js";
 describe("ticking a fan-out group whose parked branch is declared before its live sibling", () => {
   const flow = defineGraph("tick-fan-out-branch-order", (flowBuilder) => {
     const start = flowBuilder.step(outputs(() => "go"));
-    const wait = flowBuilder.waitFor("approval");
+    const wait = flowBuilder.waitFor(userInput("approval"));
     const a = flowBuilder.step(outputs(() => "a"));
     const joinStep = flowBuilder.step(join((context) => context.inputs));
     flowBuilder.entry(start);
