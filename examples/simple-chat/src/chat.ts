@@ -1,9 +1,12 @@
-// M2 — the interactive chat graph. One persona step, looped: run a turn, wait
-// for the next prompt, run again, all on the same thread (the default), so
-// context carries across turns. No tools yet, so every model response
-// finishes the turn immediately (see docs/reference.md § "Full examples" #1).
+// M3 — the interactive chat graph, now with real filesystem tools. One
+// persona step, looped: run a turn, wait for the next prompt, run again, all
+// on the same thread (the default), so context carries across turns. A turn
+// finishes once a response uses no tools (see docs/reference.md § "Full
+// examples" #1); otherwise it loops back to respond again so the model can
+// see the tool results and continue.
 
 import { defineGraph, userInput } from "behalf";
+import { fsTools } from "./tools.js";
 import type { Profile, PersonaStep, StepContext, ModelCallResult, Model } from "behalf";
 
 export const DEFAULT_MODEL: Model = {
@@ -16,7 +19,7 @@ export const DEFAULT_MODEL: Model = {
 export const assistant: Profile = {
   model: DEFAULT_MODEL,
   system: "You are a helpful assistant.",
-  tools: [],
+  tools: fsTools,
   reasoning: "medium",
 };
 
@@ -29,8 +32,11 @@ const agentTurn = (persona: Profile) =>
   defineGraph(persona.system, (flow) => {
     const respond = flow.step(modelStep(persona));
     flow.entry(respond);
-    // No tools bound, so every response finishes the turn.
-    respond.then(flow.finish);
+    // A response that used no tools ends the turn; otherwise loop back so the
+    // model can see the committed tool results and keep going.
+    respond
+      .when((result) => !(result as ModelCallResult).usedTools, flow.finish)
+      .otherwise(respond);
   });
 
 export const chat = defineGraph("chat", (flow) => {

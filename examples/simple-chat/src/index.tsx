@@ -4,6 +4,7 @@ import { runtime, adapters } from "behalf";
 import type { Runtime } from "behalf";
 import { App } from "./App.js";
 import { DEFAULT_MODEL } from "./chat.js";
+import { fsBindings } from "./tools.js";
 
 function Root() {
   const [ready, setReady] = useState<Runtime | undefined>(undefined);
@@ -13,7 +14,7 @@ function Root() {
     let cancelled = false;
     runtime({
       models: () => adapters.models.createAnthropicPort(DEFAULT_MODEL),
-      bindings: [],
+      bindings: fsBindings,
       store: adapters.stores.memoryStore(),
     }).then(
       (resolved) => {

@@ -1,8 +1,11 @@
-// M2 — real interactive multi-turn conversation. No tools, no delta streaming
-// (those are M3/M4). Renders a scrolling transcript folded from the store's
-// committed message envelopes, and a text input that drives the chat graph:
-// the first submit kicks off `runFlow`, every following submit is a
-// "follow-up" message fed into the running flow via `store.receive`.
+// M3 — real interactive multi-turn conversation with filesystem tools. No
+// delta streaming or live progress yet (those are M4/M5). Renders a scrolling
+// transcript folded from the store's committed envelopes: `message` events
+// become chat lines, `toolCall`/`toolResult` events become commit-only tool
+// cards (no spinner — a static running indicator is enough for M3). The text
+// input drives the chat graph: the first submit kicks off `runFlow`, every
+// following submit is a "follow-up" message fed into the running flow via
+// `store.receive`.
 import React, { useEffect, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import TextInput from "ink-text-input";
@@ -13,10 +16,17 @@ import { chat, DEFAULT_MODEL, assistant } from "./chat.js";
 export const MODEL_ID = DEFAULT_MODEL.identifier;
 export const REASONING_LEVEL = assistant.reasoning;
 
-type TranscriptEntry = {
-  role: "user" | "assistant" | "other";
-  text: string;
-};
+type TranscriptEntry =
+  | { kind: "message"; role: "user" | "assistant" | "other"; text: string }
+  | {
+      kind: "tool";
+      correlationId: string;
+      name: string;
+      input: unknown;
+      output?: unknown;
+      isError?: boolean;
+      done: boolean;
+    };
 
 function textOf(message: Message): string {
   return message.content
@@ -26,9 +36,19 @@ function textOf(message: Message): string {
 }
 
 function entryOf(message: Message): TranscriptEntry | undefined {
-  if (message.role === "user") return { role: "user", text: textOf(message) };
-  if (message.role === "assistant") return { role: "assistant", text: textOf(message) };
-  return undefined; // system/tool messages: skip silently, no tools in M2
+  if (message.role === "user") return { kind: "message", role: "user", text: textOf(message) };
+  if (message.role === "assistant")
+    return { kind: "message", role: "assistant", text: textOf(message) };
+  return undefined; // system messages: skip silently
+}
+
+function formatValue(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
 }
 
 export function App({ ready }: { ready: Runtime }) {
@@ -42,10 +62,42 @@ export function App({ ready }: { ready: Runtime }) {
     (async () => {
       for await (const envelope of ready.store.changes()) {
         if (cancelled) return;
-        if (envelope.form !== "committed" || envelope.type !== "message") continue;
-        const message = (envelope.event as { message: Message }).message;
-        const entry = entryOf(message);
-        if (entry) setTranscript((previous) => [...previous, entry]);
+        if (envelope.form !== "committed") continue;
+        if (envelope.type === "message") {
+          const message = (envelope.event as { message: Message }).message;
+          const entry = entryOf(message);
+          if (entry) setTranscript((previous) => [...previous, entry]);
+          continue;
+        }
+        if (envelope.type === "toolCall") {
+          const call = envelope.event as { correlationId: string; name: string; input: unknown };
+          setTranscript((previous) => [
+            ...previous,
+            {
+              kind: "tool",
+              correlationId: call.correlationId,
+              name: call.name,
+              input: call.input,
+              done: false,
+            },
+          ]);
+          continue;
+        }
+        if (envelope.type === "toolResult") {
+          const result = envelope.event as {
+            correlationId: string;
+            output: unknown;
+            isError?: boolean;
+          };
+          setTranscript((previous) =>
+            previous.map((entry) =>
+              entry.kind === "tool" && entry.correlationId === result.correlationId
+                ? { ...entry, output: result.output, isError: result.isError, done: true }
+                : entry,
+            ),
+          );
+          continue;
+        }
       }
     })();
     return () => {
@@ -84,12 +136,26 @@ export function App({ ready }: { ready: Runtime }) {
       <Text dimColor>cwd: {process.cwd()}</Text>
       <Box flexDirection="column" marginTop={1}>
         {transcript.length === 0 && <Text dimColor>(no messages yet — type below)</Text>}
-        {transcript.map((entry, index) => (
-          <Text key={index}>
-            <Text bold>{entry.role === "user" ? "You: " : "Assistant: "}</Text>
-            {entry.text}
-          </Text>
-        ))}
+        {transcript.map((entry, index) => {
+          if (entry.kind === "message") {
+            return (
+              <Text key={index}>
+                <Text bold>{entry.role === "user" ? "You: " : "Assistant: "}</Text>
+                {entry.text}
+              </Text>
+            );
+          }
+          const status = entry.done
+            ? entry.isError
+              ? `✗ ${formatValue(entry.output)}`
+              : `→ ${formatValue(entry.output)}`
+            : "…";
+          return (
+            <Text key={entry.correlationId} dimColor>
+              🔧 {entry.name}({formatValue(entry.input)}) {status}
+            </Text>
+          );
+        })}
         {error && <Text color="red">Error: {error}</Text>}
       </Box>
       <Box marginTop={1}>
