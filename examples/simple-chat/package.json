@@ -12,6 +12,7 @@
     "@anthropic-ai/sdk": "^0.70.0",
     "behalf": "file:../..",
     "ink": "^5.2.0",
+    "ink-text-input": "^6.0.0",
     "react": "^18.3.1"
   },
   "devDependencies": {
