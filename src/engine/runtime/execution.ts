@@ -355,5 +355,5 @@ export async function runModelCall(
     await runToolCall(call, context, runtime, identity, setThread);
   }
 
-  return { usedTools: toolCalls.length > 0, usage: reply.usage };
+  return { usedTools: toolCalls.length > 0, usage: reply.usage, toolCalls: [] };
 }

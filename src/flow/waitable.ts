@@ -1,4 +1,6 @@
-// Flow authoring — Waitable / userInput. See docs/reference.md.
+// Flow authoring — Waitable / userInput / toolCall. See docs/reference.md.
+
+import { notImplemented } from "../engine/errors.js";
 
 import type { MessageKind, UserMessage } from "./message.js";
 import type { Envelope } from "../session/index.js";
@@ -32,6 +34,20 @@ export function userInput(kind: MessageKind): Waitable<UserMessage> {
       }
       return undefined;
     },
+  };
+}
+
+/**
+ * A Waitable matching a committed `toolResult` event by correlationId — the
+ * decoupled counterpart to a model-call step's own `toolCall` request. Stub
+ * only: `match()` is not implemented yet.
+ * @public
+ */
+export function toolCall(correlationId: string): Waitable<unknown> {
+  return {
+    provider: "toolCall",
+    label: correlationId,
+    match: () => notImplemented("toolCall"),
   };
 }
 

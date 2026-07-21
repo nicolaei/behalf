@@ -4,6 +4,7 @@ import type { Step } from "./step.js";
 import type { Message } from "./message.js";
 import type { Waitable } from "./waitable.js";
 import type { ThreadAction } from "./thread.js";
+import { notImplemented } from "../engine/errors.js";
 
 /** Opaque brand for node identifiers within a graph. @public */
 export type NodeId = string & { readonly __brand: "NodeId" };
@@ -20,6 +21,11 @@ export type NodeKind =
   | { kind: "use"; subgraph: Graph }
   | { kind: "waitFor"; waitable: Waitable<unknown> }
   | { kind: "interrupt"; waitable: Waitable<unknown>; run: Step }
+  | {
+      kind: "forEach";
+      items: (output: unknown) => readonly unknown[];
+      branch: (item: unknown) => Graph;
+    }
   | { kind: "finish" };
 
 /** One edge's declaration, as captured by `Handle.when`/`.otherwise`/`.then`. */
@@ -53,6 +59,7 @@ export interface Flow {
   use(subgraph: Graph): Handle; // compose a graph as a node; runs on the reaching edge's thread
   waitFor<T>(waitable: Waitable<T>): Handle; // park until `waitable`'s condition is met
   interrupt<T>(waitable: Waitable<T>, run: Step): Handle; // always armed
+  forEach<Item>(items: (output: unknown) => readonly Item[], branch: (item: Item) => Graph): Handle; // dynamic, runtime-sized fan-out
   entry(node: Handle): void;
   readonly finish: Handle; // route a value in to end the flow; that value is the result
 }
@@ -150,6 +157,9 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
       const id = freshNodeId();
       nodes.set(id, { kind: "interrupt", waitable, run });
       return makeHandle(id);
+    },
+    forEach() {
+      return notImplemented("Flow.forEach");
     },
     entry(node) {
       entry = node.id;

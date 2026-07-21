@@ -12,6 +12,7 @@ import type { EventType } from "../session/event.js";
 export interface ModelCallResult {
   usedTools: boolean;
   usage: Usage;
+  toolCalls: { correlationId: string; name: string }[]; // requested this turn; empty until Story 5
 }
 
 /** A structured error a step can return instead of throwing. @public */
