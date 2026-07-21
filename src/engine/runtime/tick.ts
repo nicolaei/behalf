@@ -40,6 +40,7 @@ import {
   seedUseNode,
 } from "./drive.js";
 import { drainOnePendingSignal, peekMessageFromInbox } from "./execution.js";
+import { buildForEachGroup, replayForEachBranch, advanceForEachGroup } from "./foreach.js";
 
 /** One cursor's current state within a tick() outcome — node, status, and (for parked) what it's waiting for. */
 export interface CursorState {
@@ -707,6 +708,34 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         },
       });
       continue;
+    }
+
+    if (node.kind === "forEach") {
+      if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
+
+      const group = buildForEachGroup(node, frame.current, currentThread, frame.currentInput);
+      for (const branch of group.branches) replayForEachBranch(branch, group, runtime);
+
+      if (group.branches.every((branch) => branch.done)) {
+        const outputs = group.branches.map((branch) => branch.output);
+        const routed = commitRoute(
+          runtime,
+          currentThread.id,
+          frame.flow.edges,
+          frame.current,
+          outputs,
+          stepIdentity(frame.current),
+          currentThread,
+        );
+        currentThread = routed.thread;
+        frame.current = routed.to;
+        frame.currentInput = routed.input;
+        frame.reason = routed.reason;
+        ranStep = true;
+        continue;
+      }
+
+      return advanceForEachGroup(group, runtime, attemptsByNode);
     }
 
     if (node.kind !== "step") notImplemented(`tick: node kind "${node.kind}"`);
