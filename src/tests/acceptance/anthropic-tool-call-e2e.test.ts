@@ -17,13 +17,37 @@ describe("the real Anthropic port runs a tool call end to end", () => {
 
     const fakeClient = {
       messages: {
-        create: () =>
-          Promise.resolve({
-            content: [
-              { type: "tool_use", id: "call-1", name: "search", input: { query: "weather" } },
-            ],
-            usage: { input_tokens: 10, output_tokens: 5 },
-          }),
+        stream: () => ({
+          [Symbol.asyncIterator]: () => {
+            const events = [
+              {
+                type: "content_block_start",
+                index: 0,
+                content_block: { type: "tool_use", id: "call-1", name: "search", input: {} },
+              },
+              {
+                type: "content_block_delta",
+                index: 0,
+                delta: { type: "input_json_delta", partial_json: '{"query":"weather"}' },
+              },
+              { type: "content_block_stop", index: 0 },
+              {
+                type: "message_delta",
+                delta: { stop_reason: "tool_use" },
+                usage: { output_tokens: 5 },
+              },
+            ];
+            let i = 0;
+            return {
+              next: () =>
+                Promise.resolve(
+                  i < events.length
+                    ? { value: events[i++], done: false }
+                    : { value: undefined, done: true },
+                ),
+            };
+          },
+        }),
       },
     } as unknown as Anthropic;
 
