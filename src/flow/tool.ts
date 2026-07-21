@@ -1,6 +1,7 @@
 // Flow authoring — tool / toolset / ToolHandler / provide / expand. See docs/reference.md.
 
 import type { ThreadId } from "./thread.js";
+import { z } from "zod";
 import type { Message } from "./message.js";
 import type { Graph } from "./graph.js";
 import type { Stream } from "../session/envelope.js";
@@ -10,6 +11,7 @@ import type { EventType } from "../session/event.js";
 export interface Tool<Input = unknown, Output = unknown> {
   readonly name: string;
   readonly describe: string;
+  readonly schema: z.ZodType<Input>;
   readonly _input?: Input;
   readonly _output?: Output;
 }
@@ -21,8 +23,12 @@ export interface Toolset {
 }
 
 /** Creates a typed tool reference by name and description. @public */
-export function tool<Input, Output>(name: string, describe: string): Tool<Input, Output> {
-  return { name, describe };
+export function tool<Input, Output>(
+  name: string,
+  describe: string,
+  schema: z.ZodType<Input> = z.record(z.string(), z.unknown()) as z.ZodType<Input>,
+): Tool<Input, Output> {
+  return { name, describe, schema };
 }
 
 /** Creates a typed toolset reference by name and description. @public */
