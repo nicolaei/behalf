@@ -1,10 +1,220 @@
 // Adapter — Anthropic ModelPort. See docs/reference.md § "ModelPort" (opus48 sketch).
+//
+// Split into small pure helpers (auth resolution, request/response mapping, usage
+// mapping) plus the createAnthropicPort factory that wires them to the real
+// @anthropic-ai/sdk client. The pure helpers are unit tested directly with no
+// network; createAnthropicPort itself is exercised only by manual/example use.
 
+import Anthropic from "@anthropic-ai/sdk";
 import type { Model } from "../../flow/model.js";
 import type { ModelPort } from "../../engine/model-port.js";
+import type { Profile } from "../../flow/profile.js";
+import type { ContentBlock, Message, AssistantMessage, Usage } from "../../flow/message.js";
 
-/** One port per Anthropic model, e.g. Claude Opus. Not yet implemented. @public */
+/** One round-trip token round trip: a resolved credential mode for the Anthropic API. @public */
+export type AnthropicAuth = { mode: "oauth"; token: string } | { mode: "apiKey"; key: string };
+
+/**
+ * Picks the credential mode from the environment. `CLAUDE_CODE_OAUTH_TOKEN`
+ * (from `claude setup-token`) wins over `ANTHROPIC_API_KEY`; neither present
+ * is a hard error since there is no way to call the API at all.
+ * @public
+ */
+export function resolveAuth(env: Record<string, string | undefined>): AnthropicAuth {
+  const oauthToken = env["CLAUDE_CODE_OAUTH_TOKEN"];
+  if (oauthToken) return { mode: "oauth", token: oauthToken };
+
+  const apiKey = env["ANTHROPIC_API_KEY"];
+  if (apiKey) return { mode: "apiKey", key: apiKey };
+
+  throw new Error(
+    "No Anthropic credentials found — set CLAUDE_CODE_OAUTH_TOKEN (from `claude setup-token`) or ANTHROPIC_API_KEY.",
+  );
+}
+
+/** Builds the SDK client for a resolved auth mode. OAuth mode uses the SDK's `authToken` option, which sends `Authorization: Bearer <token>` and merges in the required `anthropic-beta: oauth-2025-04-20` header itself (it appends to any beta values our request already sets, e.g. for thinking, rather than clobbering them). */
+export function createAnthropicClient(auth: AnthropicAuth): Anthropic {
+  return auth.mode === "oauth"
+    ? new Anthropic({ authToken: auth.token })
+    : new Anthropic({ apiKey: auth.key });
+}
+
+const DEFAULT_MAX_TOKENS = 8192;
+const DEFAULT_THINKING_BUDGET = 4096;
+
+/** Thinking token budgets by reasoning level — deliberately coarse, not over-engineered. */
+const THINKING_BUDGETS: Record<string, number> = {
+  minimal: 1024,
+  low: 2048,
+  medium: 4096,
+  high: 8192,
+  xhigh: 16384,
+};
+
+/** The shape `toAnthropicRequest` hands to `client.messages.create`. */
+export interface AnthropicRequest {
+  system: string;
+  messages: Anthropic.MessageParam[];
+  thinking?: Anthropic.ThinkingConfigParam;
+}
+
+/**
+ * Maps one `behalf` content block to its Anthropic request-side param. Shared
+ * by the request and response mapping — the shapes are symmetric enough that
+ * a single switch covers both directions for text/thinking/toolCall; toolResult
+ * only ever appears in a request (the model never emits one).
+ */
+function toAnthropicBlock(block: ContentBlock): Anthropic.ContentBlockParam {
+  switch (block.type) {
+    case "text":
+      return { type: "text", text: block.text };
+    case "thinking":
+      if (block.redacted) {
+        return { type: "redacted_thinking", data: block.signature ?? "" };
+      }
+      return { type: "thinking", thinking: block.text, signature: block.signature ?? "" };
+    case "image":
+      return {
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: block.mediaType as Anthropic.Base64ImageSource["media_type"],
+          data: block.data,
+        },
+      };
+    case "toolCall":
+      return { type: "tool_use", id: block.correlationId, name: block.name, input: block.input };
+    case "toolResult":
+      return {
+        type: "tool_result",
+        tool_use_id: block.correlationId,
+        content: typeof block.output === "string" ? block.output : JSON.stringify(block.output),
+        ...(block.isError !== undefined ? { is_error: block.isError } : {}),
+      };
+  }
+}
+
+/**
+ * Maps one `behalf` Message to zero-or-one Anthropic MessageParam. `system`
+ * messages return undefined — their text is folded into the top-level
+ * `system` string by `toAnthropicRequest`, not sent as a `messages` entry.
+ * `tool` messages become a `user`-role message (Anthropic has no separate
+ * tool role — tool_result blocks live on user messages).
+ */
+function toAnthropicMessage(message: Message): Anthropic.MessageParam | undefined {
+  switch (message.role) {
+    case "system":
+      return undefined;
+    case "user":
+      return { role: "user", content: message.content.map(toAnthropicBlock) };
+    case "assistant":
+      return { role: "assistant", content: message.content.map(toAnthropicBlock) };
+    case "tool":
+      return { role: "user", content: message.content.map(toAnthropicBlock) };
+  }
+}
+
+function systemText(block: ContentBlock): string {
+  return block.type === "text" ? block.text : block.type === "thinking" ? block.text : "";
+}
+
+/**
+ * Builds the Anthropic request body from a Profile + Message history.
+ * `Profile.system` is the primary system prompt source; any `system`-role
+ * Messages in the history (docs/reference.md doesn't rule these out) are
+ * appended after it so both land in Anthropic's single top-level `system` param.
+ */
+export function toAnthropicRequest(profile: Profile, messages: Message[]): AnthropicRequest {
+  const systemFromHistory = messages
+    .filter((m): m is Extract<Message, { role: "system" }> => m.role === "system")
+    .map((m) => m.content.map(systemText).join(""))
+    .filter((text) => text.length > 0);
+
+  const system = [profile.system, ...systemFromHistory]
+    .filter((text) => text.length > 0)
+    .join("\n\n");
+
+  const anthropicMessages = messages
+    .map(toAnthropicMessage)
+    .filter((m): m is Anthropic.MessageParam => m !== undefined);
+
+  const reasoning = profile.reasoning;
+  const thinking: Anthropic.ThinkingConfigParam | undefined =
+    reasoning && reasoning !== "off"
+      ? {
+          type: "enabled",
+          budget_tokens: THINKING_BUDGETS[reasoning] ?? DEFAULT_THINKING_BUDGET,
+        }
+      : undefined;
+
+  return { system, messages: anthropicMessages, ...(thinking ? { thinking } : {}) };
+}
+
+/**
+ * Maps one Anthropic response content block back to a `behalf` ContentBlock —
+ * the reverse of `toAnthropicBlock`. Only the block kinds the model can
+ * actually emit appear here (no toolResult, no image, no cache_control).
+ */
+export function fromAnthropicBlock(block: Anthropic.ContentBlock): ContentBlock {
+  switch (block.type) {
+    case "text":
+      return { type: "text", text: block.text };
+    case "thinking":
+      return { type: "thinking", text: block.thinking, signature: block.signature };
+    case "redacted_thinking":
+      return { type: "thinking", text: "", signature: block.data, redacted: true };
+    case "tool_use":
+      return { type: "toolCall", correlationId: block.id, name: block.name, input: block.input };
+    default:
+      // Server-tool blocks (web_search, code_execution, …) have no ContentBlock
+      // analogue yet — surface them as opaque text rather than dropping them silently.
+      return { type: "text", text: JSON.stringify(block) };
+  }
+}
+
+/** Maps an Anthropic response's `usage` to `behalf`'s `Usage` shape. @public */
+export function fromAnthropicUsage(usage: Anthropic.Usage): Usage {
+  const reasoning = usage.output_tokens_details?.thinking_tokens;
+  return {
+    input: usage.input_tokens,
+    output: usage.output_tokens,
+    ...(reasoning !== undefined ? { reasoning } : {}),
+    ...(usage.cache_read_input_tokens != null ? { cacheRead: usage.cache_read_input_tokens } : {}),
+    ...(usage.cache_creation_input_tokens != null
+      ? { cacheWrite: usage.cache_creation_input_tokens }
+      : {}),
+  };
+}
+
+/**
+ * One port per Anthropic model. `respond` makes a single non-streaming call —
+ * delta streaming through `stream: DeltaSink` is out of scope here; a follow-up
+ * milestone wires token-level streaming through openStream.
+ * @public
+ */
 export function createAnthropicPort(model: Model): ModelPort {
-  void model;
-  throw new Error("createAnthropicPort is not implemented yet");
+  const client = createAnthropicClient(resolveAuth(process.env));
+
+  return {
+    model,
+    async respond(profile, messages) {
+      const request = toAnthropicRequest(profile, messages);
+      const response = await client.messages.create({
+        model: model.identifier,
+        max_tokens: DEFAULT_MAX_TOKENS,
+        system: request.system,
+        messages: request.messages,
+        ...(request.thinking ? { thinking: request.thinking } : {}),
+      });
+
+      const assistantMessage: AssistantMessage = {
+        role: "assistant",
+        provider: model.provider,
+        model: model.identifier,
+        content: response.content.map(fromAnthropicBlock),
+        usage: fromAnthropicUsage(response.usage),
+      };
+      return assistantMessage;
+    },
+  };
 }
