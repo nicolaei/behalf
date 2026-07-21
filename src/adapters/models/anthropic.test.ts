@@ -7,6 +7,8 @@ import {
   toAnthropicRequest,
   fromAnthropicBlock,
   fromAnthropicUsage,
+  oauthHeaders,
+  CLAUDE_CODE_IDENTITY,
 } from "./anthropic.js";
 import type { Profile } from "../../flow/profile.js";
 import type { Message } from "../../flow/message.js";
@@ -130,6 +132,28 @@ describe("toAnthropicRequest", () => {
       },
     ]);
   });
+
+  it("prepends the Claude Code identity block first when isOAuth is true", () => {
+    const messages: Message[] = [
+      { role: "user", intent: "standard", content: [{ type: "text", text: "hi" }] },
+    ];
+
+    const request = toAnthropicRequest(profile(), messages, true);
+
+    expect(request.system.startsWith(CLAUDE_CODE_IDENTITY)).toBe(true);
+    expect(request.system).toBe(`${CLAUDE_CODE_IDENTITY}\n\ntest persona`);
+  });
+
+  it("omits the Claude Code identity block when isOAuth is false (the default)", () => {
+    const messages: Message[] = [
+      { role: "user", intent: "standard", content: [{ type: "text", text: "hi" }] },
+    ];
+
+    const request = toAnthropicRequest(profile(), messages);
+
+    expect(request.system).toBe("test persona");
+    expect(request.system).not.toContain("Claude Code");
+  });
 });
 
 describe("fromAnthropicBlock", () => {
@@ -211,5 +235,20 @@ describe("fromAnthropicUsage", () => {
     } as Anthropic.Usage;
 
     expect(fromAnthropicUsage(usage)).toEqual({ input: 5, output: 3 });
+  });
+});
+
+describe("oauthHeaders", () => {
+  it("carries both required beta flags, not just oauth-2025-04-20 alone", () => {
+    const headers = oauthHeaders();
+    expect(headers["anthropic-beta"]).toContain("oauth-2025-04-20");
+    expect(headers["anthropic-beta"]).toContain("claude-code-20250219");
+  });
+
+  it("carries the direct-browser-access and cli identity headers OAuth requires", () => {
+    const headers = oauthHeaders();
+    expect(headers["anthropic-dangerous-direct-browser-access"]).toBe("true");
+    expect(headers["x-app"]).toBe("cli");
+    expect(headers["user-agent"]).toMatch(/^claude-cli\//);
   });
 });

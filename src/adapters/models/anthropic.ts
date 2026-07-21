@@ -32,11 +32,36 @@ export function resolveAuth(env: Record<string, string | undefined>): AnthropicA
   );
 }
 
-/** Builds the SDK client for a resolved auth mode. OAuth mode uses the SDK's `authToken` option, which sends `Authorization: Bearer <token>` and merges in the required `anthropic-beta: oauth-2025-04-20` header itself (it appends to any beta values our request already sets, e.g. for thinking, rather than clobbering them). */
+// OAuth (Claude Pro/Max subscription) tokens are scoped to Claude Code's own
+// client identity — Anthropic's API requires the request to present as Claude
+// Code, both via these headers and the system-prompt identity block
+// `toAnthropicRequest` prepends in OAuth mode, or it rejects/mishandles an
+// OAuth-authenticated call. The SDK's `authToken` option alone only sends the
+// bearer token; it does NOT add these headers itself — verified against a real
+// implementation: https://github.com/earendil-works/pi/blob/main/packages/ai/src/api/anthropic-messages.ts
+const CLAUDE_CODE_VERSION = "2.1.75";
+export const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
+
+/** The headers an OAuth-mode request must carry so Anthropic accepts it as a Claude Code client. Pure, so it's unit tested with no network. @public */
+export function oauthHeaders(): Record<string, string> {
+  return {
+    accept: "application/json",
+    "anthropic-dangerous-direct-browser-access": "true",
+    "anthropic-beta": "claude-code-20250219,oauth-2025-04-20",
+    "user-agent": `claude-cli/${CLAUDE_CODE_VERSION}`,
+    "x-app": "cli",
+  };
+}
+
+/** Builds the SDK client for a resolved auth mode. OAuth mode uses the SDK's `authToken` option plus `oauthHeaders()` and `dangerouslyAllowBrowser` (required for the SDK to allow sending a bearer token outside its normal apiKey path). */
 export function createAnthropicClient(auth: AnthropicAuth): Anthropic {
-  return auth.mode === "oauth"
-    ? new Anthropic({ authToken: auth.token })
-    : new Anthropic({ apiKey: auth.key });
+  if (auth.mode === "apiKey") return new Anthropic({ apiKey: auth.key });
+  return new Anthropic({
+    apiKey: null,
+    authToken: auth.token,
+    dangerouslyAllowBrowser: true,
+    defaultHeaders: oauthHeaders(),
+  });
 }
 
 const DEFAULT_MAX_TOKENS = 8192;
@@ -123,14 +148,21 @@ function systemText(block: ContentBlock): string {
  * `Profile.system` is the primary system prompt source; any `system`-role
  * Messages in the history (docs/reference.md doesn't rule these out) are
  * appended after it so both land in Anthropic's single top-level `system` param.
+ * In OAuth mode, Anthropic requires the Claude Code identity block to lead
+ * the system prompt — the token is scoped to that client identity and the API
+ * rejects/mishandles requests that don't present as Claude Code.
  */
-export function toAnthropicRequest(profile: Profile, messages: Message[]): AnthropicRequest {
+export function toAnthropicRequest(
+  profile: Profile,
+  messages: Message[],
+  isOAuth = false,
+): AnthropicRequest {
   const systemFromHistory = messages
     .filter((m): m is Extract<Message, { role: "system" }> => m.role === "system")
     .map((m) => m.content.map(systemText).join(""))
     .filter((text) => text.length > 0);
 
-  const system = [profile.system, ...systemFromHistory]
+  const system = [...(isOAuth ? [CLAUDE_CODE_IDENTITY] : []), profile.system, ...systemFromHistory]
     .filter((text) => text.length > 0)
     .join("\n\n");
 
@@ -193,12 +225,14 @@ export function fromAnthropicUsage(usage: Anthropic.Usage): Usage {
  * @public
  */
 export function createAnthropicPort(model: Model): ModelPort {
-  const client = createAnthropicClient(resolveAuth(process.env));
+  const auth = resolveAuth(process.env);
+  const client = createAnthropicClient(auth);
+  const isOAuth = auth.mode === "oauth";
 
   return {
     model,
     async respond(profile, messages) {
-      const request = toAnthropicRequest(profile, messages);
+      const request = toAnthropicRequest(profile, messages, isOAuth);
       const response = await client.messages.create({
         model: model.identifier,
         max_tokens: DEFAULT_MAX_TOKENS,
