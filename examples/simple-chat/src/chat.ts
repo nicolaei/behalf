@@ -7,6 +7,7 @@
 
 import { defineGraph, userInput } from "behalf";
 import { fsTools } from "./tools.js";
+import { isRetryableProviderError } from "./retry.js";
 import type { Profile, PersonaStep, StepContext, ModelCallResult, Model } from "behalf";
 
 export const DEFAULT_MODEL: Model = {
@@ -24,9 +25,24 @@ export const assistant: Profile = {
 };
 
 const modelStep = (profile: Profile): PersonaStep<ModelCallResult> =>
-  Object.assign(async (context: StepContext) => context.output(await context.modelCall(profile)), {
-    persona: profile,
-  });
+  Object.assign(
+    async (context: StepContext) => {
+      try {
+        return context.output(await context.modelCall(profile));
+      } catch (cause) {
+        // A raw throw here is always classified `retryable: false` by the
+        // engine's generic catch — build the StepError ourselves so a real
+        // 429/5xx from the provider actually gets retried (see retry.ts).
+        return context.fail({
+          type: "provider",
+          message: cause instanceof Error ? cause.message : String(cause),
+          retryable: isRetryableProviderError(cause),
+          cause,
+        });
+      }
+    },
+    { persona: profile },
+  );
 
 const agentTurn = (persona: Profile) =>
   defineGraph(persona.system, (flow) => {

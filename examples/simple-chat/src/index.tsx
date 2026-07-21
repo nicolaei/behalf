@@ -5,6 +5,7 @@ import type { Runtime } from "behalf";
 import { App } from "./App.js";
 import { DEFAULT_MODEL } from "./chat.js";
 import { fsBindings } from "./tools.js";
+import { rateLimitBackoff } from "./retry.js";
 
 function Root() {
   const [ready, setReady] = useState<Runtime | undefined>(undefined);
@@ -15,6 +16,7 @@ function Root() {
     runtime({
       models: () => adapters.models.createAnthropicPort(DEFAULT_MODEL),
       bindings: fsBindings,
+      errorHandlers: [rateLimitBackoff],
       store: adapters.stores.memoryStore(),
     }).then(
       (resolved) => {
