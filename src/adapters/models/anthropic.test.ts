@@ -14,6 +14,8 @@ import type { Profile } from "../../flow/profile.js";
 import type { Message } from "../../flow/message.js";
 import type { Model } from "../../flow/model.js";
 import type Anthropic from "@anthropic-ai/sdk";
+import { z } from "zod";
+import { tool } from "../../flow/tool.js";
 
 const model: Model = {
   identifier: "claude-opus-4-8",
@@ -153,6 +155,45 @@ describe("toAnthropicRequest", () => {
 
     expect(request.system).toBe("test persona");
     expect(request.system).not.toContain("Claude Code");
+  });
+});
+
+describe("toAnthropicRequest — tools", () => {
+  it("includes a tools array built from profile.tools, with a real JSON schema", () => {
+    const search = tool<{ query: string }, { hits: string[] }>(
+      "search",
+      "Search the web.",
+      z.object({ query: z.string() }),
+    );
+    const messages: Message[] = [
+      { role: "user", intent: "standard", content: [{ type: "text", text: "hi" }] },
+    ];
+
+    const request = toAnthropicRequest(profile({ tools: [search] }), messages);
+
+    expect(request.tools).toEqual([
+      {
+        name: "search",
+        description: "Search the web.",
+        input_schema: {
+          $schema: "https://json-schema.org/draft/2020-12/schema",
+          type: "object",
+          properties: { query: { type: "string" } },
+          required: ["query"],
+          additionalProperties: false,
+        },
+      },
+    ]);
+  });
+
+  it("omits the tools key entirely when profile.tools is empty", () => {
+    const messages: Message[] = [
+      { role: "user", intent: "standard", content: [{ type: "text", text: "hi" }] },
+    ];
+
+    const request = toAnthropicRequest(profile(), messages);
+
+    expect(request.tools).toBeUndefined();
   });
 });
 

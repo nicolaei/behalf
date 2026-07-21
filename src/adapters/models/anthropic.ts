@@ -6,9 +6,11 @@
 // network; createAnthropicPort itself is exercised only by manual/example use.
 
 import Anthropic from "@anthropic-ai/sdk";
+import { z } from "zod";
 import type { Model } from "../../flow/model.js";
 import type { ModelPort } from "../../engine/model-port.js";
 import type { Profile } from "../../flow/profile.js";
+import type { Tool, Toolset } from "../../flow/tool.js";
 import type { ContentBlock, Message, AssistantMessage, Usage } from "../../flow/message.js";
 
 /** One round-trip token round trip: a resolved credential mode for the Anthropic API. @public */
@@ -81,6 +83,17 @@ export interface AnthropicRequest {
   system: string;
   messages: Anthropic.MessageParam[];
   thinking?: Anthropic.ThinkingConfigParam;
+  tools?: Anthropic.Tool[];
+}
+
+/** Maps a `behalf` Tool/Toolset to Anthropic's per-tool definition shape. Toolset members are resolved dynamically elsewhere and never statically known here, so a Toolset falls back to a permissive schema. */
+function toAnthropicToolDef(t: Tool | Toolset): Anthropic.Tool {
+  const schema = "schema" in t ? t.schema : z.record(z.string(), z.unknown());
+  return {
+    name: t.name,
+    description: t.describe,
+    input_schema: z.toJSONSchema(schema) as Anthropic.Tool.InputSchema,
+  };
 }
 
 /**
@@ -179,7 +192,12 @@ export function toAnthropicRequest(
         }
       : undefined;
 
-  return { system, messages: anthropicMessages, ...(thinking ? { thinking } : {}) };
+  return {
+    system,
+    messages: anthropicMessages,
+    ...(thinking ? { thinking } : {}),
+    ...(profile.tools.length > 0 ? { tools: profile.tools.map(toAnthropicToolDef) } : {}),
+  };
 }
 
 /**
@@ -239,6 +257,7 @@ export function createAnthropicPort(model: Model): ModelPort {
         system: request.system,
         messages: request.messages,
         ...(request.thinking ? { thinking: request.thinking } : {}),
+        ...(request.tools ? { tools: request.tools } : {}),
       });
 
       const assistantMessage: AssistantMessage = {
