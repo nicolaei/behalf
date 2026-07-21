@@ -4,9 +4,15 @@
   "private": true,
   "description": "A framework and library for writing agent workflows with LLMs.",
   "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "format": "prettier --write .",

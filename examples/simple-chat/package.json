@@ -1,0 +1,21 @@
+{
+  "name": "simple-chat",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A minimal Ink TUI agent built on behalf: Anthropic (claude-sonnet-5, medium thinking), filesystem tools, tool streaming.",
+  "scripts": {
+    "start": "tsx src/index.tsx"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
+    "behalf": "file:../..",
+    "ink": "^5.2.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^6.0.3"
+  }
+}
