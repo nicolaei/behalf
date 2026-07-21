@@ -73,6 +73,22 @@ export function assistantToolCall(name: string, input: unknown): AssistantMessag
   };
 }
 
+/** A scripted assistant message with several tool calls, correlationIds "1".. "N" in order. */
+export function assistantToolCalls(calls: { name: string; input: unknown }[]): AssistantMessage {
+  return {
+    role: "assistant",
+    provider: "test",
+    model: "scripted",
+    content: calls.map((call, index) => ({
+      type: "toolCall" as const,
+      correlationId: String(index + 1),
+      name: call.name,
+      input: call.input,
+    })),
+    usage: { input: 1, output: 1 },
+  };
+}
+
 export type CommittedEnvelope = Extract<Envelope, { type: EventType }>;
 
 // Tightened to "committed" only (not "in-progress") — in-progress snapshots are
