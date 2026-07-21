@@ -100,3 +100,19 @@ export function loggedEventAt(store: SessionStore, index: number): CommittedEnve
 export function loggedEnvelopes(store: SessionStore): CommittedEnvelope[] {
   return store.events().filter(isCommitted);
 }
+
+/**
+ * Awaits the next committed envelope of `type` on `store.changes()` — for
+ * asserting something eventually gets committed asynchronously, independent
+ * of whatever kicked it off. Subscribes before the caller triggers the
+ * async work, so nothing committed in the same tick is missed.
+ */
+export async function awaitEventType(
+  store: SessionStore,
+  type: EventType,
+): Promise<CommittedEnvelope> {
+  for await (const envelope of store.changes()) {
+    if (envelope.form === "committed" && envelope.type === type) return envelope;
+  }
+  throw new Error(`changes() ended without a committed "${type}" envelope`);
+}
