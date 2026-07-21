@@ -437,9 +437,9 @@ export async function runModelCall(
 
   const toolCalls = reply.content.filter(isToolCall);
   for (const call of toolCalls) {
-    runtime.store.append(
+    context.appendEvent(
       { correlationId: call.correlationId, name: call.name, input: call.input },
-      { type: "toolCall", threadId: context.thread.id },
+      "toolCall",
     );
   }
 
