@@ -52,3 +52,6 @@ export interface Stream {
   commit(event: Event[EventType]): void; // finalize into the log
   abort(): void; // commit what streamed, mark the envelope aborted
 }
+
+/** Narrows `Envelope` to its committed/in-progress form, excluding a `delta` fragment (which has neither `type` nor `event`). Shared by every replay/reconstruction path that scans the committed log for a specific event type. Not part of the package's public surface — an internal engine helper that happens to live next to `Envelope`. */
+export type CommittedEnvelope = Extract<Envelope, { type: EventType }>;

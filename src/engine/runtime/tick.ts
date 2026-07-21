@@ -2,12 +2,12 @@
 // event log, advances it exactly one node, and the `tickUntilSuspended`
 // helper that repeats until every cursor is parked or done.
 
-import type { Graph, NodeId } from "../../flow/graph.js";
+import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
 import type { Message, MessageKind } from "../../flow/message.js";
 import { messageKindOf, tryMessageKindOf } from "../../flow/waitable.js";
 import type { StepContext, WaitForResult } from "../../flow/step.js";
-import type { Event, EventType } from "../../session/event.js";
-import type { Envelope } from "../../session/envelope.js";
+import type { Event } from "../../session/event.js";
+import type { CommittedEnvelope } from "../../session/envelope.js";
 import type { Runtime } from "../runtime.js";
 import { freshThreadId } from "./ids.js";
 import { notImplemented, unreachable } from "../errors.js";
@@ -39,7 +39,7 @@ import {
   findInterruptNodes,
   seedUseNode,
 } from "./drive.js";
-import { drainOnePendingSignal, peekMessageFromInbox } from "./execution.js";
+import { peekSignalMatch, peekMessageFromInbox } from "./execution.js";
 import { buildForEachGroup, replayForEachBranch, advanceForEachGroup } from "./foreach.js";
 
 /** One cursor's current state within a tick() outcome — node, status, and (for parked) what it's waiting for. */
@@ -186,7 +186,6 @@ type ReplayResult = ({ kind: "single" } & ReplayPosition) | { kind: "fanout"; gr
  * instead — the completion event `commitOutput` tags with the `use` node's
  * own (outer) id once its subgraph reaches `finish`.
  */
-type CommittedEnvelope = Extract<Envelope, { type: EventType }>;
 
 /** `replayPosition`'s own mutable working state — the thread and position tree it's rebuilding, threaded through each per-event-type handler by reference so every handler sees (and can advance) exactly where the previous one left off. */
 interface ReplayState {
@@ -511,6 +510,71 @@ function parentOf<TFrame>(path: PathLevel<TFrame>[]): NodeId | undefined {
   return enclosing?.kind === "use-descent" ? enclosing.outerNode : undefined;
 }
 
+/** `tick()`'s own `use` node handling: seeds the subgraph from the outer frame's current input/reason (`seedUseNode`), then wraps it in a `use-descent` tree node ready for the loop's next iteration to drive — same descent `driveUseNode` builds for `runFlow`, just captured as data instead of an immediate recursive call. */
+function advanceTickUseNode(
+  node: Extract<NodeKind, { kind: "use" }>,
+  frame: LiveFrame,
+  currentThread: Thread,
+  path: PathLevel<LiveFrame>[],
+  runtime: Runtime,
+  getThread: () => Thread,
+  setThread: (thread: Thread) => void,
+): { thread: Thread; tree: CursorTree<LiveFrame> } {
+  const { seed, thread: seededThread } = seedUseNode(
+    frame.reason,
+    frame.currentInput,
+    currentThread,
+    runtime,
+  );
+
+  const tree = rebuildFromPath(path, path.length - 1, {
+    kind: "use-descent",
+    outerNode: frame.current,
+    inner: {
+      kind: "step",
+      frame: buildLiveFrame(
+        { flow: node.subgraph, current: node.subgraph.entry, currentInput: seed },
+        runtime,
+        getThread,
+        setThread,
+      ),
+    },
+  });
+
+  return { thread: seededThread, tree };
+}
+
+/** `tick()`'s own `forEach` node handling: builds and replays the group's branches, folding to the join (mutating `frame` in place, same as tick()'s own step-folding elsewhere) the instant every branch is done, or handing off to `advanceForEachGroup` for one more branch-step of work otherwise. */
+async function advanceTickForEachNode(
+  node: Extract<NodeKind, { kind: "forEach" }>,
+  frame: LiveFrame,
+  currentThread: Thread,
+  runtime: Runtime,
+  attemptsByNode: Map<NodeId, number>,
+): Promise<{ kind: "folded"; thread: Thread } | { kind: "outcome"; outcome: TickOutcome }> {
+  const group = buildForEachGroup(node, frame.current, currentThread, frame.currentInput);
+  for (const branch of group.branches) replayForEachBranch(branch, group, runtime);
+
+  if (group.branches.every((branch) => branch.done)) {
+    const outputs = group.branches.map((branch) => branch.output);
+    const routed = commitRoute(
+      runtime,
+      currentThread.id,
+      frame.flow.edges,
+      frame.current,
+      outputs,
+      stepIdentity(frame.current),
+      currentThread,
+    );
+    frame.current = routed.to;
+    frame.currentInput = routed.input;
+    frame.reason = routed.reason;
+    return { kind: "folded", thread: routed.thread };
+  }
+
+  return { kind: "outcome", outcome: await advanceForEachGroup(group, runtime, attemptsByNode) };
+}
+
 /**
  * Advances a flow exactly one node, reconstructing where it is purely from
  * `runtime.store` — no state may survive in a JS closure between calls, so a
@@ -629,13 +693,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         // against the committed log, same as waitForSignal's blocking check,
         // but never poll — drain and commit at most one pending signal entry
         // before re-checking, then park if it's still unmatched.
-        let matched = node.waitable.match(runtime.store.events());
-
-        if (matched === undefined) {
-          if (drainOnePendingSignal(runtime.store)) {
-            matched = node.waitable.match(runtime.store.events());
-          }
-        }
+        const matched = peekSignalMatch(runtime.store, node.waitable);
         if (matched === undefined)
           return [
             { node: frame.current, status: "parked", waitingFor: [node.waitable.label], ...parent },
@@ -685,57 +743,33 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
 
     if (node.kind === "use") {
       if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
-
-      const { seed, thread: seededThread } = seedUseNode(
-        frame.reason,
-        frame.currentInput,
+      const advanced = advanceTickUseNode(
+        node,
+        frame,
         currentThread,
+        path,
         runtime,
+        getThread,
+        setThread,
       );
-      currentThread = seededThread;
-
-      tree = rebuildFromPath(path, path.length - 1, {
-        kind: "use-descent",
-        outerNode: frame.current,
-        inner: {
-          kind: "step",
-          frame: buildLiveFrame(
-            { flow: node.subgraph, current: node.subgraph.entry, currentInput: seed },
-            runtime,
-            getThread,
-            setThread,
-          ),
-        },
-      });
+      currentThread = advanced.thread;
+      tree = advanced.tree;
       continue;
     }
 
     if (node.kind === "forEach") {
       if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
-
-      const group = buildForEachGroup(node, frame.current, currentThread, frame.currentInput);
-      for (const branch of group.branches) replayForEachBranch(branch, group, runtime);
-
-      if (group.branches.every((branch) => branch.done)) {
-        const outputs = group.branches.map((branch) => branch.output);
-        const routed = commitRoute(
-          runtime,
-          currentThread.id,
-          frame.flow.edges,
-          frame.current,
-          outputs,
-          stepIdentity(frame.current),
-          currentThread,
-        );
-        currentThread = routed.thread;
-        frame.current = routed.to;
-        frame.currentInput = routed.input;
-        frame.reason = routed.reason;
-        ranStep = true;
-        continue;
-      }
-
-      return advanceForEachGroup(group, runtime, attemptsByNode);
+      const advanced = await advanceTickForEachNode(
+        node,
+        frame,
+        currentThread,
+        runtime,
+        attemptsByNode,
+      );
+      if (advanced.kind === "outcome") return advanced.outcome;
+      currentThread = advanced.thread;
+      ranStep = true;
+      continue;
     }
 
     if (node.kind !== "step") notImplemented(`tick: node kind "${node.kind}"`);

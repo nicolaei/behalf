@@ -25,18 +25,20 @@ import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
 import type { ThreadId } from "../../flow/thread.js";
 import type { MessageKind } from "../../flow/message.js";
 import type { WaitForResult } from "../../flow/step.js";
-import type { Event, EventType } from "../../session/event.js";
-import type { Envelope } from "../../session/envelope.js";
+import type { Event } from "../../session/event.js";
+import type { CommittedEnvelope } from "../../session/envelope.js";
 import type { Runtime } from "../runtime.js";
 import { notImplemented, unreachable } from "../errors.js";
 import { type Thread, withMessage, route } from "./routing.js";
 import { tryMessageKindOf } from "../../flow/waitable.js";
 import type { ExecutionContext } from "./step-runner.js";
-import { runBranchNode, replayForkedThread } from "./fan-out.js";
+import {
+  runBranchNode,
+  replayForkedThread,
+  branchCursorStateWith,
+  findSingleThenEdge,
+} from "./fan-out.js";
 import type { CursorState, TickOutcome } from "./tick.js";
-
-/** A committed (or in-progress) envelope — the same narrowing `tick.ts` defines for its own replay loop, needed here for the same reason: a `delta` envelope has neither `type` nor `event`. */
-type CommittedEnvelope = Extract<Envelope, { type: EventType }>;
 
 /** One forEach branch's reconstructed progress — mirrors `BranchReplay` (fan-out.ts), but `graph` is rebuilt fresh every call (see this file's own doc comment) and `current`/`thread` are reconstructed by replaying only this branch's own deterministic thread, never by matching stepIds. `thread` is set the first time the branch is touched (forked off the group's `mainThread`, same fork semantics as a static fan-out branch — just onto a deterministic id instead of a fresh one). Once `done`, `current` names the branch graph's own `finish` node and `output` holds what reached it. */
 export interface ForEachBranchReplay {
@@ -189,24 +191,12 @@ export function replayForEachBranch(
   }
 }
 
-/** One forEach branch's outward `CursorState` — mirrors `branchCursorState` (fan-out.ts). */
+/** One forEach branch's outward `CursorState` — delegates to `branchCursorStateWith` (fan-out.ts) with the group's forEach node id as parent. */
 export function forEachBranchCursorState(
   branch: ForEachBranchReplay,
   group: ForEachGroup,
 ): CursorState {
-  if (branch.waitingFor) {
-    return {
-      node: branch.current,
-      status: "parked",
-      waitingFor: branch.waitingFor,
-      parent: group.forEachNodeId,
-    };
-  }
-  return {
-    node: branch.current,
-    status: branch.done ? "parked" : "active",
-    parent: group.forEachNodeId,
-  };
+  return branchCursorStateWith(branch, group.forEachNodeId);
 }
 
 /**
@@ -246,11 +236,7 @@ export async function advanceForEachGroup(
       branch.current = result.to;
       branch.currentInput = result.input;
     } else {
-      const thenEdge = branch.graph.edges.find(
-        (edge) => edge.from === branch.current && edge.edge === "then",
-      );
-      if (!thenEdge)
-        throw new Error(`forEach branch step "${branch.current}" has no outgoing then edge`);
+      const thenEdge = findSingleThenEdge(branch.graph.edges, branch.current, "forEach branch");
       branch.current = thenEdge.to;
       branch.currentInput = result.output;
     }

@@ -83,6 +83,15 @@ export function peekMessageFromInbox(
   return entry?.kind === "message" ? entry.message : undefined;
 }
 
+/** Checks a non-message `Waitable`'s own `match()` against the committed log, draining and committing at most one pending `signal` entry if nothing matched yet, then re-checking once more — the peek shape every non-blocking, non-message `waitFor` site (tick's own waitFor handling, `runBranchNode`'s `"peek"` mode) shares. `undefined` if still unmatched; never blocks, unlike `waitForSignal`. */
+export function peekSignalMatch<T>(store: SessionStore, waitable: Waitable<T>): T | undefined {
+  let matched = waitable.match(store.events());
+  if (matched === undefined && drainOnePendingSignal(store)) {
+    matched = waitable.match(store.events());
+  }
+  return matched;
+}
+
 /**
  * Parks until a non-`userInput` `Waitable` (a signal-based one, today's only
  * other provider) is satisfied: drains one pending `signal` entry at a time,

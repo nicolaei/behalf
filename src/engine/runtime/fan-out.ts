@@ -30,7 +30,7 @@ import {
   callTool,
   waitForMessage,
   waitForSignal,
-  drainOnePendingSignal,
+  peekSignalMatch,
   peekMessageFromInbox,
 } from "./execution.js";
 import { driveWaitForMessage, findInterruptNodes } from "./drive.js";
@@ -80,6 +80,17 @@ export function findJoinNode(branchTargets: NodeId[], fanOutNodeId: NodeId, flow
   }
 
   throw new Error(`fan-out from "${fanOutNodeId}": branches never converge on a common node`);
+}
+
+/** Finds a node's single outgoing `then` edge, or throws — the "one linear next step" shape every branch-walking site (runBranch's loop, replayBranchOutput/replayBranchMessage, advanceFanOutGroup, advanceForEachGroup) assumes. `label` customizes the error message's branch-kind prefix (a forEach branch passes its own). */
+export function findSingleThenEdge(
+  edges: readonly EdgeDefinition[],
+  from: NodeId,
+  label = "fan-out branch",
+): EdgeDefinition {
+  const thenEdge = edges.find((edge) => edge.from === from && edge.edge === "then");
+  if (!thenEdge) throw new Error(`${label} step "${from}" has no outgoing then edge`);
+  return thenEdge;
 }
 
 /**
@@ -165,12 +176,7 @@ export async function runBranchNode(
         return { kind: "routed", thread: routed.thread, to: routed.to, input: routed.input };
       }
 
-      let matched = nodeDef.waitable.match(runtime.store.events());
-      if (matched === undefined) {
-        if (drainOnePendingSignal(runtime.store)) {
-          matched = nodeDef.waitable.match(runtime.store.events());
-        }
-      }
+      const matched = peekSignalMatch(runtime.store, nodeDef.waitable);
       if (matched === undefined)
         return { kind: "parked", waitingFor: [nodeDef.waitable.label], thread };
 
@@ -284,9 +290,7 @@ export async function runBranch(
     }
 
     // Follow the step's single outgoing then edge.
-    const thenEdge = flow.edges.find((e) => e.from === currentNode && e.edge === "then");
-    if (!thenEdge)
-      throw new Error(`fan-out branch step "${currentNode}" has no outgoing then edge`);
+    const thenEdge = findSingleThenEdge(flow.edges, currentNode);
 
     if (thenEdge.to === joinNodeId) return { kind: "output", output: result.output };
 
@@ -297,7 +301,7 @@ export async function runBranch(
 }
 
 /** Applies a branch step's resolved `then` edge (or an already-resolved `{ from, to }` pair, e.g. a `waitFor`'s routed target): reaching the join marks the branch done, holding its output and settling `current` on the step that just produced it (`from` — the node the caller just ran) so it stays there per `BranchReplay.current`'s own contract ("once done, it stays at the last chain node the branch actually ran"); otherwise advances `current`/`currentInput` to `to`. Shared by `runBranch`'s own loop state, `replayBranchOutput`/`replayBranchMessage`, and `advanceFanOutGroup` — every place a branch's step-to-step edge gets resolved — so all of them settle a branch reaching its join the same way. */
-export function applyBranchEdge(
+function applyBranchEdge(
   branch: Pick<BranchReplay, "current" | "currentInput" | "done" | "output">,
   thenEdge: Pick<EdgeDefinition, "to" | "from">,
   joinNodeId: NodeId,
@@ -325,7 +329,7 @@ export function applyBranchEdge(
  * `CursorState.waitingFor` carries for the root and use-descent cases —
  * and cleared the moment a message resolves it.
  */
-export interface BranchReplay {
+interface BranchReplay {
   target: NodeId;
   current: NodeId;
   thread?: Thread;
@@ -410,8 +414,7 @@ export function replayBranchOutput(
     if (threadId) branch.thread = replayForkedThread(group.mainThread, threadId);
   }
 
-  const thenEdge = flow.edges.find((edge) => edge.from === stepId && edge.edge === "then");
-  if (!thenEdge) throw new Error(`fan-out branch step "${stepId}" has no outgoing then edge`);
+  const thenEdge = findSingleThenEdge(flow.edges, stepId);
 
   applyBranchEdge(branch, thenEdge, group.joinNodeId, value);
 }
@@ -436,8 +439,7 @@ export function replayBranchMessage(
   delete branch.waitingFor;
 
   const waitNodeId = branch.current;
-  const thenEdge = flow.edges.find((edge) => edge.from === waitNodeId && edge.edge === "then");
-  if (!thenEdge) throw new Error(`fan-out branch step "${waitNodeId}" has no outgoing then edge`);
+  const thenEdge = findSingleThenEdge(flow.edges, waitNodeId);
 
   applyBranchEdge(branch, thenEdge, group.joinNodeId, {
     ok: true,
@@ -445,21 +447,29 @@ export function replayBranchMessage(
   } satisfies WaitForResult);
 }
 
-/** One branch cursor's outward `CursorState` — `parked` (not `done`, reserved for the root) once it has folded its own output in or is waiting on its own `waitFor` (with `waitingFor` set, mirroring the root/use-descent cases), `active` while it still has work of its own left. */
-export function branchCursorState(branch: BranchReplay, group: FanOutGroup): CursorState {
+/** One branch cursor's outward `CursorState` — shared shape for a fan-out branch and a forEach branch (see `forEachBranchCursorState`, foreach.ts): `parked` (not `done`, reserved for the root) once it has folded its own output in or is waiting on its own `waitFor` (with `waitingFor` set, mirroring the root/use-descent cases), `active` while it still has work of its own left. `parentNodeId` names whichever node the caller's branch cursors report as their parent (a fan-out node's or a forEach node's own id). */
+export function branchCursorStateWith(
+  branch: Pick<BranchReplay, "current" | "done" | "waitingFor">,
+  parentNodeId: NodeId,
+): CursorState {
   if (branch.waitingFor) {
     return {
       node: branch.current,
       status: "parked",
       waitingFor: branch.waitingFor,
-      parent: group.fanOutNodeId,
+      parent: parentNodeId,
     };
   }
   return {
     node: branch.current,
     status: branch.done ? "parked" : "active",
-    parent: group.fanOutNodeId,
+    parent: parentNodeId,
   };
+}
+
+/** A fan-out branch's own `CursorState` — delegates to `branchCursorStateWith` with the group's fan-out node id as parent. */
+export function branchCursorState(branch: BranchReplay, group: FanOutGroup): CursorState {
+  return branchCursorStateWith(branch, group.fanOutNodeId);
 }
 
 /**
@@ -539,11 +549,7 @@ export async function advanceFanOutGroup(
         result.input,
       );
     } else {
-      const thenEdge = flow.edges.find(
-        (edge) => edge.from === branch.current && edge.edge === "then",
-      );
-      if (!thenEdge)
-        throw new Error(`fan-out branch step "${branch.current}" has no outgoing then edge`);
+      const thenEdge = findSingleThenEdge(flow.edges, branch.current);
       applyBranchEdge(branch, thenEdge, group.joinNodeId, result.output);
     }
 
