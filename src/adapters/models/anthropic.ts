@@ -4,4 +4,7 @@ import type { Model } from "../../flow/model.js";
 import type { ModelPort } from "../../engine/model-port.js";
 
 /** One port per Anthropic model, e.g. Claude Opus. Not yet implemented. @public */
-export declare function createAnthropicPort(model: Model): ModelPort;
+export function createAnthropicPort(model: Model): ModelPort {
+  void model;
+  throw new Error("createAnthropicPort is not implemented yet");
+}
