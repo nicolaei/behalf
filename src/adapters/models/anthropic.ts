@@ -297,16 +297,22 @@ export function fromAnthropicUsage(usage: Anthropic.Usage): Usage {
  * milestone wires token-level streaming through openStream.
  * @public
  */
-export function createAnthropicPort(model: Model): ModelPort {
-  const auth = resolveAuth(process.env);
-  const client = createAnthropicClient(auth);
-  const isOAuth = auth.mode === "oauth";
+export function createAnthropicPort(model: Model, client?: Anthropic): ModelPort {
+  let auth: AnthropicAuth | undefined;
+  let resolvedClient: Anthropic;
+  if (client === undefined) {
+    auth = resolveAuth(process.env);
+    resolvedClient = createAnthropicClient(auth);
+  } else {
+    resolvedClient = client;
+  }
+  const isOAuth = auth?.mode === "oauth";
 
   return {
     model,
     async respond(profile, messages) {
       const request = toAnthropicRequest(profile, messages, isOAuth);
-      const response = await client.messages.create({
+      const response = await resolvedClient.messages.create({
         model: model.identifier,
         max_tokens: DEFAULT_MAX_TOKENS,
         system: request.system,
