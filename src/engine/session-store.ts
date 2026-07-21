@@ -19,17 +19,21 @@ export type PendingEntry =
  * `append` commits an event; `open` begins a streaming event that broadcasts
  * deltas and commits (or aborts) at the end; `changes` yields envelopes of
  * every form; `awaitReceive` resolves once, the next time `receive` adds a
- * fresh pending entry — a wake-only signal carrying no payload, letting a
- * parked `waitFor`-style loop block on a genuine event instead of polling on
- * a timer. A caller re-checks `inbox()`/`consume()` after it resolves; it
- * makes no promise about which entry arrived, only that one did.
+ * fresh pending entry *or* `append` commits a fresh event — a wake-only
+ * signal carrying no payload, letting a parked `waitFor`-style loop block on
+ * a genuine event instead of polling on a timer, whether it's polling the
+ * pending inbox (`consume`) or a `Waitable`'s `match()` against the
+ * committed log (`events`). A caller re-checks its own source after it
+ * resolves; it makes no promise about which one changed, or that anything
+ * matches yet — a wake can be spurious and the caller just goes back to
+ * sleep.
  * @public
  */
 export interface SessionStore {
   events(): Envelope[]; // committed envelopes
   inbox(): PendingEntry[]; // pending input, not yet applied
   receive(entry: PendingEntry): void;
-  awaitReceive(): Promise<void>; // resolves once, on the next receive() call
+  awaitReceive(): Promise<void>; // resolves once, on the next receive() call or append() call
   consume(matches: (entry: PendingEntry) => boolean): PendingEntry | undefined; // find-and-remove a pending entry in one call
   append(
     event: Event[EventType],

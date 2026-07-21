@@ -1,7 +1,5 @@
 // Flow authoring — Waitable / userInput / toolCall. See docs/reference.md.
 
-import { notImplemented } from "../engine/errors.js";
-
 import type { MessageKind, UserMessage } from "./message.js";
 import type { Envelope } from "../session/index.js";
 
@@ -39,15 +37,25 @@ export function userInput(kind: MessageKind): Waitable<UserMessage> {
 
 /**
  * A Waitable matching a committed `toolResult` event by correlationId — the
- * decoupled counterpart to a model-call step's own `toolCall` request. Stub
- * only: `match()` is not implemented yet.
+ * decoupled counterpart to a model-call step's own `toolCall` request:
+ * whatever eventually resolves the call (a tool executor, in later stories)
+ * commits a `toolResult` event independently, and this Waitable scans the
+ * committed log for the one whose correlationId matches, the same scanning
+ * pattern `userInput`'s match() uses above.
  * @public
  */
 export function toolCall(correlationId: string): Waitable<unknown> {
   return {
     provider: "toolCall",
     label: correlationId,
-    match: () => notImplemented("toolCall"),
+    match: (events) => {
+      for (const envelope of events) {
+        if (envelope.form !== "committed" || envelope.type !== "toolResult") continue;
+        const event = envelope.event as { correlationId: string; output: unknown };
+        if (event.correlationId === correlationId) return event.output;
+      }
+      return undefined;
+    },
   };
 }
 

@@ -63,14 +63,26 @@ export function memoryStore(): SessionStore {
   const pending: PendingEntry[] = [];
   const subscribers = new Set<AsyncQueue<Envelope>>();
   // Wake-only resolvers for `awaitReceive` — parked `pollInbox` loops, one per
-  // outstanding call. Registration and the `receive()` that resolves them are
-  // both synchronous, so there's no window where a wake can be missed between
-  // a caller's last poll and its subscribe.
+  // outstanding call. Registration and the `receive()`/`append()` calls that
+  // resolve them are both synchronous, so there's no window where a wake can
+  // be missed between a caller's last poll and its subscribe.
   let sequence = 0;
   let receiveWaiters: (() => void)[] = [];
 
   function broadcast(envelope: Envelope): void {
     for (const subscriber of subscribers) subscriber.push(envelope);
+  }
+
+  // Wakes every parked `awaitReceive()` caller. Called by both `receive()`
+  // (a fresh pending entry) and `append()` (a fresh committed event) since a
+  // parked `pollInbox` loop may be waiting on either — e.g. `waitForSignal`
+  // re-checks `Waitable.match()` against the committed log on every wake.
+  // Spurious wakes are harmless: the loop just re-polls, finds nothing new,
+  // and parks again.
+  function wakeReceiveWaiters(): void {
+    const waiters = receiveWaiters;
+    receiveWaiters = [];
+    for (const resolve of waiters) resolve();
   }
 
   return {
@@ -84,9 +96,7 @@ export function memoryStore(): SessionStore {
 
     receive(entry: PendingEntry): void {
       pending.push(entry);
-      const waiters = receiveWaiters;
-      receiveWaiters = [];
-      for (const resolve of waiters) resolve();
+      wakeReceiveWaiters();
     },
 
     awaitReceive(): Promise<void> {
@@ -107,6 +117,7 @@ export function memoryStore(): SessionStore {
       const envelope = buildEnvelope(meta, event, sequence);
       log.push(envelope);
       broadcast(envelope);
+      wakeReceiveWaiters();
     },
 
     open(meta: {
