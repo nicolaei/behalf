@@ -4,7 +4,6 @@ import type { Step } from "./step.js";
 import type { Message } from "./message.js";
 import type { Waitable } from "./waitable.js";
 import type { ThreadAction } from "./thread.js";
-import { notImplemented } from "../engine/errors.js";
 
 /** Opaque brand for node identifiers within a graph. @public */
 export type NodeId = string & { readonly __brand: "NodeId" };
@@ -158,8 +157,14 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
       nodes.set(id, { kind: "interrupt", waitable, run });
       return makeHandle(id);
     },
-    forEach() {
-      return notImplemented("Flow.forEach");
+    forEach(items, branch) {
+      const id = freshNodeId();
+      nodes.set(id, {
+        kind: "forEach",
+        items,
+        branch: branch as (item: unknown) => Graph,
+      });
+      return makeHandle(id);
     },
     entry(node) {
       entry = node.id;

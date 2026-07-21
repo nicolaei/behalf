@@ -111,6 +111,36 @@ async function driveUseNode(
 }
 
 /**
+ * Runs a `forEach` node: computes its items from the prior step's output,
+ * builds one branch `Graph` per item via `node.branch` (a dynamic, runtime-
+ * sized fan-out — unlike a static `.then([a, b])` fan-out, the branch count
+ * and shape aren't known until this node actually runs), drives each branch
+ * as a first-class subgraph on its own forked thread — the same machinery
+ * `driveUseNode` uses for a single `use`d subgraph, just one call per item —
+ * and folds every branch's own result back into an array as this node's
+ * single output. Branches run concurrently (`Promise.all`), same as a static
+ * fan-out's `driveStepEmit` runs its branches.
+ */
+async function driveForEachNode(
+  node: Extract<NodeKind, { kind: "forEach" }>,
+  nodeId: NodeId,
+  currentInput: unknown,
+  ctx: ExecutionContext,
+): Promise<RouteResult> {
+  const { flow, runtime, thread } = ctx;
+  const items = node.items(currentInput);
+  const results = await Promise.all(
+    items.map((item) => {
+      const branchThread = applyThreadAction(thread, "fork", undefined, runtime);
+      return driveGraph(node.branch(item), runtime, branchThread, item);
+    }),
+  );
+  const outputs = results.map((result) => result.output);
+
+  return commitRoute(runtime, thread.id, flow.edges, nodeId, outputs, stepIdentity(nodeId), thread);
+}
+
+/**
  * Folds a waitFor node's already-obtained message into the thread and
  * routes it: if the message is what an armed `interrupt` was waiting for,
  * that step runs and takes over routing — reading `context.thread` live
@@ -529,6 +559,20 @@ export async function driveGraph(
 
     if (node.kind === "use") {
       const routed = await driveUseNode(node, current, reason, currentInput, {
+        flow,
+        runtime,
+        thread: currentThread,
+        attemptsByNode,
+      });
+      currentThread = routed.thread;
+      currentInput = routed.input;
+      reason = routed.reason;
+      current = routed.to;
+      continue;
+    }
+
+    if (node.kind === "forEach") {
+      const routed = await driveForEachNode(node, current, currentInput, {
         flow,
         runtime,
         thread: currentThread,
