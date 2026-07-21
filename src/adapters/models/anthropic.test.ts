@@ -9,6 +9,8 @@ import {
   fromAnthropicUsage,
   oauthHeaders,
   CLAUDE_CODE_IDENTITY,
+  toClaudeCodeName,
+  fromClaudeCodeName,
 } from "./anthropic.js";
 import type { Profile } from "../../flow/profile.js";
 import type { Message } from "../../flow/message.js";
@@ -291,5 +293,105 @@ describe("oauthHeaders", () => {
     expect(headers["anthropic-dangerous-direct-browser-access"]).toBe("true");
     expect(headers["x-app"]).toBe("cli");
     expect(headers["user-agent"]).toMatch(/^claude-cli\//);
+  });
+});
+
+describe("Claude Code tool name mapping (OAuth)", () => {
+  it("toClaudeCodeName renames an exact case-insensitive match", () => {
+    expect(toClaudeCodeName("read")).toBe("Read");
+    expect(toClaudeCodeName("BASH")).toBe("Bash");
+  });
+
+  it("toClaudeCodeName passes a non-matching name through unchanged", () => {
+    expect(toClaudeCodeName("read_file")).toBe("read_file");
+  });
+
+  it("fromClaudeCodeName reverses to the caller's own registered casing", () => {
+    expect(fromClaudeCodeName("Read", ["read", "search"])).toBe("read");
+  });
+
+  it("fromClaudeCodeName passes through when no registered tool matches", () => {
+    expect(fromClaudeCodeName("Read", ["search"])).toBe("Read");
+  });
+
+  it("renames matching tool names in the request when isOAuth is true", () => {
+    const read = tool<{ path: string }, { content: string }>("read", "Reads a file.");
+    const search = tool<{ query: string }, { hits: string[] }>("search", "Search the web.");
+    const messages: Message[] = [
+      { role: "user", intent: "standard", content: [{ type: "text", text: "hi" }] },
+    ];
+
+    const request = toAnthropicRequest(profile({ tools: [read, search] }), messages, true);
+
+    expect(request.tools?.map((t) => t.name)).toEqual(["Read", "search"]);
+  });
+
+  it("leaves tool names unchanged in the request when isOAuth is false", () => {
+    const read = tool<{ path: string }, { content: string }>("read", "Reads a file.");
+    const messages: Message[] = [
+      { role: "user", intent: "standard", content: [{ type: "text", text: "hi" }] },
+    ];
+
+    const request = toAnthropicRequest(profile({ tools: [read] }), messages);
+
+    expect(request.tools?.map((t) => t.name)).toEqual(["read"]);
+  });
+
+  it("renames a replayed tool_use block's name in message history when isOAuth is true", () => {
+    const messages: Message[] = [
+      {
+        role: "assistant",
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        usage: { input: 1, output: 1 },
+        content: [
+          { type: "toolCall", correlationId: "call-1", name: "read", input: { path: "x" } },
+        ],
+      },
+    ];
+
+    const request = toAnthropicRequest(profile(), messages, true);
+
+    expect(request.messages).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "call-1", name: "Read", input: { path: "x" } }],
+      },
+    ]);
+  });
+
+  it("reverse-maps a response tool_use block's name back to the caller's own registered name", () => {
+    const block = fromAnthropicBlock(
+      {
+        type: "tool_use",
+        id: "call-1",
+        name: "Read",
+        input: { path: "x" },
+      } as Anthropic.ContentBlock,
+      { isOAuth: true, toolNames: ["read", "search"] },
+    );
+
+    expect(block).toEqual({
+      type: "toolCall",
+      correlationId: "call-1",
+      name: "read",
+      input: { path: "x" },
+    });
+  });
+
+  it("does not reverse-map the response name when isOAuth is false (the default)", () => {
+    const block = fromAnthropicBlock({
+      type: "tool_use",
+      id: "call-1",
+      name: "Read",
+      input: { path: "x" },
+    } as Anthropic.ContentBlock);
+
+    expect(block).toEqual({
+      type: "toolCall",
+      correlationId: "call-1",
+      name: "Read",
+      input: { path: "x" },
+    });
   });
 });

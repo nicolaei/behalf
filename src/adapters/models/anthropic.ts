@@ -85,12 +85,46 @@ export interface AnthropicRequest {
   thinking?: Anthropic.ThinkingConfigParam;
   tools?: Anthropic.Tool[];
 }
+/** OAuth (Claude Pro/Max subscription) tokens are scoped to Claude Code's own tool surface — these are the exact tool names it will accept. @public */
+export const CLAUDE_CODE_TOOLS = [
+  "Read",
+  "Write",
+  "Edit",
+  "Bash",
+  "Grep",
+  "Glob",
+  "AskUserQuestion",
+  "EnterPlanMode",
+  "ExitPlanMode",
+  "KillShell",
+  "NotebookEdit",
+  "Skill",
+  "Task",
+  "TaskOutput",
+  "TodoWrite",
+  "WebFetch",
+  "WebSearch",
+] as const;
+
+const ccToolLookup = new Map(CLAUDE_CODE_TOOLS.map((t) => [t.toLowerCase(), t]));
+
+/** Renames a tool name to Claude Code's canonical casing when it matches one exactly (case-insensitive); otherwise passes it through unchanged. @public */
+export function toClaudeCodeName(name: string): string {
+  return ccToolLookup.get(name.toLowerCase()) ?? name;
+}
+
+/** Reverses a Claude Code canonical name back to whichever of the caller's own registered tool names matches it (case-insensitive); otherwise passes it through unchanged. @public */
+export function fromClaudeCodeName(name: string, toolNames: readonly string[]): string {
+  const lowerName = name.toLowerCase();
+  const matched = toolNames.find((toolName) => toolName.toLowerCase() === lowerName);
+  return matched ?? name;
+}
 
 /** Maps a `behalf` Tool/Toolset to Anthropic's per-tool definition shape. Toolset members are resolved dynamically elsewhere and never statically known here, so a Toolset falls back to a permissive schema. */
-function toAnthropicToolDef(t: Tool | Toolset): Anthropic.Tool {
+function toAnthropicToolDef(t: Tool | Toolset, isOAuth = false): Anthropic.Tool {
   const schema = "schema" in t ? t.schema : z.record(z.string(), z.unknown());
   return {
-    name: t.name,
+    name: isOAuth ? toClaudeCodeName(t.name) : t.name,
     description: t.describe,
     input_schema: z.toJSONSchema(schema) as Anthropic.Tool.InputSchema,
   };
@@ -102,7 +136,7 @@ function toAnthropicToolDef(t: Tool | Toolset): Anthropic.Tool {
  * a single switch covers both directions for text/thinking/toolCall; toolResult
  * only ever appears in a request (the model never emits one).
  */
-function toAnthropicBlock(block: ContentBlock): Anthropic.ContentBlockParam {
+function toAnthropicBlock(block: ContentBlock, isOAuth = false): Anthropic.ContentBlockParam {
   switch (block.type) {
     case "text":
       return { type: "text", text: block.text };
@@ -121,7 +155,12 @@ function toAnthropicBlock(block: ContentBlock): Anthropic.ContentBlockParam {
         },
       };
     case "toolCall":
-      return { type: "tool_use", id: block.correlationId, name: block.name, input: block.input };
+      return {
+        type: "tool_use",
+        id: block.correlationId,
+        name: isOAuth ? toClaudeCodeName(block.name) : block.name,
+        input: block.input,
+      };
     case "toolResult":
       return {
         type: "tool_result",
@@ -139,16 +178,19 @@ function toAnthropicBlock(block: ContentBlock): Anthropic.ContentBlockParam {
  * `tool` messages become a `user`-role message (Anthropic has no separate
  * tool role — tool_result blocks live on user messages).
  */
-function toAnthropicMessage(message: Message): Anthropic.MessageParam | undefined {
+function toAnthropicMessage(message: Message, isOAuth = false): Anthropic.MessageParam | undefined {
   switch (message.role) {
     case "system":
       return undefined;
     case "user":
-      return { role: "user", content: message.content.map(toAnthropicBlock) };
+      return { role: "user", content: message.content.map((b) => toAnthropicBlock(b, isOAuth)) };
     case "assistant":
-      return { role: "assistant", content: message.content.map(toAnthropicBlock) };
+      return {
+        role: "assistant",
+        content: message.content.map((b) => toAnthropicBlock(b, isOAuth)),
+      };
     case "tool":
-      return { role: "user", content: message.content.map(toAnthropicBlock) };
+      return { role: "user", content: message.content.map((b) => toAnthropicBlock(b, isOAuth)) };
   }
 }
 
@@ -180,7 +222,7 @@ export function toAnthropicRequest(
     .join("\n\n");
 
   const anthropicMessages = messages
-    .map(toAnthropicMessage)
+    .map((m) => toAnthropicMessage(m, isOAuth))
     .filter((m): m is Anthropic.MessageParam => m !== undefined);
 
   const reasoning = profile.reasoning;
@@ -196,7 +238,9 @@ export function toAnthropicRequest(
     system,
     messages: anthropicMessages,
     ...(thinking ? { thinking } : {}),
-    ...(profile.tools.length > 0 ? { tools: profile.tools.map(toAnthropicToolDef) } : {}),
+    ...(profile.tools.length > 0
+      ? { tools: profile.tools.map((t) => toAnthropicToolDef(t, isOAuth)) }
+      : {}),
   };
 }
 
@@ -205,7 +249,10 @@ export function toAnthropicRequest(
  * the reverse of `toAnthropicBlock`. Only the block kinds the model can
  * actually emit appear here (no toolResult, no image, no cache_control).
  */
-export function fromAnthropicBlock(block: Anthropic.ContentBlock): ContentBlock {
+export function fromAnthropicBlock(
+  block: Anthropic.ContentBlock,
+  options?: { isOAuth?: boolean; toolNames?: readonly string[] },
+): ContentBlock {
   switch (block.type) {
     case "text":
       return { type: "text", text: block.text };
@@ -214,7 +261,15 @@ export function fromAnthropicBlock(block: Anthropic.ContentBlock): ContentBlock 
     case "redacted_thinking":
       return { type: "thinking", text: "", signature: block.data, redacted: true };
     case "tool_use":
-      return { type: "toolCall", correlationId: block.id, name: block.name, input: block.input };
+      return {
+        type: "toolCall",
+        correlationId: block.id,
+        name:
+          options?.isOAuth && options.toolNames
+            ? fromClaudeCodeName(block.name, options.toolNames)
+            : block.name,
+        input: block.input,
+      };
     default:
       // Server-tool blocks (web_search, code_execution, …) have no ContentBlock
       // analogue yet — surface them as opaque text rather than dropping them silently.
@@ -264,7 +319,9 @@ export function createAnthropicPort(model: Model): ModelPort {
         role: "assistant",
         provider: model.provider,
         model: model.identifier,
-        content: response.content.map(fromAnthropicBlock),
+        content: response.content.map((b) =>
+          fromAnthropicBlock(b, { isOAuth, toolNames: profile.tools.map((t) => t.name) }),
+        ),
         usage: fromAnthropicUsage(response.usage),
       };
       return assistantMessage;
