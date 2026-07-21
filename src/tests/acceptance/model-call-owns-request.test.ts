@@ -9,7 +9,7 @@ import { loggedEnvelopes } from "./support.js";
 // surfacing each one's correlationId/name on the step's own output, so a
 // later story's forEach can know exactly which toolCall(id) Waitables to
 // wait on without parsing the reply's own ContentBlocks.
-describe.skip("runModelCall commits toolCall events and outputs correlationIds", () => {
+describe("runModelCall commits toolCall events and outputs correlationIds", () => {
   // Deferred to a factory, not built at describe-scope: `tool()` isn't real
   // yet, and a describe body runs even when its `it`s are skipped.
   function scriptedFixture() {
