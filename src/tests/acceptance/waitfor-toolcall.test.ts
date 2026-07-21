@@ -17,7 +17,7 @@ import { neverCalled } from "./support.js";
 // waitFor(toolCall(id)), resolved by committing a matching toolResult
 // directly (standing in for whatever eventually resolves it — a tool
 // executor, in later stories), resumes with the tool's own output.
-describe.skip("toolCall(correlationId) Waitable resolves via a committed toolResult", () => {
+describe("toolCall(correlationId) Waitable resolves via a committed toolResult", () => {
   const flow = defineGraph("wait-for-tool-call", (flowBuilder) => {
     const wait = flowBuilder.waitFor(toolCall("call-1"));
     const after = flowBuilder.step(outputs((context) => context.inputs[0]));
