@@ -5,7 +5,8 @@
   "type": "module",
   "description": "A minimal Ink TUI agent built on behalf: Anthropic (claude-sonnet-5, medium thinking), filesystem tools, tool streaming.",
   "scripts": {
-    "start": "tsx src/index.tsx"
+    "start": "tsx src/index.tsx",
+    "m1": "tsx src/main.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.70.0",
