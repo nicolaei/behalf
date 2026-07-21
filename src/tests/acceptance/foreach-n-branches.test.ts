@@ -18,7 +18,7 @@ import { neverCalled, textOf } from "./support.js";
 // Proves forEach branches can be plain steps, waits, and use-composed
 // subgraphs, and that folding doesn't depend on the order branches resolve
 // in (each case below resolves its branches in reverse item order).
-describe.skip("forEach runs N branches, each a multi-node graph (step -> waitFor -> use)", () => {
+describe("forEach runs N branches, each a multi-node graph (step -> waitFor -> use)", () => {
   // A small reusable subgraph, shared by every branch's `use` node — proves
   // `use` composes correctly inside a dynamically-instantiated forEach branch.
   const sharedSubgraph: Graph = defineGraph("forEach-shared-subgraph", (flow) => {
