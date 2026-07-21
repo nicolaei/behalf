@@ -3,7 +3,6 @@
 // making one model request (with its own tool calls folded in).
 
 import type {
-  Message,
   MessageKind,
   UserMessage,
   AssistantMessage,
@@ -261,39 +260,116 @@ export function buildToolContext(
 }
 
 /**
- * Runs one tool call: invokes its bound handler, logs the result,
- * and folds the result into the thread as a tool message so the next model
- * call sees it. Assumes its caller has already committed the `toolCall`
- * event — `runModelCall` owns that half of the request.
+ * Executes one already-committed tool call end to end: resolves its binding, runs the handler,
+ * and commits its `toolResult`. Never folds a tool message into any thread — only a caller with
+ * a live `StepContext.thread` reference can decide when and how to do that. `runModelCall` no
+ * longer needs to (it returns before any tool call resolves); a `forEach` branch's own step
+ * folds explicitly instead, via `context.compact` (see agent-loop.test.ts). This is the
+ * decoupled tool executor's sole dispatch path — nothing here assumes a synchronous caller.
  */
-export async function runToolCall(
-  call: Extract<ContentBlock, { type: "toolCall" }>,
-  context: StepContext,
+export async function executeToolCall(
+  call: { correlationId: string; name: string; input: unknown },
+  threadId: ThreadId,
   runtime: Runtime,
   identity: StepIdentity,
-  setThread: (thread: Thread) => void,
-): Promise<void> {
+): Promise<unknown> {
   const handler = findToolBinding(runtime, call.name);
-
-  const toolContext = buildToolContext(context.thread.id, runtime, identity);
+  const toolContext = buildToolContext(threadId, runtime, identity);
   const output = await handler(call.input, toolContext);
 
   runtime.store.append(
     { correlationId: call.correlationId, output },
-    { type: "toolResult", threadId: context.thread.id },
+    { type: "toolResult", threadId },
   );
 
-  const toolMessage: Message = {
-    role: "tool",
-    content: [{ type: "toolResult", correlationId: call.correlationId, output }],
+  return output;
+}
+
+/** A fixed identity every dispatch from the decoupled tool executor logs under — it runs
+ * independently of any node, so there's no real step id to attribute a dispatch to. */
+const TOOL_EXECUTOR_IDENTITY: StepIdentity = {
+  stepId: "tool-executor" as NodeId,
+  stepName: "tool-executor",
+};
+
+/**
+ * The decoupled tool executor: watches the committed log for `toolCall` events with no matching
+ * `toolResult` yet, and dispatches each independently of whatever step requested it —
+ * `runModelCall` only commits the request and returns; it never runs or waits on a handler
+ * itself (see its own doc comment below). Wakes the same way `waitForSignal`/`pollInbox` do, via
+ * `store.awaitReceive()`, then re-scans the committed log rather than trusting anything buffered
+ * from a previous wake — consistent with every other polling loop in this file.
+ *
+ * Modeled the same shape as a `WaitableSource` (`provider` + `start(store)`, see
+ * waitable-source.ts) even though nothing here is a `Waitable` — the same "one long-lived
+ * watcher per store" shape — so `runtime()` can auto-start it from the very `bindings` it
+ * already received, with no separate setup required by any caller.
+ *
+ * Idempotency: a correlationId is marked dispatched the instant it's found pending, before its
+ * handler even starts, so a later wake — however many times it fires before that handler
+ * settles — never dispatches the same call twice.
+ */
+export function startToolExecutor(runtime: Runtime): () => void {
+  const store = runtime.store;
+  const dispatched = new Set<string>();
+  let stopped = false;
+
+  function pendingToolCalls(): {
+    correlationId: string;
+    name: string;
+    input: unknown;
+    threadId: ThreadId;
+  }[] {
+    const events = store.events();
+    const resolved = new Set<string>();
+    for (const envelope of events) {
+      if (envelope.form === "committed" && envelope.type === "toolResult") {
+        resolved.add((envelope.event as { correlationId: string }).correlationId);
+      }
+    }
+
+    const pending: {
+      correlationId: string;
+      name: string;
+      input: unknown;
+      threadId: ThreadId;
+    }[] = [];
+    for (const envelope of events) {
+      if (envelope.form !== "committed" || envelope.type !== "toolCall") continue;
+      if (!envelope.threadId) continue; // a toolCall is always committed with its owning thread
+      const event = envelope.event as { correlationId: string; name: string; input: unknown };
+      if (resolved.has(event.correlationId) || dispatched.has(event.correlationId)) continue;
+      pending.push({ ...event, threadId: envelope.threadId });
+    }
+    return pending;
+  }
+
+  async function watch(): Promise<void> {
+    for (;;) {
+      if (stopped) return;
+      for (const call of pendingToolCalls()) {
+        dispatched.add(call.correlationId);
+        executeToolCall(call, call.threadId, runtime, TOOL_EXECUTOR_IDENTITY).catch(() => {
+          // A handler failure has nowhere to surface today: no step is synchronously
+          // awaiting this call, only a later waitFor(toolCall(id)) that would otherwise
+          // just never resolve. Swallowed here rather than crashing the whole watcher —
+          // one failed call must never stop every other in-flight or future one.
+        });
+      }
+      await store.awaitReceive();
+    }
+  }
+
+  void watch();
+  return () => {
+    stopped = true;
   };
-  setThread(withMessage(context.thread, toolMessage));
 }
 
 /**
  * Calls a tool directly, with no model in the loop: resolves its binding and
  * returns the handler's result as-is — no logging or thread-folding, unlike
- * `runToolCall`, since nothing here asks a model to see the result.
+ * `executeToolCall`, since nothing here asks a model to see the result.
  */
 export async function callTool<Input, Output>(
   tool: Tool<Input, Output>,
@@ -308,16 +384,17 @@ export async function callTool<Input, Output>(
 }
 
 /**
- * Makes one model request and runs every tool the reply asks for, appending
- * all of it — the reply, each tool call, each tool result — to the log.
- * Does not call the model again itself: a graph loops by routing a step's
- * output back to itself, same as any other edge.
+ * Makes one model request and commits it to the log: the reply, and one `toolCall` event per
+ * tool the reply asks for. Returns as soon as that's committed — it never runs or waits on a
+ * tool call itself; a separate, decoupled executor (`startToolExecutor`, auto-registered by
+ * `runtime()`) resolves each `toolCall` independently, whenever its handler settles. Does not
+ * call the model again itself: a graph loops by routing a step's output back to itself, same as
+ * any other edge.
  */
 export async function runModelCall(
   profile: Profile,
   context: StepContext,
   runtime: Runtime,
-  identity: StepIdentity,
   setThread: (thread: Thread) => void,
 ): Promise<ModelCallResult> {
   const port = runtime.models(profile.model);
@@ -352,9 +429,6 @@ export async function runModelCall(
       { correlationId: call.correlationId, name: call.name, input: call.input },
       { type: "toolCall", threadId: context.thread.id },
     );
-  }
-  for (const call of toolCalls) {
-    await runToolCall(call, context, runtime, identity, setThread);
   }
 
   return {

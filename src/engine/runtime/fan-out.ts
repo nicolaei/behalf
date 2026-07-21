@@ -139,7 +139,7 @@ export async function runBranchNode(
         threadId: thread.id,
         ...nodeIdentity,
       }),
-    modelCall: (profile) => runModelCall(profile, branchContext, runtime, nodeIdentity, setThread),
+    modelCall: (profile) => runModelCall(profile, branchContext, runtime, setThread),
     callTool: (tool, toolInput) => callTool(tool, toolInput, thread.id, runtime, nodeIdentity),
   });
 

@@ -474,13 +474,12 @@ export function buildDriveContext(
     },
     modelCall(profile): Promise<ModelCallResult> {
       // modelCall only ever runs while a node is being processed by the
-      // caller's drive loop, so getCurrent() is always set at that point.
-      const identity = currentNodeIdentity(
-        getCurrent(),
-        flow,
-        "modelCall called outside a running node",
-      );
-      return runModelCall(profile, context, runtime, identity, setThread);
+      // caller's drive loop, so getCurrent() is always set at that point. The
+      // identity itself is only needed for the guard's own error message —
+      // runModelCall no longer runs a tool call inline, so it has no need to
+      // attribute one to this node's identity.
+      currentNodeIdentity(getCurrent(), flow, "modelCall called outside a running node");
+      return runModelCall(profile, context, runtime, setThread);
     },
     callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
       const identity = currentNodeIdentity(

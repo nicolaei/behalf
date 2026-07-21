@@ -16,7 +16,7 @@ import type { SessionStore } from "./session-store.js";
 import { defaultErrorHandler, type ErrorHandler } from "./errors.js";
 import type { Thread } from "./runtime/routing.js";
 import { driveGraph } from "./runtime/drive.js";
-import { resolvedTools } from "./runtime/execution.js";
+import { resolvedTools, startToolExecutor } from "./runtime/execution.js";
 import { idFactories, freshThreadId } from "./runtime/ids.js";
 
 export type { CursorState, TickOutcome } from "./runtime/tick.js";
@@ -46,7 +46,13 @@ async function expandToolsets(bindings: Binding[]): Promise<Map<string, ToolHand
   return resolved;
 }
 
-/** Builds a ready-to-run Runtime, expanding all toolset bindings. @public */
+/**
+ * Builds a ready-to-run Runtime, expanding all toolset bindings and auto-starting the decoupled
+ * tool executor (see `startToolExecutor` in engine/runtime/execution.ts) against the same
+ * bindings — every `toolCall` a running flow commits gets resolved independently, with no
+ * separate setup required by any caller.
+ * @public
+ */
 export async function runtime(config: {
   models: (model: Model) => ModelPort;
   bindings: Binding[];
@@ -61,6 +67,7 @@ export async function runtime(config: {
     errorHandlers: [...(config.errorHandlers ?? []), defaultErrorHandler],
   };
   resolvedTools.set(ready, await expandToolsets(config.bindings));
+  startToolExecutor(ready);
   if (config.idFactory) idFactories.set(ready, config.idFactory);
   return ready;
 }
