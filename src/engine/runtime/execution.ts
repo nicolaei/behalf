@@ -261,9 +261,10 @@ export function buildToolContext(
 }
 
 /**
- * Runs one tool call: logs it, invokes its bound handler, logs the result,
+ * Runs one tool call: invokes its bound handler, logs the result,
  * and folds the result into the thread as a tool message so the next model
- * call sees it.
+ * call sees it. Assumes its caller has already committed the `toolCall`
+ * event — `runModelCall` owns that half of the request.
  */
 export async function runToolCall(
   call: Extract<ContentBlock, { type: "toolCall" }>,
@@ -273,11 +274,6 @@ export async function runToolCall(
   setThread: (thread: Thread) => void,
 ): Promise<void> {
   const handler = findToolBinding(runtime, call.name);
-
-  runtime.store.append(
-    { correlationId: call.correlationId, name: call.name, input: call.input },
-    { type: "toolCall", threadId: context.thread.id },
-  );
 
   const toolContext = buildToolContext(context.thread.id, runtime, identity);
   const output = await handler(call.input, toolContext);
@@ -352,8 +348,18 @@ export async function runModelCall(
 
   const toolCalls = reply.content.filter(isToolCall);
   for (const call of toolCalls) {
+    runtime.store.append(
+      { correlationId: call.correlationId, name: call.name, input: call.input },
+      { type: "toolCall", threadId: context.thread.id },
+    );
+  }
+  for (const call of toolCalls) {
     await runToolCall(call, context, runtime, identity, setThread);
   }
 
-  return { usedTools: toolCalls.length > 0, usage: reply.usage, toolCalls: [] };
+  return {
+    usedTools: toolCalls.length > 0,
+    usage: reply.usage,
+    toolCalls: toolCalls.map((call) => ({ correlationId: call.correlationId, name: call.name })),
+  };
 }
