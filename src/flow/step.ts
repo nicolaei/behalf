@@ -6,7 +6,7 @@ import type { Tool } from "./tool.js";
 import type { ThreadId, ThreadAction } from "./thread.js";
 import type { NodeId } from "./graph.js";
 import type { Stream } from "../session/envelope.js";
-import type { EventType } from "../session/event.js";
+import type { Event, EventType } from "../session/event.js";
 
 /** Summary of a model call — whether tools were used and token usage. @public */
 export interface ModelCallResult {
@@ -55,6 +55,7 @@ export interface StepContext {
   };
   readonly inputs: unknown[]; // upstream outputs; a join gets one per branch
   openStream(type: EventType): Stream; // open a fresh stream scoped to this step's thread
+  appendEvent<T extends EventType>(payload: Event[T], type: T): void; // commit a standalone event to this step's own thread
 
   modelCall(profile: Profile): Promise<ModelCallResult>; // one request + its tools, appended to the log
   callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output>;

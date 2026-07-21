@@ -472,6 +472,9 @@ export function buildDriveContext(
         ...identity,
       });
     },
+    appendEvent: (payload, type) => {
+      runtime.store.append(payload, { type, threadId: getThread().id });
+    },
     modelCall(profile): Promise<ModelCallResult> {
       // modelCall only ever runs while a node is being processed by the
       // caller's drive loop, so getCurrent() is always set at that point. The

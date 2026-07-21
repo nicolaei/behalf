@@ -150,6 +150,9 @@ export async function runBranchNode(
         threadId: thread.id,
         ...nodeIdentity,
       }),
+    appendEvent: (payload, type) => {
+      runtime.store.append(payload, { type, threadId: thread.id });
+    },
     modelCall: (profile) => runModelCall(profile, branchContext, runtime, setThread),
     callTool: (tool, toolInput) => callTool(tool, toolInput, thread.id, runtime, nodeIdentity),
   });

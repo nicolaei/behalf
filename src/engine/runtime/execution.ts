@@ -263,6 +263,9 @@ export function buildToolContext(
         threadId,
         ...identity,
       }),
+    appendEvent: (payload, type) => {
+      runtime.store.append(payload, { type, threadId });
+    },
     runFlow: (flow, initialPrompt) =>
       runFlow(flow, initialPrompt, runtime, { parentThreadId: threadId }),
   };

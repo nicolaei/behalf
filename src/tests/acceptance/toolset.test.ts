@@ -22,6 +22,9 @@ describe("toolset groups multiple tool handlers behind one binding", () => {
       openStream: () => {
         throw new Error("unused");
       },
+      appendEvent: () => {
+        throw new Error("unused");
+      },
       runFlow: () => Promise.resolve(undefined),
     });
 

@@ -9,7 +9,7 @@ import type { Step, StepContext, Emit, ModelCallResult, StepError } from "../../
 import type { Tool } from "../../flow/tool.js";
 import type { Profile } from "../../flow/profile.js";
 import type { Stream } from "../../session/envelope.js";
-import type { EventType } from "../../session/event.js";
+import type { Event, EventType } from "../../session/event.js";
 import type { Runtime } from "../runtime.js";
 import { type ErrorContext, type ErrorDecision, unreachable } from "../errors.js";
 import type { Thread } from "./routing.js";
@@ -127,6 +127,7 @@ export interface StepContextConfig {
   getThread: () => Thread;
   inputs: unknown[];
   openStream: (type: EventType) => Stream; // on-demand stream factory model calls and steps use to create a logged event
+  appendEvent: <T extends EventType>(payload: Event[T], type: T) => void; // commits a standalone event to this scope's thread
   modelCall: (profile: Profile) => Promise<ModelCallResult>;
   callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
 }
@@ -144,6 +145,7 @@ export function makeStepContext(config: StepContextConfig): StepContext {
     },
     inputs: config.inputs,
     openStream: config.openStream,
+    appendEvent: config.appendEvent,
     modelCall: config.modelCall,
     callTool: config.callTool,
     output<Result>(value: Result): Emit<Result> {
@@ -183,6 +185,9 @@ export function withInputs(context: StepContext, inputs: unknown[]): StepContext
     },
     inputs,
     openStream: (type) => context.openStream(type),
+    appendEvent: (payload, type) => {
+      context.appendEvent(payload, type);
+    },
     modelCall: (profile) => context.modelCall(profile),
     callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) =>
       context.callTool(tool, input),
