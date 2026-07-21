@@ -25,7 +25,14 @@ import {
   handleStepError,
   type ExecutionContext,
 } from "./step-runner.js";
-import { runModelCall, callTool, waitForMessage, waitForSignal } from "./execution.js";
+import {
+  runModelCall,
+  callTool,
+  waitForMessage,
+  waitForSignal,
+  drainOnePendingSignal,
+  peekMessageFromInbox,
+} from "./execution.js";
 import { driveWaitForMessage, findInterruptNodes } from "./drive.js";
 import type { CursorState, TickOutcome } from "./tick.js";
 
@@ -160,15 +167,7 @@ export async function runBranchNode(
 
       let matched = nodeDef.waitable.match(runtime.store.events());
       if (matched === undefined) {
-        const pending = runtime.store.consume((candidate) => candidate.kind === "signal");
-        if (pending?.kind === "signal") {
-          runtime.store.append(
-            {
-              name: pending.name,
-              ...(pending.payload !== undefined ? { payload: pending.payload } : {}),
-            },
-            { type: "signal" },
-          );
+        if (drainOnePendingSignal(runtime.store)) {
           matched = nodeDef.waitable.match(runtime.store.events());
         }
       }
@@ -189,15 +188,7 @@ export async function runBranchNode(
     const message: UserMessage | undefined =
       waitMode === "block"
         ? await waitForMessage(runtime.store, kinds)
-        : (() => {
-            const entry = runtime.store.consume(
-              (candidate) =>
-                candidate.kind === "message" &&
-                candidate.message.kind !== undefined &&
-                kinds.includes(candidate.message.kind),
-            );
-            return entry?.kind === "message" ? entry.message : undefined;
-          })();
+        : peekMessageFromInbox(runtime.store, kinds);
     if (!message) return { kind: "parked", waitingFor: kinds, thread };
 
     const routed = await driveWaitForMessage(

@@ -3,7 +3,7 @@
 // fan-out along the way. This is the whole engine loop — shared by the
 // top-level runFlow drive and any `use` node's inline subgraph drive — and
 // tick()'s own live execution reuses several of its pieces (buildDriveContext,
-// findInterruptNodes, driveStepEmit, looksLikeMessage) to drive one node at a
+// findInterruptNodes, driveStepEmit, seedUseNode) to drive one node at a
 // time instead of to completion.
 
 import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
@@ -55,7 +55,7 @@ export function findInterruptNodes(flow: Graph): InterruptNode[] {
 }
 
 /** Distinguishes a real `Message` from a plain marker value (e.g. `waitFor`'s `WaitForResult`) reaching a `use` node as its incoming value. */
-export function looksLikeMessage(value: unknown): value is Message {
+function looksLikeMessage(value: unknown): value is Message {
   return typeof value === "object" && value !== null && "role" in value && "content" in value;
 }
 

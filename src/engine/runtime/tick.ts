@@ -6,7 +6,8 @@ import type { Graph, NodeId } from "../../flow/graph.js";
 import type { Message, MessageKind } from "../../flow/message.js";
 import { messageKindOf, tryMessageKindOf } from "../../flow/waitable.js";
 import type { StepContext, WaitForResult } from "../../flow/step.js";
-import type { Event } from "../../session/event.js";
+import type { Event, EventType } from "../../session/event.js";
+import type { Envelope } from "../../session/envelope.js";
 import type { Runtime } from "../runtime.js";
 import { freshThreadId } from "./ids.js";
 import { notImplemented, unreachable } from "../errors.js";
@@ -38,12 +39,20 @@ import {
   findInterruptNodes,
   seedUseNode,
 } from "./drive.js";
+import { drainOnePendingSignal, peekMessageFromInbox } from "./execution.js";
 
 /** One cursor's current state within a tick() outcome — node, status, and (for parked) what it's waiting for. */
 export interface CursorState {
   node: NodeId;
   status: "active" | "parked" | "done";
-  waitingFor?: MessageKind[]; // present only when status is "parked"
+  // Present only when status is "parked". A known overload: for a userInput-based
+  // wait, these are message kinds a real message could carry; for a signal-based
+  // wait, this instead holds the Waitable's own `label` (its display identifier),
+  // not a message kind at all. It compiles either way because `MessageKind` is
+  // just `string` underneath, with no way for a reader to tell the two apart from
+  // the type alone. Deliberately deferred: distinguishing them for real would
+  // need a breaking change to this public shape, out of scope for this pass.
+  waitingFor?: MessageKind[];
   result?: unknown; // present only when status is "done" (root cursor only)
   parent?: string; // absent = this is the root cursor; present = identifies which cursor this folds into
 }
@@ -176,11 +185,199 @@ type ReplayResult = ({ kind: "single" } & ReplayPosition) | { kind: "fanout"; gr
  * instead — the completion event `commitOutput` tags with the `use` node's
  * own (outer) id once its subgraph reaches `finish`.
  */
-function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
-  let thread: Thread = { id: freshThreadId(runtime), messages: [], history: [] };
-  let tree: CursorTree = {
+type CommittedEnvelope = Extract<Envelope, { type: EventType }>;
+
+/** `replayPosition`'s own mutable working state — the thread and position tree it's rebuilding, threaded through each per-event-type handler by reference so every handler sees (and can advance) exactly where the previous one left off. */
+interface ReplayState {
+  thread: Thread;
+  tree: CursorTree;
+}
+
+/** `replayPosition`'s handling of an event while the innermost position is a still-in-flight fan-out group: folds an `output`/`message` event into whichever branch owns it, or — for the join node's own output — recognizes the fold already happened on an earlier tick call and resumes ordinary single-line replay from its routed edge. */
+function applyFanOutEvent(
+  envelope: CommittedEnvelope,
+  path: PathLevel<ReplayFrame>[],
+  group: FanOutGroup,
+  ownerFlow: Graph,
+  runtime: Runtime,
+  state: ReplayState,
+): void {
+  if (envelope.type === "output") {
+    const { value } = envelope.event as Event["output"];
+    const stepId = envelope.stepId as NodeId;
+    if (stepId === group.joinNodeId) {
+      // The join already ran on an earlier tick call: the group folded
+      // in the log itself. Resume ordinary single-line replay from here,
+      // rebuilding whatever use-descent wrapping led to this depth.
+      state.thread = group.mainThread;
+      const routed = route(ownerFlow.edges, stepId, value, state.thread, runtime);
+      state.thread = routed.thread;
+      state.tree = rebuildFromPath(path, path.length - 1, {
+        kind: "step",
+        frame: {
+          flow: ownerFlow,
+          current: routed.to,
+          currentInput: routed.input,
+          reason: routed.reason,
+        },
+      });
+    } else {
+      replayBranchOutput(group, envelope.threadId, stepId, value, ownerFlow);
+    }
+  }
+  if (envelope.type === "message") {
+    const { message } = envelope.event as Event["message"];
+    replayBranchMessage(group, envelope.threadId, message, ownerFlow);
+  }
+  // toolCall/toolResult/compaction/invalidation/error inside a branch aren't
+  // produced by any node kind `runBranchNode` supports — out of scope for
+  // this slice's replay, same as the single-line path.
+}
+
+/** `replayPosition`'s handling of a committed `output` event outside an in-flight fan-out: finds the level that actually owns the node id (walking outward, since a level above may already have finished), then either hands off to per-branch fan-out reconstruction or routes to the next node the same way `advance` would. */
+function applyOutputEvent(
+  envelope: CommittedEnvelope,
+  path: PathLevel<ReplayFrame>[],
+  runtime: Runtime,
+  state: ReplayState,
+): void {
+  const { value } = envelope.event as Event["output"];
+  const stepId = envelope.stepId as NodeId;
+
+  // Find the level that actually owns this node id, from the innermost
+  // level outward. Node ids are globally unique per graph, so exactly
+  // one level ever recognizes a given id; landing on an ENCLOSING
+  // level's own id (rather than the innermost one's) means every level
+  // above it already reached its own `finish` — each logged its own
+  // such completion event first — so rebuilding the tree back to that
+  // depth is simply catching up on pops a live tick() call already made.
+  let depth = path.length - 1;
+  for (; depth >= 0; depth -= 1) {
+    if (path[depth]?.flow.nodes.has(stepId)) break;
+  }
+  if (depth < 0) return; // inner noise no known level owns — skip
+  const owner: PathLevel<ReplayFrame> | undefined = path[depth];
+  if (!owner) unreachable("replayPosition: owner missing after depth search");
+  const ownerFlow = owner.flow;
+
+  const branchTargets = thenEdges(ownerFlow.edges, stepId).map((edge) => edge.to);
+  if (branchTargets.length > 1) {
+    // A fan-out node's own output: hand off to per-branch reconstruction
+    // instead of `advance`, which would silently pick just the first
+    // branch (see `selectEdge`) and desync from what actually ran.
+    // `rebuildFromPath` rewraps whatever use-descents sit above this
+    // depth unchanged, so this works whether the fan-out is at the
+    // outermost level or nested inside a used subgraph.
+    state.tree = rebuildFromPath(path, depth, {
+      kind: "fan-out",
+      group: buildFanOutGroup(branchTargets, stepId, ownerFlow, state.thread, value),
+    });
+    return;
+  }
+
+  const routed = route(ownerFlow.edges, stepId, value, state.thread, runtime);
+  state.thread = routed.thread;
+  state.tree = rebuildFromPath(path, depth, {
     kind: "step",
-    frame: { flow, current: flow.entry, currentInput: undefined },
+    frame: {
+      flow: ownerFlow,
+      current: routed.to,
+      currentInput: routed.input,
+      reason: routed.reason,
+    },
+  });
+}
+
+/** `replayPosition`'s handling of a committed `message` event: a `waitFor` node that consumed it routes off the message, same as `advance`; a `use` node being seeded descends a level into its subgraph; any other current node is skipped, since replay isn't tracking it. */
+function applyMessageEvent(
+  envelope: CommittedEnvelope,
+  path: PathLevel<ReplayFrame>[],
+  leaf: PathLevel<ReplayFrame>,
+  runtime: Runtime,
+  state: ReplayState,
+): void {
+  const { message } = envelope.event as Event["message"];
+  if (leaf.node.kind !== "step") unreachable("replayPosition: innermost position is not a step");
+  const topFrame = leaf.node.frame;
+  const node = leaf.flow.nodes.get(topFrame.current);
+
+  if (node?.kind === "waitFor") {
+    state.thread = withMessage(state.thread, message);
+    const routed = route(leaf.flow.edges, topFrame.current, message, state.thread, runtime);
+    state.thread = routed.thread;
+    state.tree = rebuildFromPath(path, path.length - 1, {
+      kind: "step",
+      frame: {
+        flow: leaf.flow,
+        current: routed.to,
+        currentInput: { ok: true, result: message } satisfies WaitForResult,
+        reason: routed.reason,
+      },
+    });
+    return;
+  }
+
+  if (node?.kind === "use") {
+    // Entering this use node's subgraph: mirrors driveUseNode's own seed
+    // dedup (a "same"-threadAction reaching edge already pushed this
+    // message onto the thread; this event just echoes it into the log)
+    // and descends a level at the subgraph's own entry, seeded with this
+    // exact message — the same value `driveGraph`'s own `input`
+    // parameter would carry.
+    if (!topFrame.reason) state.thread = withMessage(state.thread, message);
+    state.tree = rebuildFromPath(path, path.length - 1, {
+      kind: "use-descent",
+      outerNode: topFrame.current,
+      inner: {
+        kind: "step",
+        frame: { flow: node.subgraph, current: node.subgraph.entry, currentInput: message },
+      },
+    });
+    return;
+  }
+
+  // Belongs to a node this replay isn't tracking as any level's
+  // `current` — safe to skip; it never needs to move a level's position.
+}
+
+/** `replayPosition`'s handling of a committed `signal` event: only ever moves the position when the innermost node is a non-message `waitFor` whose `Waitable` now matches the log up to and including this event — mirrors `applyMessageEvent`'s `waitFor` case, but the value routed downstream is `match()`'s own result rather than the raw event. */
+function applySignalEvent(
+  path: PathLevel<ReplayFrame>[],
+  leaf: PathLevel<ReplayFrame>,
+  runtime: Runtime,
+  state: ReplayState,
+): void {
+  if (leaf.node.kind !== "step") return;
+  const topFrame = leaf.node.frame;
+  const node = leaf.flow.nodes.get(topFrame.current);
+  if (node?.kind !== "waitFor" || tryMessageKindOf(node.waitable) !== undefined) return;
+
+  const matched = node.waitable.match(runtime.store.events());
+  if (matched === undefined) return;
+
+  const routed = route(
+    leaf.flow.edges,
+    topFrame.current,
+    { ok: true, result: matched } satisfies WaitForResult,
+    state.thread,
+    runtime,
+  );
+  state.thread = routed.thread;
+  state.tree = rebuildFromPath(path, path.length - 1, {
+    kind: "step",
+    frame: {
+      flow: leaf.flow,
+      current: routed.to,
+      currentInput: { ok: true, result: matched } satisfies WaitForResult,
+      reason: routed.reason,
+    },
+  });
+}
+
+function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
+  const state: ReplayState = {
+    thread: { id: freshThreadId(runtime), messages: [], history: [] },
+    tree: { kind: "step", frame: { flow, current: flow.entry, currentInput: undefined } },
   };
 
   for (const envelope of runtime.store.events()) {
@@ -190,181 +387,36 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     // it may be a still-in-flight fan-out (root or nested inside one or more
     // use-descents), which needs its own per-branch handling below instead of
     // the ordinary step/message dispatch.
-    const path: PathLevel<ReplayFrame>[] = cursorPath(flow, tree);
+    const path: PathLevel<ReplayFrame>[] = cursorPath(flow, state.tree);
     const leaf = path[path.length - 1];
     if (!leaf) unreachable("replayPosition: position path is empty");
 
     if (leaf.node.kind === "fan-out") {
-      const group = leaf.node.group;
-      const ownerFlow = leaf.flow;
-      if (envelope.type === "output") {
-        const { value } = envelope.event as Event["output"];
-        const stepId = envelope.stepId as NodeId;
-        if (stepId === group.joinNodeId) {
-          // The join already ran on an earlier tick call: the group folded
-          // in the log itself. Resume ordinary single-line replay from here,
-          // rebuilding whatever use-descent wrapping led to this depth.
-          thread = group.mainThread;
-          const routed = route(ownerFlow.edges, stepId, value, thread, runtime);
-          thread = routed.thread;
-          tree = rebuildFromPath(path, path.length - 1, {
-            kind: "step",
-            frame: {
-              flow: ownerFlow,
-              current: routed.to,
-              currentInput: routed.input,
-              reason: routed.reason,
-            },
-          });
-        } else {
-          replayBranchOutput(group, envelope.threadId, stepId, value, ownerFlow);
-        }
-      }
-      if (envelope.type === "message") {
-        const { message } = envelope.event as Event["message"];
-        replayBranchMessage(group, envelope.threadId, message, ownerFlow);
-      }
-      // toolCall/toolResult/compaction/invalidation/error inside a branch aren't
-      // produced by any node kind `runBranchNode` supports — out of scope for
-      // this slice's replay, same as the single-line path.
+      applyFanOutEvent(envelope, path, leaf.node.group, leaf.flow, runtime, state);
       continue;
     }
 
-    if (envelope.threadId) thread = { ...thread, id: envelope.threadId };
+    if (envelope.threadId) state.thread = { ...state.thread, id: envelope.threadId };
 
     if (envelope.type === "output") {
-      const { value } = envelope.event as Event["output"];
-      const stepId = envelope.stepId as NodeId;
-
-      // Find the level that actually owns this node id, from the innermost
-      // level outward. Node ids are globally unique per graph, so exactly
-      // one level ever recognizes a given id; landing on an ENCLOSING
-      // level's own id (rather than the innermost one's) means every level
-      // above it already reached its own `finish` — each logged its own
-      // such completion event first — so rebuilding the tree back to that
-      // depth is simply catching up on pops a live tick() call already made.
-      let depth = path.length - 1;
-      for (; depth >= 0; depth -= 1) {
-        if (path[depth]?.flow.nodes.has(stepId)) break;
-      }
-      if (depth < 0) continue; // inner noise no known level owns — skip
-      const owner: PathLevel<ReplayFrame> | undefined = path[depth];
-      if (!owner) unreachable("replayPosition: owner missing after depth search");
-      const ownerFlow = owner.flow;
-
-      const branchTargets = thenEdges(ownerFlow.edges, stepId).map((edge) => edge.to);
-      if (branchTargets.length > 1) {
-        // A fan-out node's own output: hand off to per-branch reconstruction
-        // instead of `advance`, which would silently pick just the first
-        // branch (see `selectEdge`) and desync from what actually ran.
-        // `rebuildFromPath` rewraps whatever use-descents sit above this
-        // depth unchanged, so this works whether the fan-out is at the
-        // outermost level or nested inside a used subgraph.
-        tree = rebuildFromPath(path, depth, {
-          kind: "fan-out",
-          group: buildFanOutGroup(branchTargets, stepId, ownerFlow, thread, value),
-        });
-        continue;
-      }
-
-      const routed = route(ownerFlow.edges, stepId, value, thread, runtime);
-      thread = routed.thread;
-      tree = rebuildFromPath(path, depth, {
-        kind: "step",
-        frame: {
-          flow: ownerFlow,
-          current: routed.to,
-          currentInput: routed.input,
-          reason: routed.reason,
-        },
-      });
+      applyOutputEvent(envelope, path, runtime, state);
       continue;
     }
 
     if (envelope.type === "message") {
-      const { message } = envelope.event as Event["message"];
-      if (leaf.node.kind !== "step")
-        unreachable("replayPosition: innermost position is not a step");
-      const topFrame = leaf.node.frame;
-      const node = leaf.flow.nodes.get(topFrame.current);
-
-      if (node?.kind === "waitFor") {
-        thread = withMessage(thread, message);
-        const routed = route(leaf.flow.edges, topFrame.current, message, thread, runtime);
-        thread = routed.thread;
-        tree = rebuildFromPath(path, path.length - 1, {
-          kind: "step",
-          frame: {
-            flow: leaf.flow,
-            current: routed.to,
-            currentInput: { ok: true, result: message } satisfies WaitForResult,
-            reason: routed.reason,
-          },
-        });
-        continue;
-      }
-
-      if (node?.kind === "use") {
-        // Entering this use node's subgraph: mirrors driveUseNode's own seed
-        // dedup (a "same"-threadAction reaching edge already pushed this
-        // message onto the thread; this event just echoes it into the log)
-        // and descends a level at the subgraph's own entry, seeded with this
-        // exact message — the same value `driveGraph`'s own `input`
-        // parameter would carry.
-        if (!topFrame.reason) thread = withMessage(thread, message);
-        tree = rebuildFromPath(path, path.length - 1, {
-          kind: "use-descent",
-          outerNode: topFrame.current,
-          inner: {
-            kind: "step",
-            frame: { flow: node.subgraph, current: node.subgraph.entry, currentInput: message },
-          },
-        });
-        continue;
-      }
-
-      // Belongs to a node this replay isn't tracking as any level's
-      // `current` — safe to skip; it never needs to move a level's position.
+      applyMessageEvent(envelope, path, leaf, runtime, state);
       continue;
     }
+
     if (envelope.type === "signal") {
-      // A committed signal: only ever moves the position when the innermost
-      // node is a non-message waitFor whose Waitable now matches the log up
-      // to and including this event — mirrors the `message` branch above,
-      // but the value routed downstream is match()'s own result rather than
-      // the raw event.
-      if (leaf.node.kind !== "step") continue;
-      const topFrame = leaf.node.frame;
-      const node = leaf.flow.nodes.get(topFrame.current);
-      if (node?.kind !== "waitFor" || tryMessageKindOf(node.waitable) !== undefined) continue;
-
-      const matched = node.waitable.match(runtime.store.events());
-      if (matched === undefined) continue;
-
-      const routed = route(
-        leaf.flow.edges,
-        topFrame.current,
-        { ok: true, result: matched } satisfies WaitForResult,
-        thread,
-        runtime,
-      );
-      thread = routed.thread;
-      tree = rebuildFromPath(path, path.length - 1, {
-        kind: "step",
-        frame: {
-          flow: leaf.flow,
-          current: routed.to,
-          currentInput: { ok: true, result: matched } satisfies WaitForResult,
-          reason: routed.reason,
-        },
-      });
+      applySignalEvent(path, leaf, runtime, state);
       continue;
     }
     // toolCall/toolResult/compaction/invalidation/error don't move the main
     // position on their own — out of scope for this slice's replay.
   }
 
-  const finalPath = cursorPath(flow, tree);
+  const finalPath = cursorPath(flow, state.tree);
   const finalLeaf = finalPath[finalPath.length - 1];
   if (!finalLeaf) unreachable("replayPosition: final position path is empty");
 
@@ -389,10 +441,10 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     // own live loop advances it from there (see its matching
     // `leaf.node.kind === "fan-out"` branch).
     if (finalPath.length === 1) return { kind: "fanout", group };
-    return { kind: "single", thread, tree };
+    return { kind: "single", thread: state.thread, tree: state.tree };
   }
 
-  return { kind: "single", thread, tree };
+  return { kind: "single", thread: state.thread, tree: state.tree };
 }
 
 /** One level of tick()'s live execution — same shape as a `ReplayFrame`, plus what only matters while actually running: this level's own armed interrupts (recomputed per level, same as `driveGraph` does for every nested `driveGraph` call) and the `StepContext` its own nodes run with. */
@@ -579,15 +631,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         let matched = node.waitable.match(runtime.store.events());
 
         if (matched === undefined) {
-          const pending = runtime.store.consume((candidate) => candidate.kind === "signal");
-          if (pending?.kind === "signal") {
-            runtime.store.append(
-              {
-                name: pending.name,
-                ...(pending.payload !== undefined ? { payload: pending.payload } : {}),
-              },
-              { type: "signal" },
-            );
+          if (drainOnePendingSignal(runtime.store)) {
             matched = node.waitable.match(runtime.store.events());
           }
         }
@@ -614,13 +658,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         waitKind,
         ...frame.interrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
       ];
-      const entry = runtime.store.consume(
-        (candidate) =>
-          candidate.kind === "message" &&
-          candidate.message.kind !== undefined &&
-          kinds.includes(candidate.message.kind),
-      );
-      const message = entry?.kind === "message" ? entry.message : undefined;
+      const message = peekMessageFromInbox(runtime.store, kinds);
       if (!message)
         return [{ node: frame.current, status: "parked", waitingFor: kinds, ...parent }];
 

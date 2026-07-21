@@ -70,43 +70,42 @@ function isPersonaStep(run: unknown): run is PersonaStep {
   return typeof run === "function" && "persona" in run;
 }
 
-/** Collects every `Profile` reachable from a graph's nodes, recursing into `use` subgraphs. */
-function personasIn(graph: Graph, profiles: Profile[], seen: Set<Graph>): void {
-  if (seen.has(graph)) return;
-  seen.add(graph);
-
-  for (const node of graph.nodes.values()) {
-    gatherPersonasFromNode(node, profiles, seen);
-  }
-}
-
-function gatherPersonasFromNode(node: NodeKind, profiles: Profile[], seen: Set<Graph>): void {
-  if (node.kind === "step" || node.kind === "interrupt") {
-    if (isPersonaStep(node.run)) profiles.push(node.run.persona);
-  } else if (node.kind === "use") {
-    personasIn(node.subgraph, profiles, seen);
-  }
-}
-
-/** Collects every distinct Waitable provider reachable from a graph's nodes, recursing into `use` subgraphs. */
-function waitableProvidersIn(graph: Graph, providers: Set<string>, seen: Set<Graph>): void {
-  if (seen.has(graph)) return;
-  seen.add(graph);
-
-  for (const node of graph.nodes.values()) {
-    gatherWaitableProvidersFromNode(node, providers, seen);
-  }
-}
-
-function gatherWaitableProvidersFromNode(
-  node: NodeKind,
-  providers: Set<string>,
+/** Generic recursive graph walker: visits every node reachable from `graph` — including through `use` subgraphs — calling `gatherFromNode` on each, and skipping any graph already in `seen`. Shared by every static-collection pass over a flow's structure so a subgraph reachable from more than one place is only ever walked once per `seen` set. */
+function walkGraph<T>(
+  graph: Graph,
   seen: Set<Graph>,
+  gatherFromNode: (node: NodeKind, acc: T, seen: Set<Graph>) => void,
+  acc: T,
 ): void {
+  if (seen.has(graph)) return;
+  seen.add(graph);
+
+  for (const node of graph.nodes.values()) {
+    gatherFromNode(node, acc, seen);
+  }
+}
+
+/** What `satisfiesFlows` collects from a single walk over a flow's structure: every reachable `Profile` and every distinct `Waitable` provider. */
+interface FlowCoverage {
+  profiles: Profile[];
+  providers: Set<string>;
+}
+
+/**
+ * Gathers one node's own contribution to a `FlowCoverage`, recursing into a `use` node's
+ * subgraph via `walkGraph` — the single pass `satisfiesFlows` uses to collect both personas
+ * and Waitable providers together, so a subgraph shared across flows (or reachable both as a
+ * step's persona source and a waitFor's provider source) is only ever walked once.
+ */
+function gatherCoverageFromNode(node: NodeKind, acc: FlowCoverage, seen: Set<Graph>): void {
+  if (node.kind === "step" || node.kind === "interrupt") {
+    if (isPersonaStep(node.run)) acc.profiles.push(node.run.persona);
+  }
   if (node.kind === "waitFor" || node.kind === "interrupt") {
-    providers.add(node.waitable.provider);
-  } else if (node.kind === "use") {
-    waitableProvidersIn(node.subgraph, providers, seen);
+    acc.providers.add(node.waitable.provider);
+  }
+  if (node.kind === "use") {
+    walkGraph(node.subgraph, seen, gatherCoverageFromNode, acc);
   }
 }
 
@@ -129,19 +128,16 @@ export function satisfiesFlows(
   bindings: Binding[],
   waitableSources: (provider: string) => WaitableSource | undefined = () => undefined,
 ): Missing[] {
-  const profiles: Profile[] = [];
-  const providers = new Set<string>();
+  const acc: FlowCoverage = { profiles: [], providers: new Set<string>() };
   const seen = new Set<Graph>();
-  const waitableSeen = new Set<Graph>();
 
   for (const flow of flows) {
-    personasIn(flow, profiles, seen);
-    waitableProvidersIn(flow, providers, waitableSeen);
+    walkGraph(flow, seen, gatherCoverageFromNode, acc);
   }
 
-  const missing = satisfiesPersonas(profiles, models, bindings);
+  const missing = satisfiesPersonas(acc.profiles, models, bindings);
 
-  for (const provider of providers) {
+  for (const provider of acc.providers) {
     if (provider === "userInput") continue;
     if (!waitableSources(provider)) missing.push({ kind: "waitable", provider });
   }

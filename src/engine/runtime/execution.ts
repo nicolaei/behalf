@@ -41,6 +41,17 @@ async function pollInbox<T>(
   return undefined;
 }
 
+/** Consumes one pending `signal` entry, if any is queued, and commits it to the log as a `signal` event — the "drain one pending signal and commit it" step every non-message `waitFor` path repeats (blocking here in `waitForSignal`/`waitForRace`, or peeked non-blockingly in `tick`/`runBranchNode`) until its `Waitable`'s own `match()` catches up with the log. Returns whether an entry was drained. */
+export function drainOnePendingSignal(store: SessionStore): boolean {
+  const entry = store.consume((candidate) => candidate.kind === "signal");
+  if (entry?.kind !== "signal") return false;
+  store.append(
+    { name: entry.name, ...(entry.payload !== undefined ? { payload: entry.payload } : {}) },
+    { type: "signal" },
+  );
+  return true;
+}
+
 /** Parks until the inbox has a message of the given kind. */
 export async function waitForMessage(
   store: SessionStore,
@@ -57,6 +68,20 @@ export async function waitForMessage(
   // pollInbox only returns undefined when given a `stop` predicate, which this call omits.
   if (entry?.kind !== "message") unreachable("waitForMessage resolved without a message");
   return entry.message;
+}
+
+/** Non-blocking counterpart to `waitForMessage`: checks whether a message of one of the given kinds is already sitting in the inbox, consuming and returning it if so — `undefined` otherwise, never parking. Shared by tick's own waitFor handling and `runBranchNode`'s `"peek"` mode, both of which must never block. */
+export function peekMessageFromInbox(
+  store: SessionStore,
+  kinds: readonly MessageKind[],
+): UserMessage | undefined {
+  const entry = store.consume(
+    (candidate) =>
+      candidate.kind === "message" &&
+      candidate.message.kind !== undefined &&
+      kinds.includes(candidate.message.kind),
+  );
+  return entry?.kind === "message" ? entry.message : undefined;
 }
 
 /**
@@ -77,13 +102,7 @@ export async function waitForSignal<T>(store: SessionStore, waitable: Waitable<T
       const matched = waitable.match(store.events());
       if (matched !== undefined) return { value: matched };
 
-      const entry = store.consume((candidate) => candidate.kind === "signal");
-      if (!entry) return undefined;
-      if (entry.kind !== "signal") unreachable("waitForSignal: consumed a non-signal entry");
-      store.append(
-        { name: entry.name, ...(entry.payload !== undefined ? { payload: entry.payload } : {}) },
-        { type: "signal" },
-      );
+      if (!drainOnePendingSignal(store)) return undefined;
       // Loop back around: the freshly committed signal may or may not be
       // what `waitable` is looking for — either way, re-check `match()`
       // before trying to drain another pending entry.
@@ -103,6 +122,37 @@ interface ArmedInterrupt {
 export type RaceWinner =
   | { kind: "self"; message: UserMessage }
   | { kind: "interrupt"; interrupt: { id: NodeId; waitable: Waitable<unknown> }; value: unknown };
+
+/** Step (a) of `waitForRace`'s poll: consumes a pending message matching the waitFor node's own kind or any message-based interrupt's kind, and classifies which one it belongs to — the interrupt whose kind matches, or "self" (the waitFor node's own Waitable) when none does. `undefined` when no matching message is queued yet. */
+function consumeRaceMessage(
+  store: SessionStore,
+  messageKinds: readonly MessageKind[],
+  interrupts: readonly ArmedInterrupt[],
+): RaceWinner | undefined {
+  const message = store.consume(
+    (candidate) =>
+      candidate.kind === "message" &&
+      candidate.message.kind !== undefined &&
+      messageKinds.includes(candidate.message.kind),
+  );
+  if (message?.kind !== "message") return undefined;
+  const interrupt = interrupts.find((candidate) => candidate.messageKind === message.message.kind);
+  return interrupt
+    ? { kind: "interrupt", interrupt, value: message.message }
+    : { kind: "self", message: message.message };
+}
+
+/** Step (b) of `waitForRace`'s poll: checks every signal-based interrupt's own `match()` against the committed log, returning the first one satisfied. `undefined` when none is. */
+function checkSignalInterrupts(
+  signalInterrupts: readonly ArmedInterrupt[],
+  store: SessionStore,
+): RaceWinner | undefined {
+  for (const interrupt of signalInterrupts) {
+    const matched = interrupt.waitable.match(store.events());
+    if (matched !== undefined) return { kind: "interrupt", interrupt, value: matched };
+  }
+  return undefined;
+}
 
 /**
  * Races a `waitFor` node's own message-based `Waitable` against every armed
@@ -139,37 +189,13 @@ export async function waitForRace(
 
   const result = await pollInbox(store, () => {
     for (;;) {
-      const message = store.consume(
-        (candidate) =>
-          candidate.kind === "message" &&
-          candidate.message.kind !== undefined &&
-          messageKinds.includes(candidate.message.kind),
-      );
-      if (message?.kind === "message") {
-        const interrupt = interrupts.find(
-          (candidate) => candidate.messageKind === message.message.kind,
-        );
-        return {
-          value: interrupt
-            ? ({ kind: "interrupt", interrupt, value: message.message } satisfies RaceWinner)
-            : ({ kind: "self", message: message.message } satisfies RaceWinner),
-        };
-      }
+      const messageWinner = consumeRaceMessage(store, messageKinds, interrupts);
+      if (messageWinner) return { value: messageWinner };
 
-      for (const interrupt of signalInterrupts) {
-        const matched = interrupt.waitable.match(store.events());
-        if (matched !== undefined) {
-          return { value: { kind: "interrupt", interrupt, value: matched } satisfies RaceWinner };
-        }
-      }
+      const signalWinner = checkSignalInterrupts(signalInterrupts, store);
+      if (signalWinner) return { value: signalWinner };
 
-      const signal = store.consume((candidate) => candidate.kind === "signal");
-      if (!signal) return undefined;
-      if (signal.kind !== "signal") unreachable("waitForRace: consumed a non-signal entry");
-      store.append(
-        { name: signal.name, ...(signal.payload !== undefined ? { payload: signal.payload } : {}) },
-        { type: "signal" },
-      );
+      if (!drainOnePendingSignal(store)) return undefined;
       // Loop back around: re-check every signal-based interrupt's match()
       // against the freshly committed signal before draining another one.
     }
