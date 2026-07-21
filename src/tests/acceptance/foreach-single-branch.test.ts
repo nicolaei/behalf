@@ -20,7 +20,7 @@ import { neverCalled, textOf } from "./support.js";
 // deliberately the smallest case — exactly one dynamically-produced item,
 // whose branch is a single waitFor node — to isolate "does dynamic branch
 // construction and execution work at all" from every other concern.
-describe.skip("forEach runs a single dynamically-produced branch, end-to-end", () => {
+describe("forEach runs a single dynamically-produced branch, end-to-end", () => {
   function branchFor(item: string): Graph {
     return defineGraph(`forEach-branch-${item}`, (flow) => {
       const wait = flow.waitFor(userInput("resume"));
