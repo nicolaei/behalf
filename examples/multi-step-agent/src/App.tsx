@@ -1,12 +1,18 @@
-// UI for the four-stage pipeline: a stage strip (asker/red/green/refactor,
-// derived from thread-id order of first appearance), a transcript folded
-// from the store's committed envelopes (message/toolCall/toolResult, plus
-// delta streaming for the model's own text — same pattern as simple-chat),
-// stage-boundary banners inserted whenever a new threadId first appears, and
-// a specialized `ask` tool card that renders an inline TextInput instead of
-// a generic tool card while the ask is pending.
+// UI for the four-stage pipeline: a transcript folded from the store's
+// committed envelopes (message/toolCall/toolResult, plus delta streaming for
+// the model's own text — same pattern as simple-chat), committed into Ink's
+// <Static> so it's written once to real scrollback and never re-rendered.
+// The header (title + model line) prints once at the very top via the same
+// <Static> mechanism. There's no separate live stage indicator: <Static>
+// can only ever append new entries, never update an already-printed one, so
+// "which stage am I in" is carried entirely by the `── stage ──` banner
+// inserted whenever a new threadId first appears — the last banner scrolling
+// up from the bottom is the current stage. A specialized `ask` tool card
+// renders an inline TextInput instead of a generic tool card while the ask
+// is pending.
 
 import React, { useEffect, useRef, useState } from "react";
+import { appendFileSync } from "node:fs";
 import { Box, Static, Text } from "ink";
 import TextInput from "ink-text-input";
 import { runFlow, userText } from "behalf";
@@ -17,6 +23,11 @@ import type { AskBridge, PendingAsk } from "./ask-bridge.js";
 
 export const MODEL_ID = DEFAULT_MODEL.identifier;
 export const REASONING_LEVEL = askerProfile.reasoning;
+
+const DEBUG_LOG_PATH = "/tmp/multi-step-agent-debug.log";
+function debugLog(line: string) {
+  appendFileSync(DEBUG_LOG_PATH, `${new Date().toISOString()} ${line}\n`);
+}
 
 const STAGE_NAMES = ["asker", "red", "green", "refactor"] as const;
 type StageName = (typeof STAGE_NAMES)[number];
@@ -89,25 +100,6 @@ function formatValue(value: unknown): string {
   }
 }
 
-/** Stage strip segment: done stages before the current one, current one, then pending. */
-function StageStrip({ current }: { current: StageName | undefined }) {
-  const currentIndex = current ? STAGE_NAMES.indexOf(current) : -1;
-  return (
-    <Text>
-      {STAGE_NAMES.map((name, index) => {
-        const marker = index < currentIndex ? "✓" : index === currentIndex ? "●" : "○";
-        const separator = index < STAGE_NAMES.length - 1 ? "  " : "";
-        return (
-          <Text key={name} bold={index === currentIndex} dimColor={index > currentIndex}>
-            {marker} {name}
-            {separator}
-          </Text>
-        );
-      })}
-    </Text>
-  );
-}
-
 function AskCard({
   pending,
   onSubmit,
@@ -148,14 +140,15 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
   // terminal, Ink can no longer erase-and-redraw it in place and instead
   // appends a whole new frame on every re-render.
   // Seeded with the one-time header so it prints once at the very top of
-  // scrollback, before any transcript content.
+  // scrollback — <Static> content always prints before whatever's in the
+  // reactive region below it, which is the only way to get it to actually
+  // appear above the transcript instead of trailing behind it forever.
   const [settled, setSettled] = useState<TranscriptEntry[]>([{ kind: "header" }]);
   const [live, setLive] = useState<Extract<TranscriptEntry, { kind: "tool" }>[]>([]);
   const [streaming, setStreaming] = useState<StreamingReply | undefined>(undefined);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const [pendingAsk, setPendingAsk] = useState<PendingAsk | undefined>(undefined);
-  const [currentStage, setCurrentStage] = useState<StageName | undefined>(undefined);
   const started = useRef(false);
   const stageByThread = useRef(new Map<ThreadId, StageName>());
   const nextStageIndex = useRef(0);
@@ -171,6 +164,19 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
       for await (const envelope of ready.store.changes()) {
         if (cancelled) return;
 
+        // DEBUG: append every envelope's type/form/threadId to a file (never
+        // stdout — that would collide with Ink's own rendering) so we can
+        // see exactly when and why a new threadId appears.
+        debugLog(
+          `form=${envelope.form} threadId=${envelope.threadId ?? "(none)"}` +
+            (envelope.form === "committed"
+              ? ` type=${envelope.type}` +
+                (envelope.type === "toolCall"
+                  ? ` name=${(envelope.event as { name: string }).name}`
+                  : "")
+              : ""),
+        );
+
         // Track stage-by-threadId by order of first appearance, and insert a
         // banner into the transcript the first time each stage's thread shows up.
         const threadId = envelope.threadId;
@@ -179,7 +185,6 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
           if (stage) {
             stageByThread.current.set(threadId, stage);
             nextStageIndex.current += 1;
-            setCurrentStage(stage);
             setSettled((previous) => [...previous, { kind: "banner", stage }]);
           }
         }
@@ -301,14 +306,12 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
           }
           if (entry.kind === "message") {
             return (
-              <Box key={index} flexDirection="column">
+              <Box key={index} flexDirection="column" marginBottom={1}>
                 {entry.thinkingChars !== undefined && (
                   <Text dimColor>💭 (thinking, {entry.thinkingChars} chars)</Text>
                 )}
-                <Text>
-                  <Text bold>{entry.role === "user" ? "You: " : "Assistant: "}</Text>
-                  {entry.text}
-                </Text>
+                <Text bold>{entry.role === "user" ? "You:" : "Assistant:"}</Text>
+                <Text> {entry.text}</Text>
               </Box>
             );
           }
@@ -325,9 +328,6 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
         }}
       </Static>
       <Box flexDirection="column">
-        <Box marginY={1}>
-          <StageStrip current={currentStage} />
-        </Box>
         <Box flexDirection="column">
           {settled.length <= 1 && live.length === 0 && !streaming && (
             <Text dimColor>(describe the page you want below to start)</Text>
@@ -349,11 +349,14 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
             );
           })}
           {streaming && (
-            <Text>
-              <Text bold>Assistant: </Text>
-              {streaming.text}
-              <Text dimColor>▌</Text>
-            </Text>
+            <Box flexDirection="column">
+              <Text bold>Assistant:</Text>
+              <Text>
+                {"  "}
+                {streaming.text}
+                <Text dimColor>▌</Text>
+              </Text>
+            </Box>
           )}
           {error && <Text color="red">Error: {error}</Text>}
         </Box>
