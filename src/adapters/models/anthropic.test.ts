@@ -11,6 +11,7 @@ import {
   CLAUDE_CODE_IDENTITY,
   toClaudeCodeName,
   fromClaudeCodeName,
+  isRetryableAnthropicError,
 } from "./anthropic.js";
 import type { Profile } from "../../flow/profile.js";
 import type { Message } from "../../flow/message.js";
@@ -421,5 +422,23 @@ describe("Claude Code tool name mapping (OAuth)", () => {
       name: "Read",
       input: { path: "x" },
     });
+  });
+});
+
+describe("isRetryableAnthropicError", () => {
+  it("is retryable for a 429", () => {
+    expect(isRetryableAnthropicError({ status: 429 })).toBe(true);
+  });
+
+  it("is retryable for a 5xx", () => {
+    expect(isRetryableAnthropicError({ status: 503 })).toBe(true);
+  });
+
+  it("is not retryable for a 4xx other than 429", () => {
+    expect(isRetryableAnthropicError({ status: 400 })).toBe(false);
+  });
+
+  it("is not retryable when there is no status at all", () => {
+    expect(isRetryableAnthropicError(new Error("boom"))).toBe(false);
   });
 });
