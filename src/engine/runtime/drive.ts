@@ -61,32 +61,47 @@ function looksLikeMessage(value: unknown): value is Message {
 
 /**
  * Computes a `use` node's subgraph seed and folds it into the thread and
- * log: the reaching edge's `prompt` output, if it had one (the previous
- * iteration's `follow` already pushed it onto the thread; logged again here
- * so it lands in the log too), otherwise the raw incoming value if it's a
- * real `Message` (never pushed onto the thread, so push it now — this node
- * is its only source), or — when the incoming value is a non-message marker
- * such as `waitFor`'s `{ ok: true }` — the message that marker stands for,
- * already the thread's last message. Shared by `driveUseNode` (runFlow) and
- * tick()'s own inline `use` handling, which both compute and log a subgraph
- * seed identically; only how each then drives the subgraph differs.
+ * log, distinguishing three cases by where `seed` comes from:
+ *
+ * - The reaching edge's own `prompt` output (`reason`): `follow` already
+ *   folded it into the thread the previous iteration, so only the log
+ *   needs it.
+ * - A raw `Message` input that is NOT already the thread's last message:
+ *   genuinely fresh, needs both folding and logging.
+ * - Anything else — a raw `Message` input that IS already the thread's
+ *   last message (the graph's own entry, already folded and logged by
+ *   whoever called `driveGraph`: `runFlow` or a parent `seedUseNode`), or a
+ *   non-message marker such as `waitFor`'s `{ ok: true }` (the message it
+ *   stands for is already the thread's last message, folded and logged by
+ *   whoever produced it, e.g. `driveWaitForMessage`) — nothing to do; it's
+ *   already both folded and logged.
+ *
+ * Shared by `driveUseNode` (runFlow) and tick()'s own inline `use`
+ * handling, which both compute and log a subgraph seed identically; only
+ * how each then drives the subgraph differs.
  */
 export function seedUseNode(
   reason: Message | undefined,
   currentInput: unknown,
   thread: Thread,
   runtime: Runtime,
-  alreadyLogged = false,
 ): { seed: Message; thread: Thread } {
-  const fallback: Message | undefined = thread.messages.at(-1);
-  const seed: Message | undefined =
-    reason ?? (looksLikeMessage(currentInput) ? currentInput : fallback);
-  if (!seed) throw new Error("use node has no message to seed its subgraph with");
-  const seededThread = reason ? thread : withMessage(thread, seed);
-  if (!alreadyLogged) {
-    runtime.store.append({ message: seed }, { type: "message", threadId: seededThread.id });
+  if (reason) {
+    runtime.store.append({ message: reason }, { type: "message", threadId: thread.id });
+    return { seed: reason, thread };
   }
-  return { seed, thread: seededThread };
+
+  if (looksLikeMessage(currentInput)) {
+    const alreadyThere = thread.messages.at(-1) === currentInput;
+    if (alreadyThere) return { seed: currentInput, thread };
+    const seededThread = withMessage(thread, currentInput);
+    runtime.store.append({ message: currentInput }, { type: "message", threadId: seededThread.id });
+    return { seed: currentInput, thread: seededThread };
+  }
+
+  const fallback = thread.messages.at(-1);
+  if (!fallback) throw new Error("use node has no message to seed its subgraph with");
+  return { seed: fallback, thread };
 }
 
 /** Runs a `use` node: seeds its subgraph, drives it inline to its own `finish`, and follows the reaching edge with its result. */
@@ -96,10 +111,9 @@ async function driveUseNode(
   reason: Message | undefined,
   currentInput: unknown,
   ctx: ExecutionContext,
-  isEntryFirstPass: boolean,
 ): Promise<RouteResult> {
   const { flow, runtime } = ctx;
-  const { seed, thread } = seedUseNode(reason, currentInput, ctx.thread, runtime, isEntryFirstPass);
+  const { seed, thread } = seedUseNode(reason, currentInput, ctx.thread, runtime);
 
   const result = await driveGraph(node.subgraph, runtime, thread, seed);
 
@@ -552,20 +566,9 @@ export async function driveGraph(
   // so the node's first error sees attempts: 0. Keyed by node id since a
   // retry re-runs the same node without ever changing `current`.
   const attemptsByNode = new Map<NodeId, number>();
-  // True only for the very first loop iteration, and only while it's still
-  // processing the entry node — the caller (runFlow or a parent
-  // seedUseNode) already logged `input` as this node's incoming message, so
-  // a `use` node here must not log it again. Any later iteration that
-  // happens to route back to the entry node's id (e.g. a loop) finds this
-  // false, since it's cleared right after the first pass regardless of
-  // which node kind actually ran.
-
-  let isFirstIteration = true;
   while (current) {
     const node = flow.nodes.get(current);
     if (!node) throw new Error(`graph "${flow.name}" has no node "${current}"`);
-    const isEntryFirstPass = isFirstIteration && current === flow.entry;
-    isFirstIteration = false;
 
     // Consumed by whichever node runs next, regardless of its kind — a join's
     // pendingInputs must never survive past the node it was meant for.
@@ -575,19 +578,12 @@ export async function driveGraph(
     if (node.kind === "finish") return { thread: currentThread, output: currentInput };
 
     if (node.kind === "use") {
-      const routed = await driveUseNode(
-        node,
-        current,
-        reason,
-        currentInput,
-        {
-          flow,
-          runtime,
-          thread: currentThread,
-          attemptsByNode,
-        },
-        isEntryFirstPass,
-      );
+      const routed = await driveUseNode(node, current, reason, currentInput, {
+        flow,
+        runtime,
+        thread: currentThread,
+        attemptsByNode,
+      });
       currentThread = routed.thread;
       currentInput = routed.input;
       reason = routed.reason;
