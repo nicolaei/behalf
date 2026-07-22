@@ -9,7 +9,7 @@ import { fsTools } from "./tools.js";
 import type { Profile, Model } from "behalf";
 
 export const DEFAULT_MODEL: Model = {
-  identifier: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5-20250929",
+  identifier: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
   provider: "anthropic",
   contextWindow: 200_000,
   reasoning: ["off", "medium"],
