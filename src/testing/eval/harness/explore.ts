@@ -12,7 +12,11 @@ import type { Metrics, Rank } from "./rank.js";
 import { byScore } from "./rank.js";
 import { runRow } from "./run-row.js";
 
-/** Spec shared by `runExplore` and `explore`. @public */
+// Not barrel-exported from eval/index.ts — internal to the harness. A test
+// author gets these shapes through explore()'s return/argument inference,
+// never by importing them directly.
+
+/** Spec shared by `runExplore` and `explore`. */
 export interface ExploreSpec<World, Output = unknown> {
   of: Agent<World, Output>;
   variants: Partial<Profile>[];
@@ -22,19 +26,19 @@ export interface ExploreSpec<World, Output = unknown> {
   rankBy?: Rank;
 }
 
-/** One variant's ranked outcome. @public */
+/** One variant's ranked outcome. */
 export interface ExploreVariantResult {
   profile: Partial<Profile>;
   metrics: Metrics;
   scorers: { name: string; distribution: Distribution }[];
 }
 
-/** The result of exploring every variant — sorted by `rankBy`, highest rank first. @public */
+/** The result of exploring every variant — sorted by `rankBy`, highest rank first. */
 export interface ExploreResult {
   variants: ExploreVariantResult[];
 }
 
-/** Runs every variant's rows x runs and returns them ranked — the directly-testable core, no test-runner registration. @public */
+/** Runs every variant's rows x runs and returns them ranked — the directly-testable core, no test-runner registration. */
 export async function runExplore<World, Output = unknown>(
   spec: ExploreSpec<World, Output>,
 ): Promise<ExploreResult> {

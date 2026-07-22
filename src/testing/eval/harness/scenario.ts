@@ -13,7 +13,11 @@ import { aggregate } from "./aggregate.js";
 import { gate } from "./gate.js";
 import { runRow } from "./run-row.js";
 
-/** One scorer's outcome from a scenario run. @public */
+// Not barrel-exported from eval/index.ts — internal to the harness. A test
+// author gets these shapes through scenario()'s return/argument inference,
+// never by importing them directly.
+
+/** One scorer's outcome from a scenario run. */
 export interface ScenarioScorerResult {
   name: string;
   passed: boolean;
@@ -24,13 +28,13 @@ export interface ScenarioScorerResult {
   regressed?: boolean;
 }
 
-/** The result of running a scenario's rows/runs — what `scenario()` gates CI on. @public */
+/** The result of running a scenario's rows/runs — what `scenario()` gates CI on. */
 export interface ScenarioResult {
   passed: boolean;
   scorers: ScenarioScorerResult[];
 }
 
-/** Spec shared by `runScenario` and `scenario`. @public */
+/** Spec shared by `runScenario` and `scenario`. */
 export interface ScenarioSpec<World, Output = unknown> {
   of: Subject<World, Output>;
   scorers: Scorer<World, Output>[];
@@ -46,7 +50,7 @@ export interface ScenarioSpec<World, Output = unknown> {
   baseline?: { store: BaselineStore; test: string };
 }
 
-/** Runs a scenario's rows x runs and returns its result — the directly-testable core, no test-runner registration. @public */
+/** Runs a scenario's rows x runs and returns its result — the directly-testable core, no test-runner registration. */
 export async function runScenario<World, Output = unknown>(
   spec: ScenarioSpec<World, Output>,
 ): Promise<ScenarioResult> {
