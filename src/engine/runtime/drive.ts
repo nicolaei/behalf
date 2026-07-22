@@ -148,10 +148,7 @@ async function driveForEachNode(
   const { flow, runtime, thread } = ctx;
   const items = node.items(currentInput);
   const results = await Promise.all(
-    items.map((item) => {
-      const branchThread = applyThreadAction(thread, "fork", undefined, runtime);
-      return driveGraph(node.branch(item), runtime, branchThread, item);
-    }),
+    items.map((item) => driveGraph(node.branch(item), runtime, thread, item)),
   );
   const outputs = results.map((result) => result.output);
 

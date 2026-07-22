@@ -396,7 +396,18 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
       continue;
     }
 
-    if (envelope.threadId) state.thread = { ...state.thread, id: envelope.threadId };
+    // A forEach node's branches each run on their own per-branch thread (see
+    // foreach.ts), and every event they commit is tagged with that thread —
+    // never the main line's. While the position is parked at a forEach node,
+    // those branch events must NOT move `state.thread`: the forEach fold
+    // (advanceTickForEachNode's commitRoute) reads it back as the thread the
+    // folded `output` event is committed on, and it has to stay the outer
+    // flow's own thread. Skip the correction here, the same way the fan-out
+    // case above never runs it. The fold's own edge is followed by `route`,
+    // which carries the thread forward correctly without this blanket sync.
+    const atForEach =
+      leaf.node.kind === "step" && leaf.flow.nodes.get(leaf.node.frame.current)?.kind === "forEach";
+    if (!atForEach && envelope.threadId) state.thread = { ...state.thread, id: envelope.threadId };
 
     if (envelope.type === "output") {
       applyOutputEvent(envelope, path, runtime, state);
