@@ -52,4 +52,11 @@ describe("nodeCalled", () => {
       nodeCalled(run, implementNode, { output: (o) => o === "wrong" });
     }).toThrow();
   });
+
+  it("times: 0 with no visits does not evaluate the output predicate", () => {
+    const run = fakeRunWithVisits([]);
+    expect(() => {
+      nodeCalled(run, implementNode, { times: 0, output: () => false });
+    }).not.toThrow();
+  });
 });

@@ -81,4 +81,11 @@ describe("matchesTraversal", () => {
       matchesTraversal(run, branch(escalateNode));
     }).not.toThrow();
   });
+
+  it("loop times: 0 passes when the node never appears", () => {
+    const run = fakeRun([{ node: n1, thread: t1 }]);
+    expect(() => {
+      matchesTraversal(run, sequence(n1, loop(implementNode, { times: 0 })));
+    }).not.toThrow();
+  });
 });

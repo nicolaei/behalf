@@ -23,4 +23,11 @@ describe("aggregate", () => {
     expect(dist.max).toBe(1.0);
     expect(dist.passRate).toBeCloseTo(0.8, 5); // 4 of 5 scores >= 0.85
   });
+
+  it("returns finite fields for an empty scores array, matching gate's empty-input guard", () => {
+    const dist = aggregate([], 0.85);
+    expect(Number.isFinite(dist.mean)).toBe(true);
+    expect(Number.isFinite(dist.stddev)).toBe(true);
+    expect(Number.isFinite(dist.passRate)).toBe(true);
+  });
 });
