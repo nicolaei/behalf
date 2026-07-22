@@ -1,11 +1,13 @@
-// M3 — real interactive multi-turn conversation with filesystem tools. No
-// delta streaming or live progress yet (those are M4/M5). Renders a scrolling
-// transcript folded from the store's committed envelopes: `message` events
-// become chat lines, `toolCall`/`toolResult` events become commit-only tool
-// cards (no spinner — a static running indicator is enough for M3). The text
-// input drives the chat graph: the first submit kicks off `runFlow`, every
-// following submit is a "follow-up" message fed into the running flow via
-// `store.receive`.
+// M4 — delta streaming for the model's own text: subscribes to "delta" form
+// envelopes alongside committed ones, growing an in-flight assistant reply
+// character by character as text deltas arrive, then finalizing into the
+// normal transcript once the underlying "message" commits. Renders a
+// scrolling transcript folded from the store's committed envelopes:
+// `message` events become chat lines, `toolCall`/`toolResult` events become
+// commit-only tool cards (no spinner — a static running indicator is enough
+// for M3/M4; live tool progress is M5). The text input drives the chat
+// graph: the first submit kicks off `runFlow`, every following submit is a
+// "follow-up" message fed into the running flow via `store.receive`.
 import React, { useEffect, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import TextInput from "ink-text-input";
@@ -27,6 +29,8 @@ type TranscriptEntry =
       isError?: boolean;
       done: boolean;
     };
+
+type StreamingReply = { correlationId: string; text: string };
 
 function textOf(message: Message): string {
   return message.content
@@ -53,6 +57,7 @@ function formatValue(value: unknown): string {
 
 export function App({ ready }: { ready: Runtime }) {
   const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  const [streaming, setStreaming] = useState<StreamingReply | undefined>(undefined);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const started = useRef(false);
@@ -62,11 +67,33 @@ export function App({ ready }: { ready: Runtime }) {
     (async () => {
       for await (const envelope of ready.store.changes()) {
         if (cancelled) return;
-        if (envelope.form !== "committed") continue;
+
+        if (envelope.form === "delta") {
+          const delta = envelope.delta;
+          if ("open" in delta) {
+            // Only the assistant's own text streams live in M4 — a toolCall's
+            // open/partialInput deltas get a live progress card in M5.
+            if (delta.open === "text")
+              setStreaming({ correlationId: delta.correlationId, text: "" });
+            continue;
+          }
+          if ("text" in delta) {
+            setStreaming((previous) =>
+              previous && previous.correlationId === delta.correlationId
+                ? { ...previous, text: previous.text + delta.text }
+                : previous,
+            );
+            continue;
+          }
+          continue; // partialInput/close: not rendered in M4
+        }
+
+        if (envelope.form !== "committed") continue; // skip in-progress snapshots
         if (envelope.type === "message") {
           const message = (envelope.event as { message: Message }).message;
           const entry = entryOf(message);
           if (entry) setTranscript((previous) => [...previous, entry]);
+          setStreaming(undefined); // the streamed reply just landed as a real message
           continue;
         }
         if (envelope.type === "toolCall") {
@@ -135,7 +162,9 @@ export function App({ ready }: { ready: Runtime }) {
       </Text>
       <Text dimColor>cwd: {process.cwd()}</Text>
       <Box flexDirection="column" marginTop={1}>
-        {transcript.length === 0 && <Text dimColor>(no messages yet — type below)</Text>}
+        {transcript.length === 0 && !streaming && (
+          <Text dimColor>(no messages yet — type below)</Text>
+        )}
         {transcript.map((entry, index) => {
           if (entry.kind === "message") {
             return (
@@ -156,6 +185,13 @@ export function App({ ready }: { ready: Runtime }) {
             </Text>
           );
         })}
+        {streaming && (
+          <Text>
+            <Text bold>Assistant: </Text>
+            {streaming.text}
+            <Text dimColor>▌</Text>
+          </Text>
+        )}
         {error && <Text color="red">Error: {error}</Text>}
       </Box>
       <Box marginTop={1}>
