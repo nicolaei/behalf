@@ -158,6 +158,34 @@ describe("toAnthropicRequest", () => {
     expect(request.system).toBe("test persona");
     expect(request.system).not.toContain("Claude Code");
   });
+
+  it("maps a tool call paired with its result to adjacent tool_use/tool_result blocks", () => {
+    const messages: Message[] = [
+      { role: "user", intent: "standard", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        provider: "test",
+        model: "m",
+        content: [{ type: "toolCall", correlationId: "1", name: "search", input: { query: "x" } }],
+        usage: { input: 1, output: 1 },
+      },
+      {
+        role: "tool",
+        content: [{ type: "toolResult", correlationId: "1", output: { hits: ["a"] } }],
+      },
+    ];
+
+    const request = toAnthropicRequest(profile(), messages);
+
+    expect(request.messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "tool_use", id: "1", name: "search", input: { query: "x" } }],
+    });
+    expect(request.messages[2]).toEqual({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "1", content: '{"hits":["a"]}' }],
+    });
+  });
 });
 
 describe("toAnthropicRequest — tools", () => {
