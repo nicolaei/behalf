@@ -114,7 +114,8 @@ describe("toAnthropicRequest", () => {
 
     const request = toAnthropicRequest(profile({ reasoning: "medium" }), messages);
 
-    expect(request.thinking).toEqual({ type: "enabled", budget_tokens: 4096 });
+    expect(request.thinking).toEqual({ type: "adaptive" });
+    expect(request.effort).toBe("medium");
   });
 
   it("carries a thinking block's signature through unmodified", () => {

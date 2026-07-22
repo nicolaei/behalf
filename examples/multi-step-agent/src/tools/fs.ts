@@ -24,10 +24,7 @@ export const writeFile = tool<{ path: string; content: string }, { path: string 
   z.object({ path: z.string(), content: z.string() }),
 );
 
-export const editFile = tool<
-  { path: string; find: string; replace: string },
-  { path: string }
->(
+export const editFile = tool<{ path: string; find: string; replace: string }, { path: string }>(
   "edit_file",
   "Perform one literal find-replace in a file's contents (not a regex).",
   z.object({ path: z.string(), find: z.string(), replace: z.string() }),

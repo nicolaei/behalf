@@ -69,15 +69,16 @@ export function createAnthropicClient(auth: AnthropicAuth): Anthropic {
 }
 
 const DEFAULT_MAX_TOKENS = 8192;
-const DEFAULT_THINKING_BUDGET = 4096;
 
-/** Thinking token budgets by reasoning level — deliberately coarse, not over-engineered. */
-const THINKING_BUDGETS: Record<string, number> = {
-  minimal: 1024,
-  low: 2048,
-  medium: 4096,
-  high: 8192,
-  xhigh: 16384,
+/** `Profile.reasoning` levels mapped to Anthropic's `output_config.effort` — the current
+ * API's own vocabulary for thinking effort. `minimal` has no `effort` equivalent; it maps
+ * to the lowest real level rather than inventing one. Deliberately coarse, not over-engineered. */
+const EFFORT_BY_REASONING: Record<string, Anthropic.OutputConfig["effort"]> = {
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
 };
 
 /** The shape `toAnthropicRequest` hands to `client.messages.create`. */
@@ -85,6 +86,7 @@ export interface AnthropicRequest {
   system: string;
   messages: Anthropic.MessageParam[];
   thinking?: Anthropic.ThinkingConfigParam;
+  effort?: Anthropic.OutputConfig["effort"];
   tools?: Anthropic.Tool[];
 }
 /** OAuth (Claude Pro/Max subscription) tokens are scoped to Claude Code's own tool surface — these are the exact tool names it will accept. @public */
@@ -228,18 +230,21 @@ export function toAnthropicRequest(
     .filter((m): m is Anthropic.MessageParam => m !== undefined);
 
   const reasoning = profile.reasoning;
+  // Anthropic's current API (claude-sonnet-5 and later) rejects the older
+  // `{type:"enabled", budget_tokens}` shape outright (400: "thinking.type.enabled"
+  // is not supported for this model. Use thinking.type.adaptive and
+  // output_config.effort") — adaptive+effort is the one shape that works
+  // across current models.
   const thinking: Anthropic.ThinkingConfigParam | undefined =
-    reasoning && reasoning !== "off"
-      ? {
-          type: "enabled",
-          budget_tokens: THINKING_BUDGETS[reasoning] ?? DEFAULT_THINKING_BUDGET,
-        }
-      : undefined;
+    reasoning && reasoning !== "off" ? { type: "adaptive" } : undefined;
+  const effort: Anthropic.OutputConfig["effort"] | undefined =
+    reasoning && reasoning !== "off" ? (EFFORT_BY_REASONING[reasoning] ?? "medium") : undefined;
 
   return {
     system,
     messages: anthropicMessages,
     ...(thinking ? { thinking } : {}),
+    ...(effort ? { effort } : {}),
     ...(profile.tools.length > 0
       ? { tools: profile.tools.map((t) => toAnthropicToolDef(t, isOAuth)) }
       : {}),
@@ -342,6 +347,7 @@ export function createAnthropicPort(model: Model, client?: Anthropic): ModelPort
         system: request.system,
         messages: request.messages,
         ...(request.thinking ? { thinking: request.thinking } : {}),
+        ...(request.effort ? { output_config: { effort: request.effort } } : {}),
         ...(request.tools ? { tools: request.tools } : {}),
       });
 

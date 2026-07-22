@@ -107,7 +107,13 @@ function StageStrip({ current }: { current: StageName | undefined }) {
   );
 }
 
-function AskCard({ pending, onSubmit }: { pending: PendingAsk; onSubmit: (answer: string) => void }) {
+function AskCard({
+  pending,
+  onSubmit,
+}: {
+  pending: PendingAsk;
+  onSubmit: (answer: string) => void;
+}) {
   const [value, setValue] = useState("");
   return (
     <Box flexDirection="column" borderStyle="round" paddingX={1}>
@@ -142,7 +148,10 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
   const stageByThread = useRef(new Map<ThreadId, StageName>());
   const nextStageIndex = useRef(0);
 
-  useEffect(() => askBridge.subscribe((pending) => setPendingAsk(pending ?? undefined)), [askBridge]);
+  useEffect(
+    () => askBridge.subscribe((pending) => setPendingAsk(pending ?? undefined)),
+    [askBridge],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -166,7 +175,8 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
         if (envelope.form === "delta") {
           const delta = envelope.delta;
           if ("open" in delta) {
-            if (delta.open === "text") setStreaming({ correlationId: delta.correlationId, text: "" });
+            if (delta.open === "text")
+              setStreaming({ correlationId: delta.correlationId, text: "" });
             continue;
           }
           if ("text" in delta) {

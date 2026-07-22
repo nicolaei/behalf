@@ -27,8 +27,7 @@ export const pipeline = defineGraph("multi-step-agent", (flow) => {
   });
   red.then(green, {
     threadAction: "new",
-    prompt: (output) =>
-      userText(`Make this test pass:\n\n${reportOf(output as AgentTurnResult)}`),
+    prompt: (output) => userText(`Make this test pass:\n\n${reportOf(output as AgentTurnResult)}`),
   });
   green.then(refactor, {
     threadAction: "new",
