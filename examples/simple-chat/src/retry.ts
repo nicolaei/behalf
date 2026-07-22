@@ -1,26 +1,18 @@
-// A step's raw thrown error is always classified `retryable: false` by the
-// engine's generic catch (see src/engine/runtime/step-runner.ts `runStep`) —
-// only a `StepError` a step explicitly builds via `context.fail(...)` carries
-// a real `retryable` hint. `chat.ts`'s `modelStep` uses `isRetryableProviderError`
-// below to build that hint from the Anthropic SDK's thrown error.
+// behalf's own createAnthropicPort now classifies a real 429/5xx itself,
+// throwing a RetryableError so runStep's generic catch sees the right
+// `retryable` hint automatically — no per-graph try/catch needed (see
+// isRetryableAnthropicError in behalf's own src/adapters/models/anthropic.ts).
 //
-// Separately, `behalf`'s built-in `defaultErrorHandler` retries with a base
-// delay of 1ms — deliberately tiny so the library's own test suite stays
-// fast, not meant for a real API's rate limits. `rateLimitBackoff` below is a
-// realistic replacement: honors the API's `Retry-After` header when present,
+// `behalf`'s built-in `defaultErrorHandler` retries with a base delay of 1ms
+// — deliberately tiny so the library's own test suite stays fast, not meant
+// for a real API's rate limits. `rateLimitBackoff` below is a realistic
+// replacement: honors the API's `Retry-After` header when present,
 // otherwise backs off in whole seconds, with a real retry cap.
 
 import type { ErrorHandler } from "behalf";
 
 const MAX_ATTEMPTS = 5;
 const BASE_DELAY_MS = 2_000;
-
-/** Anthropic's SDK throws `APIError` with a numeric `status`; 429 (rate limit)
- * and 5xx (transient server errors) are worth retrying, everything else isn't. */
-export function isRetryableProviderError(error: unknown): boolean {
-  const status = (error as { status?: number } | undefined)?.status;
-  return status === 429 || (status !== undefined && status >= 500);
-}
 
 function retryAfterMs(error: unknown): number | undefined {
   const headers = (error as { headers?: unknown } | undefined)?.headers;

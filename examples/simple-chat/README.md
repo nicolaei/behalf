@@ -50,10 +50,10 @@ index.tsx          runtime() setup: model port, filesystem bindings, error
                     handlers, in-memory store. Renders <App> once the runtime
                     resolves.
       ↓
-chat.ts             the graph: modelStep (one model call, classifying thrown
-                    errors into a StepError so real 429/5xx get retried) →
-                    agentTurn (loops the model step while it keeps using
-                    tools) → chat (loops agentTurn, waiting for the next
+chat.ts             the graph: agentLoop (behalf's own reusable graph — run
+                    the model, wait for every tool call it made, fold their
+                    results into one message, loop until a reply uses no
+                    tools) → chat (loops agentLoop, waiting for the next
                     user prompt between turns, same thread throughout).
       ↓
 App.tsx             the UI: folds the store's committed envelopes into a
@@ -65,7 +65,10 @@ App.tsx             the UI: folds the store's committed envelopes into a
 
 - `index.tsx` also supplies `rateLimitBackoff` (`retry.ts`) as the first error
   handler: a realistic `Retry-After`-aware backoff for real provider rate
-  limits, ahead of `behalf`'s own tiny-delay `defaultErrorHandler`.
+  limits, ahead of `behalf`'s own tiny-delay `defaultErrorHandler`. The
+  classification itself ("was this actually a 429/5xx") lives in `behalf`'s
+  own Anthropic adapter (`isRetryableAnthropicError`), which throws a
+  `RetryableError` — `rateLimitBackoff` only decides how long to wait.
 - Tool errors are left to reject naturally; the engine's tool executor turns a
   rejected handler promise into the run's error path — the tools in
   `tools.ts` never hand-roll a synthetic `{ isError }`.
