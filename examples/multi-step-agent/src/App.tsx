@@ -1,14 +1,17 @@
-// UI for the four-stage pipeline: a real full-screen TUI, alternate screen
-// buffer and all. Everything is reactive — there's no Ink <Static> anywhere.
-// That's made safe by windowing: the transcript is flattened into individual
-// terminal lines, and only the tail slice that actually fits the current
-// terminal height is ever rendered, auto-following new content as it arrives.
-// Older history still exists in the `transcript` array, it's just not shown —
-// this trades native terminal scrollback for a bounded, always-safely-
-// redrawable frame (an unbounded reactive Ink tree taller than the terminal
-// can no longer erase-and-redraw itself in place). A specialized `ask` tool
-// card renders an inline TextInput instead of a generic tool card while the
-// ask is pending.
+// UI for the four-stage pipeline: a full-screen TUI, alternate screen buffer
+// and all. No Ink <Static> anywhere — everything is reactive, and the whole
+// app is one Box sized to exactly the terminal's height. The header and
+// stage strip take their natural height; the transcript viewport below them
+// gets `flexGrow` for whatever's left, with `overflow="hidden"` and
+// `justifyContent="flex-end"` so Ink's own layout engine (which knows real
+// wrapped-text heights, not an approximation) clips from the top and always
+// keeps the most recent content visible at the bottom — auto-following as
+// new content arrives. Older history still exists in the `transcript` array,
+// it's just clipped from view — this trades native terminal scrollback for a
+// frame that can never exceed the terminal height by construction, so it
+// never has trouble erasing-and-redrawing itself in place. A specialized
+// `ask` tool card renders an inline TextInput instead of a generic tool card
+// while the ask is pending.
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useStdout } from "ink";
@@ -43,16 +46,13 @@ type TranscriptEntry =
 
 type StreamingReply = { correlationId: string; text: string };
 
-/** One flattened, already-styled terminal row — the unit the viewport windows
- * over. `text` is the plain-text content (no styling), kept alongside the
- * already-styled `node` purely so the viewport can estimate how many
- * physical terminal rows this logical line actually wraps to. */
-type Line = { key: string; text: string; node: React.ReactNode };
+/** One flattened, already-styled terminal row — the unit the viewport clips over. */
+type Line = { key: string; node: React.ReactNode };
 
-/** How many physical terminal rows a line of `text` wraps to at `width` columns. */
-function wrappedLineCount(text: string, width: number): number {
-  return Math.max(1, Math.ceil(text.length / Math.max(1, width)));
-}
+// However long a real session runs, only the last this-many flattened lines
+// are ever kept around — a plain perf/memory guard, unrelated to what's
+// actually visible (Ink's own layout clips that precisely on its own).
+const MAX_KEPT_LINES = 2000;
 
 function textOf(message: Message): string {
   return message.content
@@ -145,23 +145,22 @@ function toolSummary(name: string, input: unknown): string {
 /** Flattens one transcript entry into the individual terminal rows it renders as. */
 function linesForEntry(entry: TranscriptEntry, index: number): Line[] {
   if (entry.kind === "banner") {
-    const text = `── ${entry.stage} ──`;
-    return [{ key: `${index}-banner`, text, node: <Text dimColor>{text}</Text> }];
+    return [{ key: `${index}-banner`, node: <Text dimColor>── {entry.stage} ──</Text> }];
   }
   if (entry.kind === "message") {
     const lines: Line[] = [];
     if (entry.thinkingChars !== undefined) {
-      const text = `💭 (thinking, ${entry.thinkingChars} chars)`;
-      lines.push({ key: `${index}-thinking`, text, node: <Text dimColor>{text}</Text> });
+      lines.push({
+        key: `${index}-thinking`,
+        node: <Text dimColor>💭 (thinking, {entry.thinkingChars} chars)</Text>,
+      });
     }
-    const roleText = entry.role === "user" ? "You:" : "Assistant:";
-    lines.push({ key: `${index}-role`, text: roleText, node: <Text bold>{roleText}</Text> });
     lines.push({
-      key: `${index}-body`,
-      text: ` ${entry.text}`,
-      node: <Text> {entry.text}</Text>,
+      key: `${index}-role`,
+      node: <Text bold>{entry.role === "user" ? "You:" : "Assistant:"}</Text>,
     });
-    lines.push({ key: `${index}-spacer`, text: " ", node: <Text> </Text> });
+    lines.push({ key: `${index}-body`, node: <Text> {entry.text}</Text> });
+    lines.push({ key: `${index}-spacer`, node: <Text> </Text> });
     return lines;
   }
   // entry.kind === "tool" — a single line: bullet, tool label, the one
@@ -170,8 +169,7 @@ function linesForEntry(entry: TranscriptEntry, index: number): Line[] {
   if (!entry.done && entry.name === "ask") {
     // Rendered specially below via pendingAsk/AskCard, not as a plain tool
     // line — this is just a placeholder while it's pending.
-    const text = "? waiting on your answer…";
-    return [{ key: entry.correlationId, text, node: <Text dimColor>{text}</Text> }];
+    return [{ key: entry.correlationId, node: <Text dimColor>? waiting on your answer…</Text> }];
   }
   const elapsed =
     entry.done && entry.elapsedMs !== undefined ? ` (${(entry.elapsedMs / 1000).toFixed(1)}s)` : "";
@@ -179,7 +177,6 @@ function linesForEntry(entry: TranscriptEntry, index: number): Line[] {
   return [
     {
       key: entry.correlationId,
-      text,
       node: <Text color={entry.done && entry.isError ? "red" : undefined}>{text}</Text>,
     },
   ];
@@ -256,7 +253,7 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
     };
   }, [stdout]);
 
-  // Terminal height drives the transcript viewport's size — re-measure on resize.
+  // Terminal height sizes the whole app — re-measure on resize.
   useEffect(() => {
     const onResize = () => setRows(stdout.rows || 24);
     stdout.on("resize", onResize);
@@ -382,10 +379,9 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
   const allLines = useMemo(() => {
     const lines = transcript.flatMap((entry, index) => linesForEntry(entry, index));
     if (streaming) {
-      lines.push({ key: "streaming-role", text: "Assistant:", node: <Text bold>Assistant:</Text> });
+      lines.push({ key: "streaming-role", node: <Text bold>Assistant:</Text> });
       lines.push({
         key: "streaming-body",
-        text: ` ${streaming.text}`,
         node: (
           <Text>
             {" "}
@@ -395,49 +391,11 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
         ),
       });
     }
-    return lines;
+    return lines.length > MAX_KEPT_LINES ? lines.slice(-MAX_KEPT_LINES) : lines;
   }, [transcript, streaming]);
 
-  // Fixed chrome above/below the transcript viewport, in rows — everything
-  // else goes to the viewport, sized to whatever's left of the terminal.
-  // Must be a conservative OVER-estimate, never an under-estimate: if the
-  // real frame ever comes out taller than `rows`, Ink can no longer erase-
-  // and-redraw it in place (there's nowhere further up the alt-screen to
-  // move the cursor to), and the whole frame — header included — stops
-  // staying put. AskCard's question can wrap across multiple terminal
-  // columns depending on its length, so that has to be estimated from the
-  // actual terminal width rather than assumed to always be one line.
-  const columns = stdout.columns || 80;
-  const HEADER_ROWS = 3; // title, model line, blank margin
-  const STAGE_STRIP_ROWS = 3; // marginY top + strip + marginY bottom
-  const SAFETY_MARGIN = 2; // absorbs any remaining estimation slack
-  const bottomRows = pendingAsk
-    ? 2 /* border top+bottom */ +
-      wrappedLineCount(`? ${pendingAsk.question}`, columns - 4) +
-      1 /* input row */ +
-      1 /* marginTop */
-    : 2; /* marginTop + input row */
-  const errorRows = error ? wrappedLineCount(`Error: ${error}`, columns) : 0;
-  const viewportHeight = Math.max(
-    1,
-    rows - HEADER_ROWS - STAGE_STRIP_ROWS - bottomRows - errorRows - SAFETY_MARGIN,
-  );
-  // Slice by cumulative estimated physical rows, not raw line count — a
-  // single logical line (a long message body, a large tool-output blob) can
-  // itself wrap across several terminal rows.
-  const visibleLines: Line[] = [];
-  let usedRows = 0;
-  for (let i = allLines.length - 1; i >= 0; i--) {
-    const line = allLines[i];
-    if (!line) continue;
-    const lineRows = wrappedLineCount(line.text, columns);
-    if (usedRows + lineRows > viewportHeight) break;
-    usedRows += lineRows;
-    visibleLines.unshift(line);
-  }
-
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" height={rows}>
       <Text bold>multi-step-agent</Text>
       <Text dimColor>
         model: {MODEL_ID} · reasoning: {REASONING_LEVEL}
@@ -445,11 +403,9 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
       <Box marginY={1}>
         <StageStrip current={currentStage} />
       </Box>
-      <Box flexDirection="column">
-        {visibleLines.length === 0 && (
-          <Text dimColor>(describe the page you want below to start)</Text>
-        )}
-        {visibleLines.map((line) => (
+      <Box flexDirection="column" flexGrow={1} overflow="hidden" justifyContent="flex-end">
+        {allLines.length === 0 && <Text dimColor>(describe the page you want below to start)</Text>}
+        {allLines.map((line) => (
           <Box key={line.key}>{line.node}</Box>
         ))}
         {error && <Text color="red">Error: {error}</Text>}
