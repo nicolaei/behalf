@@ -19,10 +19,6 @@ export type Traverse =
   | { kind: "loop"; node: NodeId; times?: number; min?: number }
   | { kind: "branch"; node: NodeId };
 
-function notImplemented(name: string): never {
-  throw new Error(`${name}: not implemented`);
-}
-
 function nodeIdOf(ref: NodeRef): NodeId {
   return typeof ref === "string" ? ref : ref.id;
 }
@@ -158,12 +154,78 @@ export function matchesTraversal<World, Output = unknown>(
   }
 }
 
+function findNode(entries: Entry[], from: number, node: NodeId): number {
+  for (let i = from; i < entries.length; i++) {
+    if (entries[i]?.node === node) return i;
+  }
+  return -1;
+}
+
+function matchOneSubseq(entries: Entry[], offset: number, spec: Traverse): number {
+  switch (spec.kind) {
+    case "node":
+    case "branch": {
+      const found = findNode(entries, offset, spec.node);
+      if (found === -1) {
+        throw new Error(
+          `expected ${spec.node} somewhere at or after position ${String(offset)}, not found`,
+        );
+      }
+      return found + 1;
+    }
+    case "sequence": {
+      let pos = offset;
+      for (const item of spec.items) {
+        pos = matchOneSubseq(entries, pos, item);
+      }
+      return pos;
+    }
+    case "loop": {
+      const start = findNode(entries, offset, spec.node);
+      if (start === -1) {
+        throw new Error(
+          `expected loop of ${spec.node} somewhere at or after position ${String(offset)}, not found`,
+        );
+      }
+      let count = 0;
+      while (entries[start + count]?.node === spec.node) count++;
+      if (spec.times !== undefined && count !== spec.times) {
+        throw new Error(
+          `expected loop of ${spec.node} exactly ${String(spec.times)} times, got ${String(count)}`,
+        );
+      }
+      if (spec.min !== undefined && count < spec.min) {
+        throw new Error(
+          `expected loop of ${spec.node} at least ${String(spec.min)} times, got ${String(count)}`,
+        );
+      }
+      return start + count;
+    }
+    case "group": {
+      let lastError: unknown;
+      for (const perm of permutations(spec.branches)) {
+        try {
+          let pos = offset;
+          for (const branchSpec of perm) {
+            pos = matchOneSubseq(entries, pos, branchSpec);
+          }
+          return pos;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+      if (lastError instanceof Error) throw lastError;
+      throw new Error(`group did not match at position ${String(offset)}`);
+    }
+  }
+}
+
 /** `spec` must appear as an order-preserving subsequence somewhere in the run. @public */
 export function containsTraversal<World, Output = unknown>(
   run: Run<World, Output>,
   spec: Traverse | NodeRef,
 ): void {
-  void run;
-  void spec;
-  notImplemented("containsTraversal");
+  const entries = run.traversal as Entry[];
+  const normalized = normalizeSpec(spec);
+  matchOneSubseq(entries, 0, normalized);
 }
