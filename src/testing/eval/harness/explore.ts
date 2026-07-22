@@ -2,18 +2,15 @@
 // never gates CI.
 
 import { describe, it } from "vitest";
-import { runtime, runFlow, adapters } from "../../../index.js";
 import type { Profile } from "../../../index.js";
 import type { Agent } from "../subject.js";
-import type { Example, Fixtures } from "../fixtures.js";
+import type { Example } from "../fixtures.js";
 import type { Scorer } from "../scorers.js";
 import type { Distribution } from "../regression.js";
 import { aggregate } from "./aggregate.js";
 import type { Metrics, Rank } from "./rank.js";
 import { byScore } from "./rank.js";
-import { agentGraph } from "./agent-graph.js";
-import { foldRun } from "../../graph/run.js";
-import type { Run } from "../../graph/run.js";
+import { runRow } from "./run-row.js";
 
 /** Spec shared by `runExplore` and `explore`. @public */
 export interface ExploreSpec<World, Output = unknown> {
@@ -52,7 +49,9 @@ export async function runExplore<World, Output = unknown>(
       const runs = (
         await Promise.all(
           spec.given.flatMap((row) =>
-            Array.from({ length: count }, () => runOneRow<World, Output>(subject.profile, row)),
+            Array.from({ length: count }, () =>
+              runRow<World, Output>(subject.profile, row, "explore"),
+            ),
           ),
         )
       ).flat();
@@ -85,29 +84,6 @@ export async function runExplore<World, Output = unknown>(
 
 function mean(values: number[]): number {
   return values.length === 0 ? 0 : values.reduce((sum, v) => sum + v, 0) / values.length;
-}
-
-async function runOneRow<World, Output>(
-  profile: Profile,
-  row: Example<World>,
-): Promise<Run<World, Output>> {
-  const started = Date.now();
-  const world = row.world();
-  const fixtures: Fixtures = row.fixtures(world, profile);
-  const ready = await runtime({
-    models: () => fixtures.models ?? throwNoModelConfigured(),
-    bindings: fixtures.bindings,
-    store: adapters.stores.memoryStore(),
-  });
-  await runFlow(agentGraph(profile), row.input, ready);
-  const latency = Date.now() - started;
-  return foldRun<World, Output>(ready.store.events(), world, latency);
-}
-
-function throwNoModelConfigured(): never {
-  throw new Error(
-    "explore: no model fixture configured — fixtures(world, profile) must return a `models` port for a graph test",
-  );
 }
 
 /** Registers a ranking eval across variants — never fails CI. @public */

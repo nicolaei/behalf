@@ -2,8 +2,8 @@
 // containsTraversal (subsequence), built from a small tree DSL: sequence,
 // group, loop, branch. Pure — reads Run.traversal, no engine.
 //
-// containsTraversal is a stub — see the epic's Story 5 architecture note for
-// the concrete behaviour it earns.
+// Both matchers share one tree-walk (matchTree) and differ only in how a bare
+// node is located (locateExact vs locateSubseq).
 
 import type { Handle, NodeId } from "../../index.js";
 import type { Run } from "./run.js";
@@ -77,33 +77,53 @@ function describeGot(entries: Entry[], offset: number): string {
   return entries[offset] ? String(entries[offset].node) : "end of traversal";
 }
 
-function matchOne(entries: Entry[], offset: number, spec: Traverse): number {
+/** Where a `node`/`branch`/`loop` spec's node is found from `offset` — the one thing exact vs subsequence matching disagree on. Throws with a message naming the expected node on failure. */
+type Locate = (entries: Entry[], offset: number, node: NodeId) => number;
+
+/** Exact matching: the node must sit right at `offset` — no gaps allowed. */
+function locateExact(entries: Entry[], offset: number, node: NodeId): number {
+  const got = entries[offset];
+  if (!got?.node || got.node !== node) {
+    throw new Error(
+      `expected ${node} at position ${String(offset)}, got ${describeGot(entries, offset)}`,
+    );
+  }
+  return offset;
+}
+
+/** Subsequence matching: the node may appear anywhere at or after `offset` — gaps allowed. */
+function locateSubseq(entries: Entry[], offset: number, node: NodeId): number {
+  const found = findNode(entries, offset, node);
+  if (found === -1) {
+    throw new Error(`expected ${node} somewhere at or after position ${String(offset)}, not found`);
+  }
+  return found;
+}
+
+function findNode(entries: Entry[], from: number, node: NodeId): number {
+  for (let i = from; i < entries.length; i++) {
+    if (entries[i]?.node === node) return i;
+  }
+  return -1;
+}
+
+/** Walks `spec` against `entries` from `offset`, using `locate` to decide where a bare node/loop-start may sit — adjacency-only for exact matching, anywhere-onward for subsequence matching. Returns the position just past the match. Shared by matchesTraversal and containsTraversal; only `locate` differs between them. */
+function matchTree(entries: Entry[], offset: number, spec: Traverse, locate: Locate): number {
   switch (spec.kind) {
     case "node":
-    case "branch": {
-      const got = entries[offset];
-      if (!got?.node || got.node !== spec.node) {
-        throw new Error(
-          `expected ${spec.node} at position ${String(offset)}, got ${describeGot(entries, offset)}`,
-        );
-      }
-      return offset + 1;
-    }
+    case "branch":
+      return locate(entries, offset, spec.node) + 1;
     case "sequence": {
       let pos = offset;
       for (const item of spec.items) {
-        pos = matchOne(entries, pos, item);
+        pos = matchTree(entries, pos, item, locate);
       }
       return pos;
     }
     case "loop": {
+      const start = locate(entries, offset, spec.node);
       let count = 0;
-      while (entries[offset + count]?.node === spec.node) count++;
-      if (count === 0) {
-        throw new Error(
-          `expected loop of ${spec.node} at position ${String(offset)}, got ${describeGot(entries, offset)}`,
-        );
-      }
+      while (entries[start + count]?.node === spec.node) count++;
       if (spec.times !== undefined && count !== spec.times) {
         throw new Error(
           `expected loop of ${spec.node} exactly ${String(spec.times)} times, got ${String(count)}`,
@@ -114,7 +134,7 @@ function matchOne(entries: Entry[], offset: number, spec: Traverse): number {
           `expected loop of ${spec.node} at least ${String(spec.min)} times, got ${String(count)}`,
         );
       }
-      return offset + count;
+      return start + count;
     }
     case "group": {
       let lastError: unknown;
@@ -122,7 +142,7 @@ function matchOne(entries: Entry[], offset: number, spec: Traverse): number {
         try {
           let pos = offset;
           for (const branchSpec of perm) {
-            pos = matchOne(entries, pos, branchSpec);
+            pos = matchTree(entries, pos, branchSpec, locate);
           }
           return pos;
         } catch (err) {
@@ -145,78 +165,11 @@ export function matchesTraversal<World, Output = unknown>(
   spec: Traverse | NodeRef,
 ): void {
   const entries = run.traversal as Entry[];
-  const normalized = normalizeSpec(spec);
-  const end = matchOne(entries, 0, normalized);
+  const end = matchTree(entries, 0, normalizeSpec(spec), locateExact);
   if (end !== entries.length) {
     throw new Error(
       `expected traversal to end at position ${String(end)}, but ${String(entries.length - end)} more entries followed (next: ${describeGot(entries, end)})`,
     );
-  }
-}
-
-function findNode(entries: Entry[], from: number, node: NodeId): number {
-  for (let i = from; i < entries.length; i++) {
-    if (entries[i]?.node === node) return i;
-  }
-  return -1;
-}
-
-function matchOneSubseq(entries: Entry[], offset: number, spec: Traverse): number {
-  switch (spec.kind) {
-    case "node":
-    case "branch": {
-      const found = findNode(entries, offset, spec.node);
-      if (found === -1) {
-        throw new Error(
-          `expected ${spec.node} somewhere at or after position ${String(offset)}, not found`,
-        );
-      }
-      return found + 1;
-    }
-    case "sequence": {
-      let pos = offset;
-      for (const item of spec.items) {
-        pos = matchOneSubseq(entries, pos, item);
-      }
-      return pos;
-    }
-    case "loop": {
-      const start = findNode(entries, offset, spec.node);
-      if (start === -1) {
-        throw new Error(
-          `expected loop of ${spec.node} somewhere at or after position ${String(offset)}, not found`,
-        );
-      }
-      let count = 0;
-      while (entries[start + count]?.node === spec.node) count++;
-      if (spec.times !== undefined && count !== spec.times) {
-        throw new Error(
-          `expected loop of ${spec.node} exactly ${String(spec.times)} times, got ${String(count)}`,
-        );
-      }
-      if (spec.min !== undefined && count < spec.min) {
-        throw new Error(
-          `expected loop of ${spec.node} at least ${String(spec.min)} times, got ${String(count)}`,
-        );
-      }
-      return start + count;
-    }
-    case "group": {
-      let lastError: unknown;
-      for (const perm of permutations(spec.branches)) {
-        try {
-          let pos = offset;
-          for (const branchSpec of perm) {
-            pos = matchOneSubseq(entries, pos, branchSpec);
-          }
-          return pos;
-        } catch (err) {
-          lastError = err;
-        }
-      }
-      if (lastError instanceof Error) throw lastError;
-      throw new Error(`group did not match at position ${String(offset)}`);
-    }
   }
 }
 
@@ -226,6 +179,5 @@ export function containsTraversal<World, Output = unknown>(
   spec: Traverse | NodeRef,
 ): void {
   const entries = run.traversal as Entry[];
-  const normalized = normalizeSpec(spec);
-  matchOneSubseq(entries, 0, normalized);
+  matchTree(entries, 0, normalizeSpec(spec), locateSubseq);
 }

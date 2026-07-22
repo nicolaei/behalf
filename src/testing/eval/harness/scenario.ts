@@ -3,7 +3,6 @@
 // mid-flow), N times per row, folds each into a Run, scores, gates.
 
 import { describe, it, expect } from "vitest";
-import { runtime, runFlow, adapters } from "../../../index.js";
 import type { Message } from "../../../index.js";
 import type { Subject } from "../subject.js";
 import type { Example, Fixtures } from "../fixtures.js";
@@ -11,9 +10,7 @@ import type { Scorer } from "../scorers.js";
 import type { Distribution, RegressionPolicy } from "../regression.js";
 import { aggregate } from "./aggregate.js";
 import { gate } from "./gate.js";
-import { agentGraph } from "./agent-graph.js";
-import { foldRun } from "../../graph/run.js";
-import type { Run } from "../../graph/run.js";
+import { runRow } from "./run-row.js";
 
 /** One scorer's outcome from a scenario run. @public */
 export interface ScenarioScorerResult {
@@ -58,7 +55,9 @@ export async function runScenario<World, Output = unknown>(
     typeof spec.runs === "object" ? spec.runs.minimumPassRate : undefined;
 
   const runs = await Promise.all(
-    rows.flatMap((row) => Array.from({ length: count }, () => runOneRow(spec, row))),
+    rows.flatMap((row) =>
+      Array.from({ length: count }, () => runRow<World, Output>(spec.of.profile, row, "scenario")),
+    ),
   );
 
   const scorers: ScenarioScorerResult[] = await Promise.all(
@@ -89,29 +88,6 @@ function requireField<T>(value: T | undefined, name: string): T {
     );
   }
   return value;
-}
-
-async function runOneRow<World, Output>(
-  spec: ScenarioSpec<World, Output>,
-  row: Example<World>,
-): Promise<Run<World, Output>> {
-  const started = Date.now();
-  const world = row.world();
-  const fixtures = row.fixtures(world, spec.of.profile);
-  const ready = await runtime({
-    models: () => fixtures.models ?? throwNoModelConfigured(),
-    bindings: fixtures.bindings,
-    store: adapters.stores.memoryStore(),
-  });
-  await runFlow(agentGraph(spec.of.profile), row.input, ready);
-  const latency = Date.now() - started;
-  return foldRun<World, Output>(ready.store.events(), world, latency);
-}
-
-function throwNoModelConfigured(): never {
-  throw new Error(
-    "scenario: no model fixture configured — fixtures(world) must return a `models` port for a graph test",
-  );
 }
 
 /** Registers a gating eval: passes when every scorer clears its bar on enough runs of every row. @public */

@@ -5,8 +5,6 @@
 // parameter anywhere here: fake models/tools never read message content, so
 // the empty thread `tick` already starts with is correct as-is.
 //
-// Stub only — see the epic's Story 1/2/3/6 architecture notes for the
-// concrete behaviour each earns.
 
 import type {
   Graph,
@@ -58,10 +56,6 @@ export interface Run<World = unknown, Output = unknown> {
   readonly threads: { id: ThreadId; label?: string }[];
   lastReply(thread?: ThreadId | string): AssistantMessage | undefined;
   messages(thread?: ThreadId | string): Message[];
-}
-
-function notImplemented(name: string): never {
-  throw new Error(`${name}: not implemented`);
 }
 
 /** Folds a runtime's committed log + the fixture's world into a Run. @public */
@@ -147,36 +141,31 @@ export function foldRun<World, Output = unknown>(
   if (hasCacheRead) usage.cacheRead = cacheRead;
   if (hasCacheWrite) usage.cacheWrite = cacheWrite;
 
+  const stepEntries = outputEvents.filter(
+    (envelope): envelope is typeof envelope & { stepId: string; threadId: ThreadId } =>
+      envelope.stepId !== undefined && envelope.threadId !== undefined,
+  );
+
   return {
     output,
     world,
     tools,
-    traversal: outputEvents
-      .filter(
-        (envelope): envelope is typeof envelope & { stepId: string; threadId: ThreadId } =>
-          envelope.stepId !== undefined && envelope.threadId !== undefined,
-      )
-      .map((envelope) => ({
+    traversal: stepEntries.map((envelope) => ({
+      node: envelope.stepId as NodeId,
+      thread: envelope.threadId,
+      ...(envelope.stepName ? { name: envelope.stepName } : {}),
+    })),
+    visits: stepEntries.map((envelope) => {
+      const prev = lastOutputByThread.get(envelope.threadId);
+      const input = prev !== undefined ? [prev] : [];
+      lastOutputByThread.set(envelope.threadId, envelope.event.value);
+      return {
         node: envelope.stepId as NodeId,
+        input,
+        output: envelope.event.value,
         thread: envelope.threadId,
-        ...(envelope.stepName ? { name: envelope.stepName } : {}),
-      })),
-    visits: outputEvents
-      .filter(
-        (envelope): envelope is typeof envelope & { stepId: string; threadId: ThreadId } =>
-          envelope.stepId !== undefined && envelope.threadId !== undefined,
-      )
-      .map((envelope) => {
-        const prev = lastOutputByThread.get(envelope.threadId);
-        const input = prev !== undefined ? [prev] : [];
-        lastOutputByThread.set(envelope.threadId, envelope.event.value);
-        return {
-          node: envelope.stepId as NodeId,
-          input,
-          output: envelope.event.value,
-          thread: envelope.threadId,
-        };
-      }),
+      };
+    }),
     usage,
     latency,
     threads,
@@ -191,11 +180,10 @@ export async function stepOnce<World, Output = unknown>(
   runtime: Runtime,
   world?: World,
 ): Promise<Run<World, Output>> {
-  void flow;
-  void runtime;
-  void world;
-  await Promise.resolve();
-  return notImplemented("stepOnce");
+  const started = Date.now();
+  await lowLevelStepOnce(flow, runtime);
+  const latency = Date.now() - started;
+  return foldRun<World, Output>(runtime.store.events(), world as World, latency);
 }
 
 /** Drives `flow` until every lane is parked or done, folding the result into a Run. `world` (if given) travels onto Run.world unchanged. @public */
