@@ -13,6 +13,7 @@ import type { Profile } from "../../flow/profile.js";
 import type { Tool, Toolset } from "../../flow/tool.js";
 import type { ContentBlock, Message, AssistantMessage, Usage } from "../../flow/message.js";
 import type { DeltaSink } from "../../session/envelope.js";
+import { RetryableError } from "../../engine/errors.js";
 
 /** One round-trip token round trip: a resolved credential mode for the Anthropic API. @public */
 export type AnthropicAuth = { mode: "oauth"; token: string } | { mode: "apiKey"; key: string };
@@ -306,6 +307,12 @@ function usageFromMessageDelta(usage: Partial<Anthropic.MessageDeltaUsage> | und
   };
 }
 
+/** Anthropic's SDK throws with a numeric `status`; 429 (rate limit) and 5xx (transient server errors) are worth retrying, everything else isn't. @public */
+export function isRetryableAnthropicError(cause: unknown): boolean {
+  const status = (cause as { status?: number } | undefined)?.status;
+  return status === 429 || (status !== undefined && status >= 500);
+}
+
 /**
  * One port per Anthropic model. `respond` streams the model's response via
  * `client.messages.stream`, pushing token-level deltas to `stream: DeltaSink`
@@ -347,100 +354,110 @@ export function createAnthropicPort(model: Model, client?: Anthropic): ModelPort
       const content: ContentBlock[] = [];
       let usage: Usage = { input: 0, output: 0 };
 
-      for await (const event of rawStream) {
-        switch (event.type) {
-          case "content_block_start": {
-            const block = event.content_block;
-            if (block.type === "tool_use") {
-              const correlationId = block.id;
-              const name = isOAuth ? fromClaudeCodeName(block.name, toolNames) : block.name;
-              correlationIds.set(event.index, correlationId);
-              blockKinds.set(event.index, "toolCall");
-              toolNamesByIndex.set(event.index, name);
-              stream.delta({ correlationId, open: "toolCall", name });
-            } else if (block.type === "text") {
-              const correlationId = String(event.index);
-              correlationIds.set(event.index, correlationId);
-              blockKinds.set(event.index, "text");
-              stream.delta({ correlationId, open: "text" });
-            } else if (block.type === "thinking") {
-              const correlationId = String(event.index);
-              correlationIds.set(event.index, correlationId);
-              blockKinds.set(event.index, "thinking");
-              stream.delta({ correlationId, open: "thinking" });
+      try {
+        for await (const event of rawStream) {
+          switch (event.type) {
+            case "content_block_start": {
+              const block = event.content_block;
+              if (block.type === "tool_use") {
+                const correlationId = block.id;
+                const name = isOAuth ? fromClaudeCodeName(block.name, toolNames) : block.name;
+                correlationIds.set(event.index, correlationId);
+                blockKinds.set(event.index, "toolCall");
+                toolNamesByIndex.set(event.index, name);
+                stream.delta({ correlationId, open: "toolCall", name });
+              } else if (block.type === "text") {
+                const correlationId = String(event.index);
+                correlationIds.set(event.index, correlationId);
+                blockKinds.set(event.index, "text");
+                stream.delta({ correlationId, open: "text" });
+              } else if (block.type === "thinking") {
+                const correlationId = String(event.index);
+                correlationIds.set(event.index, correlationId);
+                blockKinds.set(event.index, "thinking");
+                stream.delta({ correlationId, open: "thinking" });
+              }
+              // Server-tool blocks (web_search, code_execution, …) have no ContentBlock
+              // analogue yet — silently skip streaming them, matching fromAnthropicBlock's
+              // fallback for the non-streaming path.
+              break;
             }
-            // Server-tool blocks (web_search, code_execution, …) have no ContentBlock
-            // analogue yet — silently skip streaming them, matching fromAnthropicBlock's
-            // fallback for the non-streaming path.
-            break;
-          }
-          case "content_block_delta": {
-            const correlationId = correlationIds.get(event.index);
-            if (correlationId === undefined) break;
-            if (event.delta.type === "text_delta") {
-              textByIndex.set(event.index, (textByIndex.get(event.index) ?? "") + event.delta.text);
-              stream.delta({ correlationId, text: event.delta.text });
-            } else if (event.delta.type === "thinking_delta") {
-              textByIndex.set(
-                event.index,
-                (textByIndex.get(event.index) ?? "") + event.delta.thinking,
-              );
-              stream.delta({ correlationId, text: event.delta.thinking });
-            } else if (event.delta.type === "input_json_delta") {
-              partialInputByIndex.set(
-                event.index,
-                (partialInputByIndex.get(event.index) ?? "") + event.delta.partial_json,
-              );
-              stream.delta({ correlationId, partialInput: event.delta.partial_json });
-            } else if (event.delta.type === "signature_delta") {
-              signatureByIndex.set(event.index, event.delta.signature);
+            case "content_block_delta": {
+              const correlationId = correlationIds.get(event.index);
+              if (correlationId === undefined) break;
+              if (event.delta.type === "text_delta") {
+                textByIndex.set(
+                  event.index,
+                  (textByIndex.get(event.index) ?? "") + event.delta.text,
+                );
+                stream.delta({ correlationId, text: event.delta.text });
+              } else if (event.delta.type === "thinking_delta") {
+                textByIndex.set(
+                  event.index,
+                  (textByIndex.get(event.index) ?? "") + event.delta.thinking,
+                );
+                stream.delta({ correlationId, text: event.delta.thinking });
+              } else if (event.delta.type === "input_json_delta") {
+                partialInputByIndex.set(
+                  event.index,
+                  (partialInputByIndex.get(event.index) ?? "") + event.delta.partial_json,
+                );
+                stream.delta({ correlationId, partialInput: event.delta.partial_json });
+              } else if (event.delta.type === "signature_delta") {
+                signatureByIndex.set(event.index, event.delta.signature);
+              }
+              break;
             }
-            break;
-          }
-          case "content_block_stop": {
-            const correlationId = correlationIds.get(event.index);
-            if (correlationId === undefined) break;
-            stream.delta({ correlationId, close: true });
-            const kind = blockKinds.get(event.index);
-            if (kind === "toolCall") {
-              const name = toolNamesByIndex.get(event.index) ?? "";
-              const rawInput = partialInputByIndex.get(event.index) ?? "";
-              content.push({
-                type: "toolCall",
-                correlationId,
-                name,
-                input: JSON.parse(rawInput || "{}"),
-              });
-            } else if (kind === "text") {
-              content.push({ type: "text", text: textByIndex.get(event.index) ?? "" });
-            } else if (kind === "thinking") {
-              const signature = signatureByIndex.get(event.index);
-              content.push({
-                type: "thinking",
-                text: textByIndex.get(event.index) ?? "",
-                ...(signature !== undefined ? { signature } : {}),
-              });
+            case "content_block_stop": {
+              const correlationId = correlationIds.get(event.index);
+              if (correlationId === undefined) break;
+              stream.delta({ correlationId, close: true });
+              const kind = blockKinds.get(event.index);
+              if (kind === "toolCall") {
+                const name = toolNamesByIndex.get(event.index) ?? "";
+                const rawInput = partialInputByIndex.get(event.index) ?? "";
+                content.push({
+                  type: "toolCall",
+                  correlationId,
+                  name,
+                  input: JSON.parse(rawInput || "{}"),
+                });
+              } else if (kind === "text") {
+                content.push({ type: "text", text: textByIndex.get(event.index) ?? "" });
+              } else if (kind === "thinking") {
+                const signature = signatureByIndex.get(event.index);
+                content.push({
+                  type: "thinking",
+                  text: textByIndex.get(event.index) ?? "",
+                  ...(signature !== undefined ? { signature } : {}),
+                });
+              }
+              break;
             }
-            break;
+            case "message_delta": {
+              usage = usageFromMessageDelta(event.usage);
+              break;
+            }
+            default:
+              // message_start/message_stop carry nothing this port needs.
+              break;
           }
-          case "message_delta": {
-            usage = usageFromMessageDelta(event.usage);
-            break;
-          }
-          default:
-            // message_start/message_stop carry nothing this port needs.
-            break;
         }
-      }
 
-      const assistantMessage: AssistantMessage = {
-        role: "assistant",
-        provider: model.provider,
-        model: model.identifier,
-        content,
-        usage,
-      };
-      return assistantMessage;
+        const assistantMessage: AssistantMessage = {
+          role: "assistant",
+          provider: model.provider,
+          model: model.identifier,
+          content,
+          usage,
+        };
+        return assistantMessage;
+      } catch (cause) {
+        throw new RetryableError(cause instanceof Error ? cause.message : String(cause), {
+          retryable: isRetryableAnthropicError(cause),
+          cause,
+        });
+      }
     },
   };
 }

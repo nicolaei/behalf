@@ -12,6 +12,7 @@ import type { Stream } from "../../session/envelope.js";
 import type { Event, EventType } from "../../session/event.js";
 import type { Runtime } from "../runtime.js";
 import { type ErrorContext, type ErrorDecision, unreachable } from "../errors.js";
+import { RetryableError } from "../errors.js";
 import type { Thread } from "./routing.js";
 
 /** Everything a step or branch needs to run against: the runtime it calls into, the graph it's routing through, the thread it's advancing, and the shared per-node attempt counter that survives retries. The one bundle every drive-loop and fan-out-branch function threads through instead of separate positional parameters. */
@@ -34,7 +35,7 @@ export async function runStep(run: Step, context: StepContext): Promise<Emit> {
       error: {
         type: "unexpected",
         message: cause instanceof Error ? cause.message : String(cause),
-        retryable: false,
+        retryable: cause instanceof RetryableError ? cause.retryable : false,
         cause,
       },
     };
