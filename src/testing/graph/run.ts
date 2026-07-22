@@ -19,8 +19,12 @@ import type {
 } from "../../index.js";
 import type { Envelope, CommittedEnvelope } from "../../session/envelope.js";
 import type { Event } from "../../session/event.js";
-import { stepUntilBlocked as lowLevelStepUntilBlocked } from "../index.js";
+import {
+  stepUntilBlocked as lowLevelStepUntilBlocked,
+  stepOnce as lowLevelStepOnce,
+} from "../index.js";
 import type { StepResult } from "../index.js";
+import { StepUntilError } from "../errors.js";
 
 /** One tool call folded from a run's log — call, result, and where it happened. `node` is omitted: a tool call's toolCall/toolResult envelopes are thread-scoped only (via appendEvent), never tagged with the requesting step's id. @public */
 export interface ToolTrace {
@@ -146,7 +150,16 @@ export function foldRun<World, Output = unknown>(
     output,
     world,
     tools,
-    traversal: [],
+    traversal: outputEvents
+      .filter(
+        (envelope): envelope is typeof envelope & { stepId: string; threadId: ThreadId } =>
+          envelope.stepId !== undefined && envelope.threadId !== undefined,
+      )
+      .map((envelope) => ({
+        node: envelope.stepId as NodeId,
+        thread: envelope.threadId,
+        ...(envelope.stepName ? { name: envelope.stepName } : {}),
+      })),
     visits: [],
     usage,
     latency,
@@ -181,17 +194,70 @@ export async function stepUntilBlocked<World, Output = unknown>(
   return foldRun<World, Output>(runtime.store.events(), world as World, latency);
 }
 
-/** Drives `flow` until `condition` holds, folding the result into a Run. `world` (if given) travels onto Run.world unchanged. @public */
+/**
+ * Drives `flow` until `condition` holds, folding the result into a Run.
+ * `world` (if given) travels onto Run.world unchanged.
+ *
+ * Steps one node at a time (via the low-level `stepOnce`, mirroring how the
+ * low-level `stepUntil` is itself built) rather than delegating straight to
+ * the low-level `stepUntil`. The low-level driving loop only ever checks
+ * `condition` against a *look-ahead* cursor — the position the next call
+ * would run, not the node that just committed — so `atNode(step)` can never
+ * be satisfied by a node that leads straight into another real step (its own
+ * entry, in particular: entering it always executes it in the same tick()
+ * call that reports the *following* node as "active"). This wrapper instead
+ * checks `condition` against a synthesized state for the node(s) that just
+ * committed this step, alongside the low-level look-ahead state (kept as a
+ * fallback so ordinary mid-chain targeting still works) — same maxSteps
+ * budget and stall/exhaustion errors as the low-level `stepUntil`, since nothing
+ * about that contract changes, only which snapshot `condition` sees. Position
+ * lives in `runtime.store`, so calling this again with a later condition
+ * continues from where the previous call left off, same contract as `tick()`.
+ * @public
+ */
 export async function stepUntil<World, Output = unknown>(
   flow: Graph,
   runtime: Runtime,
   condition: (state: StepResult) => boolean,
   world?: World,
 ): Promise<Run<World, Output>> {
-  void flow;
-  void runtime;
-  void condition;
-  void world;
-  await Promise.resolve();
-  return notImplemented("stepUntil");
+  const started = Date.now();
+  const maxSteps = 1000;
+
+  for (let step = 0; step < maxSteps; step += 1) {
+    const before = runtime.store.events().length;
+    const state = await lowLevelStepOnce(flow, runtime);
+    const justRan: StepResult = runtime.store
+      .events()
+      .slice(before)
+      .filter(
+        (envelope): envelope is CommittedEnvelope & { type: "output" } =>
+          envelope.form === "committed" && envelope.type === "output",
+      )
+      .map((envelope) => ({
+        laneId: `just-ran#${String(step)}`,
+        node: envelope.stepId as NodeId,
+        status: "active",
+      }));
+
+    if (condition(justRan) || condition(state)) break;
+
+    if (state.every((lane) => lane.status !== "active")) {
+      throw new StepUntilError(
+        "stalled",
+        `stepUntil: every lane is parked or done after ${String(step + 1)} step(s) ` +
+          "without satisfying the condition",
+      );
+    }
+
+    if (step === maxSteps - 1) {
+      throw new StepUntilError(
+        "budget-exceeded",
+        `stepUntil: exceeded maxSteps (${String(maxSteps)}) without satisfying the condition`,
+      );
+    }
+  }
+
+  const latency = Date.now() - started;
+  return foldRun<World, Output>(runtime.store.events(), world as World, latency);
 }
