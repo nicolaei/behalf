@@ -1,32 +1,123 @@
 // Harness — explore(). A scenario with many variants instead of one — ranks,
 // never gates CI.
-//
-// Stub only — see the epic's Story 15 architecture note for the concrete
-// behaviour this earns.
 
+import { describe, it } from "vitest";
+import { runtime, runFlow, adapters } from "../../../index.js";
 import type { Profile } from "../../../index.js";
 import type { Agent } from "../subject.js";
-import type { Example } from "../fixtures.js";
+import type { Example, Fixtures } from "../fixtures.js";
 import type { Scorer } from "../scorers.js";
-import type { Rank } from "./rank.js";
+import type { Distribution } from "../regression.js";
+import { aggregate } from "./aggregate.js";
+import type { Metrics, Rank } from "./rank.js";
+import { byScore } from "./rank.js";
+import { agentGraph } from "./agent-graph.js";
+import { foldRun } from "../../graph/run.js";
+import type { Run } from "../../graph/run.js";
 
-function notImplemented(name: string): never {
-  throw new Error(`${name}: not implemented`);
+/** Spec shared by `runExplore` and `explore`. @public */
+export interface ExploreSpec<World, Output = unknown> {
+  of: Agent<World, Output>;
+  variants: Partial<Profile>[];
+  scorers: Scorer<World, Output>[];
+  given: Example<World>[];
+  runs?: number | { count: number; minimumPassRate: number };
+  rankBy?: Rank;
+}
+
+/** One variant's ranked outcome. @public */
+export interface ExploreVariantResult {
+  profile: Partial<Profile>;
+  metrics: Metrics;
+  scorers: { name: string; distribution: Distribution }[];
+}
+
+/** The result of exploring every variant — sorted by `rankBy`, highest rank first. @public */
+export interface ExploreResult {
+  variants: ExploreVariantResult[];
+}
+
+/** Runs every variant's rows x runs and returns them ranked — the directly-testable core, no test-runner registration. @public */
+export async function runExplore<World, Output = unknown>(
+  spec: ExploreSpec<World, Output>,
+): Promise<ExploreResult> {
+  const count = typeof spec.runs === "number" ? spec.runs : (spec.runs?.count ?? 1);
+  const rankBy = spec.rankBy ?? byScore;
+  // spec.runs.minimumPassRate (if given) is accepted for parity with scenario's spec
+  // shape but has no effect here — explore never gates, it only ranks.
+
+  const variants = await Promise.all(
+    spec.variants.map(async (variant) => {
+      const subject = spec.of.with(variant);
+      const runs = (
+        await Promise.all(
+          spec.given.flatMap((row) =>
+            Array.from({ length: count }, () => runOneRow<World, Output>(subject.profile, row)),
+          ),
+        )
+      ).flat();
+
+      const scorers = await Promise.all(
+        spec.scorers.map(async (scorer) => {
+          const scores = await Promise.all(runs.map((run) => Promise.resolve(scorer.score(run))));
+          const distribution = aggregate(scores, scorer.minimumScore);
+          return { name: scorer.name, distribution };
+        }),
+      );
+
+      const metrics: Metrics = {
+        score: mean(scorers.map((s) => s.distribution.mean)),
+        usage: {
+          input: mean(runs.map((r) => r.usage.input)),
+          output: mean(runs.map((r) => r.usage.output)),
+        },
+        latency: mean(runs.map((r) => r.latency)),
+      };
+
+      return { profile: variant, metrics, scorers };
+    }),
+  );
+
+  variants.sort((a, b) => rankBy(b.metrics) - rankBy(a.metrics));
+
+  return { variants };
+}
+
+function mean(values: number[]): number {
+  return values.length === 0 ? 0 : values.reduce((sum, v) => sum + v, 0) / values.length;
+}
+
+async function runOneRow<World, Output>(
+  profile: Profile,
+  row: Example<World>,
+): Promise<Run<World, Output>> {
+  const started = Date.now();
+  const world = row.world();
+  const fixtures: Fixtures = row.fixtures(world, profile);
+  const ready = await runtime({
+    models: () => fixtures.models ?? throwNoModelConfigured(),
+    bindings: fixtures.bindings,
+    store: adapters.stores.memoryStore(),
+  });
+  await runFlow(agentGraph(profile), row.input, ready);
+  const latency = Date.now() - started;
+  return foldRun<World, Output>(ready.store.events(), world, latency);
+}
+
+function throwNoModelConfigured(): never {
+  throw new Error(
+    "explore: no model fixture configured — fixtures(world, profile) must return a `models` port for a graph test",
+  );
 }
 
 /** Registers a ranking eval across variants — never fails CI. @public */
 export function explore<World, Output = unknown>(
   name: string,
-  spec: {
-    of: Agent<World, Output>;
-    variants: Partial<Profile>[];
-    scorers: Scorer<World, Output>[];
-    given: Example<World>[];
-    runs?: number | { count: number; minimumPassRate: number };
-    rankBy?: Rank;
-  },
+  spec: ExploreSpec<World, Output>,
 ): void {
-  void name;
-  void spec;
-  notImplemented("explore");
+  describe(name, () => {
+    it("ranks", async () => {
+      await runExplore(spec);
+    });
+  });
 }
