@@ -103,6 +103,45 @@ function formatValue(value: unknown): string {
   }
 }
 
+/** Human-readable label for a tool call — matches how a CLI agent's own tool
+ * calls are usually shown, e.g. `● Bash <command>`, not the raw tool name. */
+function toolLabel(name: string): string {
+  switch (name) {
+    case "run_bash":
+      return "Bash";
+    case "write_file":
+      return "Write";
+    case "edit_file":
+      return "Edit";
+    case "ask":
+      return "Ask";
+    case "submit_spec":
+      return "Submit spec";
+    default:
+      return name;
+  }
+}
+
+/** The one piece of a tool call's input worth showing inline — the command
+ * that ran, the path touched, the question asked — never the full input
+ * object, and never its output/result. */
+function toolSummary(name: string, input: unknown): string {
+  const record = input && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  switch (name) {
+    case "run_bash":
+      return String(record.command ?? "");
+    case "write_file":
+    case "edit_file":
+      return String(record.path ?? "");
+    case "ask":
+      return String(record.question ?? "");
+    case "submit_spec":
+      return String(record.page ?? "");
+    default:
+      return formatValue(input);
+  }
+}
+
 /** Flattens one transcript entry into the individual terminal rows it renders as. */
 function linesForEntry(entry: TranscriptEntry, index: number): Line[] {
   if (entry.kind === "banner") {
@@ -125,31 +164,23 @@ function linesForEntry(entry: TranscriptEntry, index: number): Line[] {
     lines.push({ key: `${index}-spacer`, text: " ", node: <Text> </Text> });
     return lines;
   }
-  // entry.kind === "tool"
-  if (!entry.done) {
-    if (entry.name === "ask") {
-      // Rendered specially below via pendingAsk/AskCard, not as a plain
-      // tool card — this line is just a placeholder while it's pending.
-      const text = "? waiting on your answer…";
-      return [{ key: entry.correlationId, text, node: <Text dimColor>{text}</Text> }];
-    }
-    const text = `- ${entry.name}(${formatValue(entry.input)}) ${entry.progress ?? "…"}`;
+  // entry.kind === "tool" — a single line: bullet, tool label, the one
+  // input value worth showing (the command/path/question, never the full
+  // input object), and elapsed time once done. Never the output/result.
+  if (!entry.done && entry.name === "ask") {
+    // Rendered specially below via pendingAsk/AskCard, not as a plain tool
+    // line — this is just a placeholder while it's pending.
+    const text = "? waiting on your answer…";
     return [{ key: entry.correlationId, text, node: <Text dimColor>{text}</Text> }];
   }
-  const elapsed = entry.elapsedMs !== undefined ? ` (${(entry.elapsedMs / 1000).toFixed(1)}s)` : "";
-  const status = entry.isError
-    ? `✗ ${formatValue(entry.output)}${elapsed}`
-    : `→ ${formatValue(entry.output)}${elapsed}`;
-  const text = `🔧 ${entry.name}(${formatValue(entry.input)}) ${status}`;
+  const elapsed =
+    entry.done && entry.elapsedMs !== undefined ? ` (${(entry.elapsedMs / 1000).toFixed(1)}s)` : "";
+  const text = `● ${toolLabel(entry.name)} ${toolSummary(entry.name, entry.input)}${elapsed}`;
   return [
     {
       key: entry.correlationId,
       text,
-      node: (
-        <Text color={entry.isError ? "red" : undefined} dimColor>
-          {text}
-        </Text>
-      ),
+      node: <Text color={entry.done && entry.isError ? "red" : undefined}>{text}</Text>,
     },
   ];
 }
