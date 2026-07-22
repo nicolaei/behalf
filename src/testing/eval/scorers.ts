@@ -17,14 +17,16 @@ export interface Scorer<World = unknown, Output = unknown> {
   score: (run: Run<World, Output>) => number | Promise<number>;
 }
 
-function scorer<World, Output>(
+// Exported for judge.ts to share — not part of the eval/ barrel.
+export function scorer<World, Output>(
   name: string,
   bars: Bars | undefined,
   score: Scorer<World, Output>["score"],
+  defaultMinimumScore = 1,
 ): Scorer<World, Output> {
   return {
     name,
-    minimumScore: bars?.minimumScore ?? 1,
+    minimumScore: bars?.minimumScore ?? defaultMinimumScore,
     ...(bars?.minimumPassRate !== undefined ? { minimumPassRate: bars.minimumPassRate } : {}),
     score,
   };

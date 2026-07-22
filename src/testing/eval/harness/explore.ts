@@ -7,7 +7,8 @@ import type { Agent } from "../subject.js";
 import type { Example } from "../fixtures.js";
 import type { Scorer } from "../scorers.js";
 import type { Distribution } from "../regression.js";
-import { aggregate, mean } from "./aggregate.js";
+import { mean } from "./aggregate.js";
+import { scoreRuns } from "./score-runs.js";
 import type { Metrics, Rank } from "./rank.js";
 import { byScore } from "./rank.js";
 import { runRow } from "./run-row.js";
@@ -50,20 +51,17 @@ export async function runExplore<World, Output = unknown>(
   const variants = await Promise.all(
     spec.variants.map(async (variant) => {
       const subject = spec.of.with(variant);
-      const runs = (
-        await Promise.all(
-          spec.given.flatMap((row) =>
-            Array.from({ length: count }, () =>
-              runRow<World, Output>(subject.profile, row, "explore"),
-            ),
+      const runs = await Promise.all(
+        spec.given.flatMap((row) =>
+          Array.from({ length: count }, () =>
+            runRow<World, Output>(subject.profile, row, "explore"),
           ),
-        )
-      ).flat();
+        ),
+      );
 
       const scorers = await Promise.all(
         spec.scorers.map(async (scorer) => {
-          const scores = await Promise.all(runs.map((run) => Promise.resolve(scorer.score(run))));
-          const distribution = aggregate(scores, scorer.minimumScore);
+          const { distribution } = await scoreRuns(scorer, runs);
           return { name: scorer.name, distribution };
         }),
       );

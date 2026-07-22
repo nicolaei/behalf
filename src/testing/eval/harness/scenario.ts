@@ -9,7 +9,7 @@ import type { Example, Fixtures } from "../fixtures.js";
 import type { Scorer } from "../scorers.js";
 import type { Distribution, RegressionPolicy, BaselineStore } from "../regression.js";
 import { checkRegression } from "../regression.js";
-import { aggregate } from "./aggregate.js";
+import { scoreRuns } from "./score-runs.js";
 import { gate } from "./gate.js";
 import { runRow } from "./run-row.js";
 
@@ -77,8 +77,7 @@ export async function runScenario<World, Output = unknown>(
 
   const scorers: ScenarioScorerResult[] = await Promise.all(
     spec.scorers.map(async (scorer) => {
-      const scores = await Promise.all(runs.map((run) => Promise.resolve(scorer.score(run))));
-      const distribution = aggregate(scores, scorer.minimumScore);
+      const { scores, distribution } = await scoreRuns(scorer, runs);
       const result = gate({
         scores,
         minimumScore: scorer.minimumScore,

@@ -3,6 +3,7 @@
 
 import type { AssistantMessage } from "../../index.js";
 import type { Bars, Scorer } from "./scorers.js";
+import { scorer } from "./scorers.js";
 
 /** The dependency llmJudge calls out to — injectable so tests never make a real model call. @public */
 export interface Judge {
@@ -20,10 +21,10 @@ const defaultJudge: Judge = {
 
 /** An LLM rates `run.lastReply()` against `rubric`, 0..1. @public */
 export function llmJudge(rubric: string, bars?: Bars, judge?: Judge): Scorer {
-  return {
-    name: `llmJudge(${rubric})`,
-    minimumScore: bars?.minimumScore ?? 0.8,
-    ...(bars?.minimumPassRate !== undefined ? { minimumPassRate: bars.minimumPassRate } : {}),
-    score: (run) => (judge ?? defaultJudge).rate(rubric, run.lastReply()),
-  };
+  return scorer(
+    `llmJudge(${rubric})`,
+    bars,
+    (run) => (judge ?? defaultJudge).rate(rubric, run.lastReply()),
+    0.8,
+  );
 }
