@@ -3,13 +3,13 @@
 // the model's own text — same pattern as simple-chat), committed into Ink's
 // <Static> so it's written once to real scrollback and never re-rendered.
 // The header (title + model line) prints once at the very top via the same
-// <Static> mechanism. There's no separate live stage indicator: <Static>
-// can only ever append new entries, never update an already-printed one, so
-// "which stage am I in" is carried entirely by the `── stage ──` banner
-// inserted whenever a new threadId first appears — the last banner scrolling
-// up from the bottom is the current stage. A specialized `ask` tool card
-// renders an inline TextInput instead of a generic tool card while the ask
-// is pending.
+// <Static> mechanism, alongside a `── stage ──` banner inserted whenever a new
+// threadId first appears. A small live stage strip in the reactive chrome
+// below mirrors the current stage for an always-visible glance — it has to
+// live there rather than in <Static> since it needs to update, and <Static>
+// can only ever append new entries, never update an already-printed one. A
+// specialized `ask` tool card renders an inline TextInput instead of a
+// generic tool card while the ask is pending.
 
 import React, { useEffect, useRef, useState } from "react";
 import { appendFileSync } from "node:fs";
@@ -100,6 +100,25 @@ function formatValue(value: unknown): string {
   }
 }
 
+/** Stage strip segment: done stages before the current one, current one, then pending. */
+function StageStrip({ current }: { current: StageName | undefined }) {
+  const currentIndex = current ? STAGE_NAMES.indexOf(current) : -1;
+  return (
+    <Text>
+      {STAGE_NAMES.map((name, index) => {
+        const marker = index < currentIndex ? "✓" : index === currentIndex ? "●" : "○";
+        const separator = index < STAGE_NAMES.length - 1 ? "  " : "";
+        return (
+          <Text key={name} bold={index === currentIndex} dimColor={index > currentIndex}>
+            {marker} {name}
+            {separator}
+          </Text>
+        );
+      })}
+    </Text>
+  );
+}
+
 function AskCard({
   pending,
   onSubmit,
@@ -149,6 +168,7 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
   const [pendingAsk, setPendingAsk] = useState<PendingAsk | undefined>(undefined);
+  const [currentStage, setCurrentStage] = useState<StageName | undefined>(undefined);
   const started = useRef(false);
   const stageByThread = useRef(new Map<ThreadId, StageName>());
   const nextStageIndex = useRef(0);
@@ -185,6 +205,7 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
           if (stage) {
             stageByThread.current.set(threadId, stage);
             nextStageIndex.current += 1;
+            setCurrentStage(stage);
             setSettled((previous) => [...previous, { kind: "banner", stage }]);
           }
         }
@@ -328,6 +349,9 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
         }}
       </Static>
       <Box flexDirection="column">
+        <Box marginY={1}>
+          <StageStrip current={currentStage} />
+        </Box>
         <Box flexDirection="column">
           {settled.length <= 1 && live.length === 0 && !streaming && (
             <Text dimColor>(describe the page you want below to start)</Text>
