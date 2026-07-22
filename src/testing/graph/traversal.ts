@@ -60,17 +60,35 @@ interface Entry {
   thread: unknown;
 }
 
-function permutations<T>(arr: T[]): T[][] {
-  if (arr.length <= 1) return [arr];
-  const result: T[][] = [];
-  for (let i = 0; i < arr.length; i++) {
-    const head = arr[i] as T;
-    const rest = [...arr.slice(0, i), ...arr.slice(i + 1)];
-    for (const perm of permutations(rest)) {
-      result.push([head, ...perm]);
+// Tries each unused branch as the next one, recursing into the rest on
+// success and backtracking on failure — depth-first with pruning, not
+// permutations(branches) generated up front. matchTree's own node/sequence
+// cases already throw immediately on a mismatch, so a wrong branch choice
+// fails fast instead of paying for the full remaining subtree; only a
+// genuinely ambiguous spec (several branches that could each match next)
+// pays for backtracking, and the true worst case remains exponential in
+// branch count — same as any general group-matching problem.
+function matchGroup(
+  entries: Entry[],
+  offset: number,
+  branches: Traverse[],
+  locate: Locate,
+): number {
+  if (branches.length === 0) return offset;
+  let lastError: unknown;
+  for (let i = 0; i < branches.length; i++) {
+    const branch = branches.at(i);
+    if (branch === undefined) continue;
+    const rest = [...branches.slice(0, i), ...branches.slice(i + 1)];
+    try {
+      const pos = matchTree(entries, offset, branch, locate);
+      return matchGroup(entries, pos, rest, locate);
+    } catch (err) {
+      lastError = err;
     }
   }
-  return result;
+  if (lastError instanceof Error) throw lastError;
+  throw new Error(`group did not match at position ${String(offset)}`);
 }
 
 function describeGot(entries: Entry[], offset: number): string {
@@ -146,22 +164,8 @@ function matchTree(entries: Entry[], offset: number, spec: Traverse, locate: Loc
       }
       return start + count;
     }
-    case "group": {
-      let lastError: unknown;
-      for (const perm of permutations(spec.branches)) {
-        try {
-          let pos = offset;
-          for (const branchSpec of perm) {
-            pos = matchTree(entries, pos, branchSpec, locate);
-          }
-          return pos;
-        } catch (err) {
-          lastError = err;
-        }
-      }
-      if (lastError instanceof Error) throw lastError;
-      throw new Error(`group did not match at position ${String(offset)}`);
-    }
+    case "group":
+      return matchGroup(entries, offset, spec.branches, locate);
   }
 }
 

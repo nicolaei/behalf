@@ -7,7 +7,8 @@ import type { Message } from "../../../index.js";
 import type { Subject } from "../subject.js";
 import type { Example, Fixtures } from "../fixtures.js";
 import type { Scorer } from "../scorers.js";
-import type { Distribution, RegressionPolicy } from "../regression.js";
+import type { Distribution, RegressionPolicy, BaselineStore } from "../regression.js";
+import { checkRegression } from "../regression.js";
 import { aggregate } from "./aggregate.js";
 import { gate } from "./gate.js";
 import { runRow } from "./run-row.js";
@@ -17,6 +18,10 @@ export interface ScenarioScorerResult {
   name: string;
   passed: boolean;
   distribution: Distribution;
+  // Only present when `regression` + `baseline` are both configured and a
+  // prior baseline existed for this scorer — independent of `passed`, which
+  // only reflects this scorer's own bar.
+  regressed?: boolean;
 }
 
 /** The result of running a scenario's rows/runs — what `scenario()` gates CI on. @public */
@@ -35,6 +40,10 @@ export interface ScenarioSpec<World, Output = unknown> {
   input?: Message;
   runs?: number | { count: number; minimumPassRate: number };
   regression?: RegressionPolicy;
+  // Where to read/write the per-scorer baseline this scenario's distributions
+  // are compared against. Without it, `regression` is accepted but has
+  // nothing to compare against — no check runs.
+  baseline?: { store: BaselineStore; test: string };
 }
 
 /** Runs a scenario's rows x runs and returns its result — the directly-testable core, no test-runner registration. @public */
@@ -60,6 +69,8 @@ export async function runScenario<World, Output = unknown>(
     ),
   );
 
+  const priorScorers = spec.baseline?.store.read(spec.baseline.test);
+
   const scorers: ScenarioScorerResult[] = await Promise.all(
     spec.scorers.map(async (scorer) => {
       const scores = await Promise.all(runs.map((run) => Promise.resolve(scorer.score(run))));
@@ -69,16 +80,32 @@ export async function runScenario<World, Output = unknown>(
         minimumScore: scorer.minimumScore,
         minimumPassRate: scorer.minimumPassRate ?? globalMinimumPassRate ?? 1,
       });
-      return { name: scorer.name, passed: result.passed, distribution };
+      const priorDistribution = priorScorers?.[scorer.name];
+      const regressed =
+        spec.regression && priorDistribution
+          ? checkRegression(spec.regression, priorDistribution, distribution) === "fail"
+          : false;
+      return {
+        name: scorer.name,
+        passed: result.passed,
+        distribution,
+        ...(spec.regression ? { regressed } : {}),
+      };
     }),
   );
 
-  // regression: out of scope for this story — the spec has no BaselineStore/test-name
-  // parameter to load/save a baseline against. Accepted but not persisted; a later
-  // story can wire it once scenario() carries enough identity to key a baseline by.
-  void spec.regression;
+  const passed = scorers.every((s) => s.passed) && scorers.every((s) => !s.regressed);
 
-  return { passed: scorers.every((s) => s.passed), scorers };
+  // Only ratchet the baseline forward on a run that didn't regress — a failing
+  // or regressed run shouldn't become the new bar future runs are judged against.
+  if (spec.baseline && passed) {
+    spec.baseline.store.write(
+      spec.baseline.test,
+      Object.fromEntries(scorers.map((s) => [s.name, s.distribution])),
+    );
+  }
+
+  return { passed, scorers };
 }
 
 function requireField<T>(value: T | undefined, name: string): T {

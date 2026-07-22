@@ -88,4 +88,14 @@ describe("matchesTraversal", () => {
       matchesTraversal(run, sequence(n1, loop(implementNode, { times: 0 })));
     }).not.toThrow();
   });
+
+  it("group with 10 branches matches in bounded time (not O(n!) permutation search)", () => {
+    const nodes = Array.from({ length: 10 }, (_, i) => `g${String(i)}` as NodeId);
+    const run = fakeRun(nodes.map((node) => ({ node, thread: t1 })));
+    const start = Date.now();
+    expect(() => {
+      matchesTraversal(run, group(...nodes));
+    }).not.toThrow();
+    expect(Date.now() - start).toBeLessThan(500);
+  });
 });
