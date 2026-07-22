@@ -1,10 +1,12 @@
-// Flow authoring — agentLoop. See docs/reference.md.
+// Flow authoring — agentTurn. See docs/reference.md.
 //
 // Reusable graph primitive: run a model, wait for every tool call it made,
 // fold their results into one combined message, loop back to the model.
 // Finishes with the assistant's final text once a turn makes no tool calls.
 // This generalizes the hand-rolled pattern in
-// src/tests/acceptance/agent-loop.test.ts's own scriptedFixture().
+// src/tests/acceptance/agent-loop.test.ts's own scriptedFixture() (that
+// file's name predates this rename — it still calls its own local fixture
+// "agentLoop", a private variable, not this exported primitive).
 
 import { defineGraph } from "./graph.js";
 import type { Graph } from "./graph.js";
@@ -16,7 +18,7 @@ import type { Message } from "./message.js";
 
 function toolBranch(item: unknown): Graph {
   const { correlationId } = item as { correlationId: string; name: string };
-  return defineGraph(`agent-loop-tool-${correlationId}`, (flow) => {
+  return defineGraph(`agent-turn-tool-${correlationId}`, (flow) => {
     const wait = flow.waitFor(toolCall(correlationId));
     const shape = flow.step(
       outputs((context) => {
@@ -30,9 +32,9 @@ function toolBranch(item: unknown): Graph {
   });
 }
 
-/** A reusable graph: run the model, wait for its tool calls, fold results, loop. @public */
-export function agentLoop(profile: Profile): Graph {
-  return defineGraph("agent-loop", (flow) => {
+/** A reusable graph: run the model, wait for its tool calls, fold results, loop. One agent's turn — the loop that keeps it going until it stops using tools. @public */
+export function agentTurn(profile: Profile): Graph {
+  return defineGraph("agent-turn", (flow) => {
     const respond = flow.step(async (context) => context.output(await context.modelCall(profile)));
     const each = flow.forEach((output) => (output as ModelCallResult).toolCalls, toolBranch);
     const foldAndLoop = flow.step(async (context) => {

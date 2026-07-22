@@ -30,4 +30,4 @@ export type {
   WaitForResult,
 } from "./step.js";
 export { outputs, compacts, join } from "./step.js";
-export { agentLoop } from "./agent-loop.js";
+export { agentTurn } from "./agent-turn.js";

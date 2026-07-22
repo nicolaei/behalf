@@ -50,10 +50,10 @@ index.tsx          runtime() setup: model port, filesystem bindings, error
                     handlers, in-memory store. Renders <App> once the runtime
                     resolves.
       ↓
-chat.ts             the graph: agentLoop (behalf's own reusable graph — run
+chat.ts             the graph: agentTurn (behalf's own reusable graph — run
                     the model, wait for every tool call it made, fold their
                     results into one message, loop until a reply uses no
-                    tools) → chat (loops agentLoop, waiting for the next
+                    tools) → chat (loops agentTurn, waiting for the next
                     user prompt between turns, same thread throughout).
       ↓
 App.tsx             the UI: folds the store's committed envelopes into a

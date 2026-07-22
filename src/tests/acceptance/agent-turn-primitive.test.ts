@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { agentLoop, runFlow, runtime, provide, tool, userText, adapters } from "../../index.js";
+import { agentTurn, runFlow, runtime, provide, tool, userText, adapters } from "../../index.js";
 import type { Message, Model, ModelPort, Profile, Tool } from "../../index.js";
 import {
   assistantToolCall,
@@ -10,11 +10,11 @@ import {
   at,
 } from "./support.js";
 
-// agentLoop is the library's own reusable "run a model, wait for every tool
+// agentTurn is the library's own reusable "run a model, wait for every tool
 // call it made, fold their results into one combined message, loop" graph —
 // the generalized, exported version of agent-loop.test.ts's hand-rolled
 // forEach + waitFor(toolCall(id)) + compact pattern. examples/simple-chat's
-// chat.ts should use this instead of hand-rolling its own (buggy) loop.
+// chat.ts uses this instead of hand-rolling its own (buggy) loop.
 const CALL_COUNTS = [1, 2] as const;
 const MODEL: Model = {
   identifier: "scripted",
@@ -40,7 +40,7 @@ function firstReply(tools: ReturnType<typeof toolsFor>): Message {
       );
 }
 
-describe.each(CALL_COUNTS)("agentLoop, %i simultaneous tool call(s)", (count) => {
+describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) => {
   it("finishes, and the model's second call sees every tool call paired with its result", async () => {
     const tools = toolsFor(count);
     const profile: Profile = { model: MODEL, system: "agent", tools };
@@ -61,7 +61,7 @@ describe.each(CALL_COUNTS)("agentLoop, %i simultaneous tool call(s)", (count) =>
       store: adapters.stores.memoryStore(),
     });
 
-    const result = await runFlow(agentLoop(profile), userText("go"), ready);
+    const result = await runFlow(agentTurn(profile), userText("go"), ready);
 
     expect(result).toBe("done");
     expect(call).toBe(2);
@@ -86,7 +86,7 @@ describe.each(CALL_COUNTS)("agentLoop, %i simultaneous tool call(s)", (count) =>
       store,
     });
 
-    await runFlow(agentLoop(profile), userText("go"), ready);
+    await runFlow(agentTurn(profile), userText("go"), ready);
 
     const toolMessages = loggedEnvelopes(store).filter(
       (e) => e.type === "message" && (e.event as { message: Message }).message.role === "tool",
@@ -126,8 +126,8 @@ describe.each(CALL_COUNTS)("agentLoop, %i simultaneous tool call(s)", (count) =>
     });
 
     const [resultA, resultB] = await Promise.all([
-      runFlow(agentLoop(profileA), userText("go A"), ready),
-      runFlow(agentLoop(profileB), userText("go B"), ready),
+      runFlow(agentTurn(profileA), userText("go A"), ready),
+      runFlow(agentTurn(profileB), userText("go B"), ready),
     ]);
 
     expect([resultA, resultB]).toEqual(["done", "done"]);
