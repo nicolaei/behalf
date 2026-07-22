@@ -7,7 +7,7 @@
 // a generic tool card while the ask is pending.
 
 import React, { useEffect, useRef, useState } from "react";
-import { Box, Text } from "ink";
+import { Box, Static, Text } from "ink";
 import TextInput from "ink-text-input";
 import { runFlow, userText } from "behalf";
 import type { Runtime, Message, StepError, ThreadId } from "behalf";
@@ -116,7 +116,7 @@ function AskCard({
 }) {
   const [value, setValue] = useState("");
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={1}>
+    <Box flexDirection="column">
       <Text bold color="cyan">
         ❓ {pending.question}
       </Text>
@@ -138,7 +138,16 @@ function AskCard({
 }
 
 export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge }) {
-  const [transcript, setTranscript] = useState<TranscriptEntry[]>([]);
+  // Settled content (banners, final messages, completed tool calls) is
+  // append-only and never mutates once added — rendered via Ink's <Static>
+  // so it's committed straight to scrollback and never re-diffed. Only
+  // `live` (in-progress tool calls) sits in the normal reactive region,
+  // alongside streaming text and input. Keeping the reactive region small
+  // matters: once a plain reactive Box's content grows taller than the
+  // terminal, Ink can no longer erase-and-redraw it in place and instead
+  // appends a whole new frame on every re-render.
+  const [settled, setSettled] = useState<TranscriptEntry[]>([]);
+  const [live, setLive] = useState<Extract<TranscriptEntry, { kind: "tool" }>[]>([]);
   const [streaming, setStreaming] = useState<StreamingReply | undefined>(undefined);
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | undefined>(undefined);
@@ -168,7 +177,7 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
             stageByThread.current.set(threadId, stage);
             nextStageIndex.current += 1;
             setCurrentStage(stage);
-            setTranscript((previous) => [...previous, { kind: "banner", stage }]);
+            setSettled((previous) => [...previous, { kind: "banner", stage }]);
           }
         }
 
@@ -185,9 +194,9 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
                 ? { ...previous, text: previous.text + delta.text }
                 : previous,
             );
-            setTranscript((previous) =>
+            setLive((previous) =>
               previous.map((entry) =>
-                entry.kind === "tool" && entry.correlationId === delta.correlationId
+                entry.correlationId === delta.correlationId
                   ? { ...entry, progress: delta.text }
                   : entry,
               ),
@@ -201,13 +210,13 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
         if (envelope.type === "message") {
           const message = (envelope.event as { message: Message }).message;
           const entry = entryOf(message);
-          if (entry) setTranscript((previous) => [...previous, entry]);
+          if (entry) setSettled((previous) => [...previous, entry]);
           setStreaming(undefined);
           continue;
         }
         if (envelope.type === "toolCall") {
           const call = envelope.event as { correlationId: string; name: string; input: unknown };
-          setTranscript((previous) => [
+          setLive((previous) => [
             ...previous,
             {
               kind: "tool",
@@ -226,19 +235,19 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
             output: unknown;
             isError?: boolean;
           };
-          setTranscript((previous) =>
-            previous.map((entry) =>
-              entry.kind === "tool" && entry.correlationId === result.correlationId
-                ? {
-                    ...entry,
-                    output: result.output,
-                    isError: result.isError,
-                    done: true,
-                    elapsedMs: Date.now() - entry.startedAt,
-                  }
-                : entry,
-            ),
-          );
+          setLive((previous) => {
+            const entry = previous.find((e) => e.correlationId === result.correlationId);
+            if (!entry) return previous;
+            const finalEntry: TranscriptEntry = {
+              ...entry,
+              output: result.output,
+              isError: result.isError,
+              done: true,
+              elapsedMs: Date.now() - entry.startedAt,
+            };
+            setSettled((settledPrevious) => [...settledPrevious, finalEntry]);
+            return previous.filter((e) => e.correlationId !== result.correlationId);
+          });
           continue;
         }
       }
@@ -271,11 +280,8 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
       <Box marginY={1}>
         <StageStrip current={currentStage} />
       </Box>
-      <Box flexDirection="column">
-        {transcript.length === 0 && !streaming && (
-          <Text dimColor>(describe the page you want below to start)</Text>
-        )}
-        {transcript.map((entry, index) => {
+      <Static items={settled}>
+        {(entry, index) => {
           if (entry.kind === "banner") {
             return (
               <Text key={index} dimColor>
@@ -296,7 +302,24 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
               </Box>
             );
           }
-          if (entry.name === "ask" && !entry.done) {
+          const elapsed =
+            entry.elapsedMs !== undefined ? ` (${(entry.elapsedMs / 1000).toFixed(1)}s)` : "";
+          const status = entry.isError
+            ? `✗ ${formatValue(entry.output)}${elapsed}`
+            : `→ ${formatValue(entry.output)}${elapsed}`;
+          return (
+            <Text key={entry.correlationId} color={entry.isError ? "red" : undefined} dimColor>
+              🔧 {entry.name}({formatValue(entry.input)}) {status}
+            </Text>
+          );
+        }}
+      </Static>
+      <Box flexDirection="column">
+        {settled.length === 0 && live.length === 0 && !streaming && (
+          <Text dimColor>(describe the page you want below to start)</Text>
+        )}
+        {live.map((entry) => {
+          if (entry.name === "ask") {
             // Rendered specially below via pendingAsk/AskCard, not as a plain
             // tool card — skip the generic rendering for it here.
             return (
@@ -305,20 +328,9 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
               </Text>
             );
           }
-          const elapsed =
-            entry.elapsedMs !== undefined ? ` (${(entry.elapsedMs / 1000).toFixed(1)}s)` : "";
-          const status = entry.done
-            ? entry.isError
-              ? `✗ ${formatValue(entry.output)}${elapsed}`
-              : `→ ${formatValue(entry.output)}${elapsed}`
-            : (entry.progress ?? "…");
           return (
-            <Text
-              key={entry.correlationId}
-              color={entry.done && entry.isError ? "red" : undefined}
-              dimColor={!(entry.done && entry.isError)}
-            >
-              🔧 {entry.name}({formatValue(entry.input)}) {status}
+            <Text key={entry.correlationId} dimColor>
+              🔧 {entry.name}({formatValue(entry.input)}) {entry.progress ?? "…"}
             </Text>
           );
         })}
