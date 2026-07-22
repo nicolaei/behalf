@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 const tsconfigRootDir = fileURLToPath(new URL(".", import.meta.url));
 
 export default defineConfig([
-  { ignores: ["dist/**"] },
+  { ignores: ["dist/**", ".worktrees/**"] },
 
   // Type-aware rules — only where a real tsconfig program covers the files.
   {
