@@ -331,15 +331,16 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
         )}
         {error && <Text color="red">Error: {error}</Text>}
       </Box>
-      {pendingAsk && (
+      {pendingAsk ? (
         <Box marginTop={1}>
           <AskCard pending={pendingAsk} onSubmit={(answer) => pendingAsk.resolve(answer)} />
         </Box>
+      ) : (
+        <Box marginTop={1}>
+          <Text dimColor>{"> "}</Text>
+          <TextInput value={input} onChange={setInput} onSubmit={submit} />
+        </Box>
       )}
-      <Box marginTop={1}>
-        <Text dimColor>{"> "}</Text>
-        <TextInput value={input} onChange={setInput} onSubmit={submit} />
-      </Box>
     </Box>
   );
 }
