@@ -18,3 +18,17 @@ export interface Subject<World = unknown, Output = unknown> {
 export interface Agent<World = unknown, Output = unknown> extends Subject<World, Output> {
   with(profile: Partial<Profile>): Subject<World, Output>;
 }
+
+/** Builds an `Agent` — the thing under eval, carrying `profile`. `.with(partial)` re-profiles it without mutating the original. @public */
+export function agent<World = unknown, Output = unknown>(
+  name: string,
+  profile: Profile,
+): Agent<World, Output> {
+  return {
+    name,
+    profile,
+    with(partial: Partial<Profile>): Subject<World, Output> {
+      return { name, profile: { ...profile, ...partial } };
+    },
+  };
+}

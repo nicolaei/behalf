@@ -3,6 +3,7 @@
 // — opt in explicitly.
 
 export type { Subject, Agent } from "./subject.js";
+export { agent } from "./subject.js";
 export type { Fixtures, Example } from "./fixtures.js";
 export { example } from "./fixtures.js";
 
