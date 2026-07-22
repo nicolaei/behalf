@@ -28,6 +28,9 @@ type TranscriptEntry =
       output?: unknown;
       isError?: boolean;
       done: boolean;
+      startedAt: number;
+      elapsedMs?: number;
+      progress?: string;
     };
 
 type StreamingReply = { correlationId: string; text: string };
@@ -83,6 +86,16 @@ export function App({ ready }: { ready: Runtime }) {
                 ? { ...previous, text: previous.text + delta.text }
                 : previous,
             );
+            // A tool's own progress deltas share its toolCall's correlationId —
+            // route them onto the matching tool card instead of the assistant
+            // reply when they don't match the in-flight streamed message.
+            setTranscript((previous) =>
+              previous.map((entry) =>
+                entry.kind === "tool" && entry.correlationId === delta.correlationId
+                  ? { ...entry, progress: delta.text }
+                  : entry,
+              ),
+            );
             continue;
           }
           continue; // partialInput/close: not rendered in M4
@@ -106,6 +119,7 @@ export function App({ ready }: { ready: Runtime }) {
               name: call.name,
               input: call.input,
               done: false,
+              startedAt: Date.now(),
             },
           ]);
           continue;
@@ -119,7 +133,13 @@ export function App({ ready }: { ready: Runtime }) {
           setTranscript((previous) =>
             previous.map((entry) =>
               entry.kind === "tool" && entry.correlationId === result.correlationId
-                ? { ...entry, output: result.output, isError: result.isError, done: true }
+                ? {
+                    ...entry,
+                    output: result.output,
+                    isError: result.isError,
+                    done: true,
+                    elapsedMs: Date.now() - entry.startedAt,
+                  }
                 : entry,
             ),
           );
@@ -174,13 +194,19 @@ export function App({ ready }: { ready: Runtime }) {
               </Text>
             );
           }
+          const elapsed =
+            entry.elapsedMs !== undefined ? ` (${(entry.elapsedMs / 1000).toFixed(1)}s)` : "";
           const status = entry.done
             ? entry.isError
-              ? `✗ ${formatValue(entry.output)}`
-              : `→ ${formatValue(entry.output)}`
-            : "…";
+              ? `✗ ${formatValue(entry.output)}${elapsed}`
+              : `→ ${formatValue(entry.output)}${elapsed}`
+            : (entry.progress ?? "…");
           return (
-            <Text key={entry.correlationId} dimColor>
+            <Text
+              key={entry.correlationId}
+              color={entry.done && entry.isError ? "red" : undefined}
+              dimColor={!(entry.done && entry.isError)}
+            >
               🔧 {entry.name}({formatValue(entry.input)}) {status}
             </Text>
           );
