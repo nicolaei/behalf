@@ -63,7 +63,7 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
 
     const result = await runFlow(agentTurn(profile), userText("go"), ready);
 
-    expect(result).toBe("done");
+    expect(result).toEqual({ finishedBy: "finalMessage", text: "done" });
     expect(call).toBe(2);
     expect(orphanedToolCallIds(at(capturedMessages, 1))).toEqual([]);
   });
@@ -130,7 +130,10 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
       runFlow(agentTurn(profileB), userText("go B"), ready),
     ]);
 
-    expect([resultA, resultB]).toEqual(["done", "done"]);
+    expect([resultA, resultB]).toEqual([
+      { finishedBy: "finalMessage", text: "done" },
+      { finishedBy: "finalMessage", text: "done" },
+    ]);
 
     const toolMessages = loggedEnvelopes(store).filter(
       (e) => e.type === "message" && (e.event as { message: Message }).message.role === "tool",
