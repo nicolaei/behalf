@@ -7,6 +7,7 @@ import {
   assistantText,
   loggedEnvelopes,
   orphanedToolCallIds,
+  at,
 } from "./support.js";
 
 // agentLoop is the library's own reusable "run a model, wait for every tool
@@ -24,16 +25,16 @@ const MODEL: Model = {
 
 function toolsFor(count: number): Tool[] {
   return count === 1
-    ? [tool<{ query: string }, { hits: string[] }>("search", "Search the web.") as Tool]
+    ? [tool<{ query: string }, { hits: string[] }>("search", "Search the web.")]
     : [
-        tool<{ query: string }, { hits: string[] }>("search", "Search the web.") as Tool,
-        tool<{ city: string }, { forecast: string }>("weather", "Get the weather.") as Tool,
+        tool<{ query: string }, { hits: string[] }>("search", "Search the web."),
+        tool<{ city: string }, { forecast: string }>("weather", "Get the weather."),
       ];
 }
 
 function firstReply(tools: ReturnType<typeof toolsFor>): Message {
   return tools.length === 1
-    ? assistantToolCall(tools[0]!.name, { query: "x" })
+    ? assistantToolCall(at(tools, 0).name, { query: "x" })
     : assistantToolCalls(
         tools.map((t, i) => ({ name: t.name, input: i === 0 ? { query: "x" } : { city: "Oslo" } })),
       );
@@ -64,7 +65,7 @@ describe.each(CALL_COUNTS)("agentLoop, %i simultaneous tool call(s)", (count) =>
 
     expect(result).toBe("done");
     expect(call).toBe(2);
-    expect(orphanedToolCallIds(capturedMessages[1]!)).toEqual([]);
+    expect(orphanedToolCallIds(at(capturedMessages, 1))).toEqual([]);
   });
 
   it("logs the collected tool results as one message event on the thread, in call order", async () => {
@@ -92,12 +93,12 @@ describe.each(CALL_COUNTS)("agentLoop, %i simultaneous tool call(s)", (count) =>
     );
     expect(toolMessages).toHaveLength(1); // one combined message, never one per call
 
-    const message = (toolMessages[0]!.event as { message: Message }).message;
+    const message = (at(toolMessages, 0).event as { message: Message }).message;
     const resultIds = message.content
       .filter((b): b is Extract<typeof b, { type: "toolResult" }> => b.type === "toolResult")
       .map((b) => b.correlationId);
     expect(resultIds).toEqual(tools.map((_, i) => String(i + 1))); // "1", "2" — call order
-    expect(toolMessages[0]!.threadId).toBeDefined();
+    expect(at(toolMessages, 0).threadId).toBeDefined();
   });
 
   it("keeps each thread's collected results on its own thread, even when correlationIds collide", async () => {

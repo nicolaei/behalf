@@ -161,3 +161,13 @@ export function orphanedToolCallIds(messages: Message[]): string[] {
   });
   return orphans;
 }
+
+/** Indexes into an array, throwing a clear error instead of `undefined` — the typed alternative to a bare `arr[i]!`. */
+export function at<T>(items: readonly T[], index: number): T {
+  const item = items[index];
+  if (item === undefined)
+    throw new Error(
+      `expected an item at index ${String(index)}, array has ${String(items.length)}`,
+    );
+  return item;
+}
