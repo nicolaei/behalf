@@ -139,15 +139,20 @@ describe("toAnthropicRequest", () => {
     ]);
   });
 
-  it("prepends the Claude Code identity block first when isOAuth is true", () => {
+  it("sends system as an array whose first block is exactly the Claude Code identity when isOAuth is true", () => {
+    // Anthropic's OAuth endpoint verifies the FIRST system block equals the
+    // identity string exactly — concatenating it into one string gets rejected
+    // with a bogus 429 rate_limit_error. Verified against the live API.
     const messages: Message[] = [
       { role: "user", intent: "standard", content: [{ type: "text", text: "hi" }] },
     ];
 
     const request = toAnthropicRequest(profile(), messages, true);
 
-    expect(request.system.startsWith(CLAUDE_CODE_IDENTITY)).toBe(true);
-    expect(request.system).toBe(`${CLAUDE_CODE_IDENTITY}\n\ntest persona`);
+    expect(request.system).toEqual([
+      { type: "text", text: CLAUDE_CODE_IDENTITY },
+      { type: "text", text: "test persona" },
+    ]);
   });
 
   it("omits the Claude Code identity block when isOAuth is false (the default)", () => {

@@ -83,7 +83,7 @@ const EFFORT_BY_REASONING: Record<string, Anthropic.OutputConfig["effort"]> = {
 
 /** The shape `toAnthropicRequest` hands to `client.messages.create`. */
 export interface AnthropicRequest {
-  system: string;
+  system: string | Anthropic.TextBlockParam[];
   messages: Anthropic.MessageParam[];
   thinking?: Anthropic.ThinkingConfigParam;
   effort?: Anthropic.OutputConfig["effort"];
@@ -207,9 +207,11 @@ function systemText(block: ContentBlock): string {
  * `Profile.system` is the primary system prompt source; any `system`-role
  * Messages in the history (docs/reference.md doesn't rule these out) are
  * appended after it so both land in Anthropic's single top-level `system` param.
- * In OAuth mode, Anthropic requires the Claude Code identity block to lead
- * the system prompt — the token is scoped to that client identity and the API
- * rejects/mishandles requests that don't present as Claude Code.
+ * In OAuth mode, Anthropic requires `system` to be an array of blocks whose
+ * FIRST block is exactly the Claude Code identity string — the endpoint
+ * verifies that block verbatim and rejects anything else (including the
+ * identity concatenated into a single system string) with a bogus 429
+ * rate_limit_error. Verified against the live API.
  */
 export function toAnthropicRequest(
   profile: Profile,
@@ -221,9 +223,16 @@ export function toAnthropicRequest(
     .map((m) => m.content.map(systemText).join(""))
     .filter((text) => text.length > 0);
 
-  const system = [...(isOAuth ? [CLAUDE_CODE_IDENTITY] : []), profile.system, ...systemFromHistory]
+  const rest = [profile.system, ...systemFromHistory]
     .filter((text) => text.length > 0)
     .join("\n\n");
+
+  const system: string | Anthropic.TextBlockParam[] = isOAuth
+    ? [
+        { type: "text", text: CLAUDE_CODE_IDENTITY },
+        ...(rest.length > 0 ? [{ type: "text" as const, text: rest }] : []),
+      ]
+    : rest;
 
   const anthropicMessages = messages
     .map((m) => toAnthropicMessage(m, isOAuth))
