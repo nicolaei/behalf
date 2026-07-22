@@ -2,7 +2,16 @@
 //
 // Reusable graph primitive: run a model, wait for every tool call it made,
 // fold their results into one combined message, loop back to the model.
-// Finishes with the assistant's final text once a turn makes no tool calls.
+// `finishOn` (default: [{ on: "finalMessage" }]) controls when the turn ends:
+// a turn that used no tools always finishes with the assistant's final text,
+// regardless of `finishOn` — that's the built-in "no tools this turn" path.
+// On top of that, an `{ on: "toolCall", name }` entry ends the turn the
+// instant a tool call by that name fires (even if other tool calls happened
+// in the same turn), outputting that call's own resolved result instead of
+// looping back to the model. Tool calls not named by any `finishOn` entry
+// still run and fold into the thread exactly as before — `finishOn` only
+// changes when the turn ends and what it outputs, never which tool calls
+// get executed.
 // This generalizes the hand-rolled pattern in
 // src/tests/acceptance/agent-loop.test.ts's own scriptedFixture() (that
 // file's name predates this rename — it still calls its own local fixture
@@ -32,12 +41,90 @@ function toolBranch(item: unknown): Graph {
   });
 }
 
-/** A reusable graph: run the model, wait for its tool calls, fold results, loop. One agent's turn — the loop that keeps it going until it stops using tools. @public */
-export function agentTurn(profile: Profile): Graph {
+/**
+ * A finish condition for `agentTurn` — the turn ends the moment any listed
+ * condition matches this turn's response. `"finalMessage"` (a turn used no
+ * tools) is always active regardless of `finishOn`; `"toolCall"` additionally
+ * ends the turn the instant the named tool is called.
+ * @public
+ */
+export type FinishOn = { on: "finalMessage" } | { on: "toolCall"; name: string };
+
+/** Options for `agentTurn`. @public */
+export interface AgentTurnOptions {
+  /**
+   * Conditions that end the turn; the turn ends the moment any one matches
+   * this turn's response. Default when omitted: `[{ on: "finalMessage" }]` —
+   * today's "no tool calls" behavior.
+   */
+  finishOn?: FinishOn[];
+}
+
+/** What `agentTurn` produces once its finish condition is met. @public */
+export type AgentTurnResult =
+  | { finishedBy: "finalMessage"; text: string }
+  | { finishedBy: "toolCall"; name: string; correlationId: string; output: unknown };
+
+/** A resolved tool call from the turn's own toolResult message, matched back to its name. */
+interface FiredToolCall {
+  name: string;
+  correlationId: string;
+  output: unknown;
+}
+
+/** Reads the last assistant message (its toolCall blocks) and the tool message that just
+ * followed it (its toolResult blocks) straight off the thread, and returns each fired call
+ * paired with its own name and result — no data carried in from earlier steps, since a
+ * `compact` emit's routed output is `undefined` downstream (see step-runner.ts/drive.ts). */
+function firedToolCalls(messages: Message[]): FiredToolCall[] {
+  const toolMessage = messages.at(-1);
+  if (toolMessage?.role !== "tool") return [];
+  let assistantMessage: Message | undefined;
+  for (let i = messages.length - 2; i >= 0; i -= 1) {
+    const candidate = messages[i];
+    if (candidate?.role === "assistant") {
+      assistantMessage = candidate;
+      break;
+    }
+  }
+  if (!assistantMessage) return [];
+  const nameByCorrelationId = new Map(
+    assistantMessage.content
+      .filter(
+        (block): block is Extract<typeof block, { type: "toolCall" }> => block.type === "toolCall",
+      )
+      .map((block) => [block.correlationId, block.name]),
+  );
+  return toolMessage.content
+    .filter(
+      (block): block is Extract<typeof block, { type: "toolResult" }> =>
+        block.type === "toolResult",
+    )
+    .flatMap((block) => {
+      const name = nameByCorrelationId.get(block.correlationId);
+      return name ? [{ name, correlationId: block.correlationId, output: block.output }] : [];
+    });
+}
+
+/**
+ * A reusable graph: run the model, wait for its tool calls, fold results, loop until a
+ * finish condition matches. One agent's turn — the loop that keeps it going until it stops.
+ * @public
+ */
+export function agentTurn(profile: Profile, options?: AgentTurnOptions): Graph {
+  const finishOnToolNames = new Set(
+    (options?.finishOn ?? [])
+      .filter(
+        (condition): condition is Extract<FinishOn, { on: "toolCall" }> =>
+          condition.on === "toolCall",
+      )
+      .map((condition) => condition.name),
+  );
+
   return defineGraph("agent-turn", (flow) => {
     const respond = flow.step(async (context) => context.output(await context.modelCall(profile)));
     const each = flow.forEach((output) => (output as ModelCallResult).toolCalls, toolBranch);
-    const foldAndLoop = flow.step(async (context) => {
+    const fold = flow.step(async (context) => {
       const results = context.inputs[0] as { correlationId: string; output: unknown }[];
       const toolMessage: Message = {
         role: "tool",
@@ -54,18 +141,47 @@ export function agentTurn(profile: Profile): Graph {
       context.appendEvent({ message: toolMessage }, "message");
       return context.compact((messages) => Promise.resolve([...messages, toolMessage]));
     });
+    const checkFinish = flow.step(
+      outputs((context) => {
+        if (finishOnToolNames.size === 0) return { winner: undefined };
+        const winner = firedToolCalls(context.thread.messages).find((call) =>
+          finishOnToolNames.has(call.name),
+        );
+        return { winner };
+      }),
+    );
+    const finishByTool = flow.step(
+      outputs((context) => {
+        const { winner } = context.inputs[0] as { winner: FiredToolCall };
+        const result: AgentTurnResult = {
+          finishedBy: "toolCall",
+          name: winner.name,
+          correlationId: winner.correlationId,
+          output: winner.output,
+        };
+        return result;
+      }),
+    );
     const finalize = flow.step(
       outputs((context) => {
         const last = context.thread.messages.at(-1);
         const block = last?.content.find((candidate) => candidate.type === "text");
-        return block?.type === "text" ? block.text : "";
+        const result: AgentTurnResult = {
+          finishedBy: "finalMessage",
+          text: block?.type === "text" ? block.text : "",
+        };
+        return result;
       }),
     );
 
     flow.entry(respond);
     respond.then(each);
-    each.when((results) => (results as unknown[]).length > 0, foldAndLoop).otherwise(finalize);
-    foldAndLoop.then(respond);
+    each.when((results) => (results as unknown[]).length > 0, fold).otherwise(finalize);
+    fold.then(checkFinish);
+    checkFinish
+      .when((output) => (output as { winner?: FiredToolCall }).winner !== undefined, finishByTool)
+      .otherwise(respond);
+    finishByTool.then(flow.finish);
     finalize.then(flow.finish);
   });
 }
