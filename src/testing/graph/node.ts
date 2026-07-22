@@ -2,12 +2,8 @@
 // engine. Mirrors the toolCalled scorer's shape one level up.
 
 import type { NodeRef } from "./traversal.js";
-import type { NodeId } from "../../index.js";
+import { nodeIdOf } from "./traversal.js";
 import type { Run } from "./run.js";
-
-function nodeIdOf(ref: NodeRef): NodeId {
-  return typeof ref === "string" ? ref : ref.id;
-}
 
 /** Was `node` visited — how many times, with what input/output. @public */
 export function nodeCalled<World, Output = unknown>(

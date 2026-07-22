@@ -2,8 +2,8 @@
 // eval: an agent, a single step, or a fake tool handler, all carrying a
 // Profile. `Agent.with` re-profiles it — what `explore` varies.
 //
-// Stub only — see the epic's Story 8 architecture note for the concrete
-// behaviour this earns.
+// agent(name, profile) builds one; .with(partial) re-profiles without
+// mutating the original.
 
 import type { Profile } from "../../index.js";
 

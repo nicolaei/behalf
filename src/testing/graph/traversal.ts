@@ -19,7 +19,9 @@ export type Traverse =
   | { kind: "loop"; node: NodeId; times?: number; min?: number }
   | { kind: "branch"; node: NodeId };
 
-function nodeIdOf(ref: NodeRef): NodeId {
+// Resolves a NodeRef to its underlying NodeId. Exported for node.ts to share
+// — not part of the graph/ barrel, same as NodeRef itself.
+export function nodeIdOf(ref: NodeRef): NodeId {
   return typeof ref === "string" ? ref : ref.id;
 }
 

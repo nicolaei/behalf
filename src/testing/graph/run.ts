@@ -4,7 +4,6 @@
 // just folds their result into a Run instead of a StepResult. No `input`
 // parameter anywhere here: fake models/tools never read message content, so
 // the empty thread `tick` already starts with is correct as-is.
-//
 
 import type {
   Graph,
@@ -58,46 +57,44 @@ export interface Run<World = unknown, Output = unknown> {
   messages(thread?: ThreadId | string): Message[];
 }
 
-/** Folds a runtime's committed log + the fixture's world into a Run. @public */
-export function foldRun<World, Output = unknown>(
-  events: unknown[],
-  world: World,
-  latency: number,
-): Run<World, Output> {
-  const envelopes = events as Envelope[];
-  const committed = envelopes.filter(
-    (envelope): envelope is CommittedEnvelope => envelope.form === "committed",
-  );
-  const outputEvents = committed.filter(
-    (envelope): envelope is CommittedEnvelope & { type: "output"; event: { value: unknown } } =>
-      envelope.type === "output",
-  );
-  const lastOutput = outputEvents.at(-1);
-  const output = lastOutput?.event.value as Output;
+// --- foldRun's concerns, each a stand-alone pass over the committed log ---
 
-  const tools: ToolTrace[] = [];
-  const pendingCalls = new Map<string, { name: string; input: unknown; thread: ThreadId }>();
-  const lastOutputByThread = new Map<string, unknown>();
+/** An `output` envelope, narrowed to the fields foldRun reads. */
+type OutputEnvelope = CommittedEnvelope & { type: "output"; event: { value: unknown } };
+
+/** An `OutputEnvelope` that also names the step and thread that produced it — what `traversal`/`visits` fold from. Envelopes from outside a `flow.step` (there are none today, but the type doesn't assume it) are excluded. */
+type StepEnvelope = OutputEnvelope & { stepId: string; threadId: ThreadId };
+
+function outputEnvelopesOf(committed: CommittedEnvelope[]): OutputEnvelope[] {
+  return committed.filter((envelope): envelope is OutputEnvelope => envelope.type === "output");
+}
+
+function stepEntriesOf(outputEvents: OutputEnvelope[]): StepEnvelope[] {
+  return outputEvents.filter(
+    (envelope): envelope is StepEnvelope =>
+      envelope.stepId !== undefined && envelope.threadId !== undefined,
+  );
+}
+
+/** Every thread a run touched, in first-seen order. */
+function collectThreads(committed: CommittedEnvelope[]): { id: ThreadId; label?: string }[] {
   const threads: { id: ThreadId; label?: string }[] = [];
-  const seenThreads = new Set<string>();
-  const usage: Usage = { input: 0, output: 0 };
-  let reasoning = 0;
-  let cacheRead = 0;
-  let cacheWrite = 0;
-  let hasReasoning = false;
-  let hasCacheRead = false;
-  let hasCacheWrite = false;
-  const allMessages: Message[] = [];
-  const messagesByThread = new Map<string, Message[]>();
-  let lastAssistantOverall: AssistantMessage | undefined;
-  const lastAssistantByThread = new Map<string, AssistantMessage>();
-
+  const seen = new Set<string>();
   for (const envelope of committed) {
-    if (envelope.threadId !== undefined && !seenThreads.has(envelope.threadId)) {
-      seenThreads.add(envelope.threadId);
+    if (envelope.threadId !== undefined && !seen.has(envelope.threadId)) {
+      seen.add(envelope.threadId);
       threads.push({ id: envelope.threadId });
     }
+  }
+  return threads;
+}
 
+/** Pairs each toolCall with its toolResult by correlationId. */
+function pairTools(committed: CommittedEnvelope[]): ToolTrace[] {
+  const tools: ToolTrace[] = [];
+  const pendingCalls = new Map<string, { name: string; input: unknown; thread: ThreadId }>();
+
+  for (const envelope of committed) {
     if (envelope.type === "toolCall" && envelope.threadId !== undefined) {
       const event = envelope.event as Event["toolCall"];
       pendingCalls.set(event.correlationId, {
@@ -118,36 +115,65 @@ export function foldRun<World, Output = unknown>(
           thread: call.thread,
         });
       }
-    } else if (envelope.type === "message") {
-      const event = envelope.event as Event["message"];
-      const message = event.message;
-      allMessages.push(message);
-      if (envelope.threadId !== undefined) {
-        const list = messagesByThread.get(envelope.threadId) ?? [];
-        list.push(message);
-        messagesByThread.set(envelope.threadId, list);
-      }
-      if (message.role === "assistant") {
-        lastAssistantOverall = message;
-        if (envelope.threadId !== undefined) {
-          lastAssistantByThread.set(envelope.threadId, message);
-        }
-        const messageUsage = message.usage;
-        usage.input += messageUsage.input;
-        usage.output += messageUsage.output;
-        if (messageUsage.reasoning !== undefined) {
-          hasReasoning = true;
-          reasoning += messageUsage.reasoning;
-        }
-        if (messageUsage.cacheRead !== undefined) {
-          hasCacheRead = true;
-          cacheRead += messageUsage.cacheRead;
-        }
-        if (messageUsage.cacheWrite !== undefined) {
-          hasCacheWrite = true;
-          cacheWrite += messageUsage.cacheWrite;
-        }
-      }
+    }
+  }
+  return tools;
+}
+
+/** What one pass over the committed "message" envelopes produces: the message lists `messages()` reads, the last-assistant-reply lookups `lastReply()` reads, and the token usage summed from every assistant message. One pass because all three read the same envelopes. */
+interface MessageFold {
+  allMessages: Message[];
+  messagesByThread: Map<string, Message[]>;
+  lastAssistantOverall: AssistantMessage | undefined;
+  lastAssistantByThread: Map<string, AssistantMessage>;
+  usage: Usage;
+}
+
+function foldMessages(committed: CommittedEnvelope[]): MessageFold {
+  const allMessages: Message[] = [];
+  const messagesByThread = new Map<string, Message[]>();
+  let lastAssistantOverall: AssistantMessage | undefined;
+  const lastAssistantByThread = new Map<string, AssistantMessage>();
+  const usage: Usage = { input: 0, output: 0 };
+  let reasoning = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let hasReasoning = false;
+  let hasCacheRead = false;
+  let hasCacheWrite = false;
+
+  for (const envelope of committed) {
+    if (envelope.type !== "message") continue;
+    const event = envelope.event as Event["message"];
+    const message = event.message;
+
+    allMessages.push(message);
+    if (envelope.threadId !== undefined) {
+      const list = messagesByThread.get(envelope.threadId) ?? [];
+      list.push(message);
+      messagesByThread.set(envelope.threadId, list);
+    }
+
+    if (message.role !== "assistant") continue;
+    lastAssistantOverall = message;
+    if (envelope.threadId !== undefined) {
+      lastAssistantByThread.set(envelope.threadId, message);
+    }
+
+    const messageUsage = message.usage;
+    usage.input += messageUsage.input;
+    usage.output += messageUsage.output;
+    if (messageUsage.reasoning !== undefined) {
+      hasReasoning = true;
+      reasoning += messageUsage.reasoning;
+    }
+    if (messageUsage.cacheRead !== undefined) {
+      hasCacheRead = true;
+      cacheRead += messageUsage.cacheRead;
+    }
+    if (messageUsage.cacheWrite !== undefined) {
+      hasCacheWrite = true;
+      cacheWrite += messageUsage.cacheWrite;
     }
   }
 
@@ -155,31 +181,59 @@ export function foldRun<World, Output = unknown>(
   if (hasCacheRead) usage.cacheRead = cacheRead;
   if (hasCacheWrite) usage.cacheWrite = cacheWrite;
 
-  const stepEntries = outputEvents.filter(
-    (envelope): envelope is typeof envelope & { stepId: string; threadId: ThreadId } =>
-      envelope.stepId !== undefined && envelope.threadId !== undefined,
+  return { allMessages, messagesByThread, lastAssistantOverall, lastAssistantByThread, usage };
+}
+
+/** The nodes a run entered, in log order — one entry per committed step output. */
+function foldTraversal(stepEntries: StepEnvelope[]): Traversal {
+  return stepEntries.map((envelope) => ({
+    node: envelope.stepId as NodeId,
+    thread: envelope.threadId,
+    ...(envelope.stepName ? { name: envelope.stepName } : {}),
+  }));
+}
+
+/** Per-node visits, approximating each visit's input from the same thread's previous committed output (see `NodeVisit.input`'s doc comment). */
+function foldVisits(stepEntries: StepEnvelope[]): NodeVisit[] {
+  const lastOutputByThread = new Map<string, unknown>();
+  return stepEntries.map((envelope) => {
+    const prev = lastOutputByThread.get(envelope.threadId);
+    const input = prev !== undefined ? [prev] : [];
+    lastOutputByThread.set(envelope.threadId, envelope.event.value);
+    return {
+      node: envelope.stepId as NodeId,
+      input,
+      output: envelope.event.value,
+      thread: envelope.threadId,
+    };
+  });
+}
+
+/** Folds a runtime's committed log + the fixture's world into a Run. @public */
+export function foldRun<World, Output = unknown>(
+  events: unknown[],
+  world: World,
+  latency: number,
+): Run<World, Output> {
+  const envelopes = events as Envelope[];
+  const committed = envelopes.filter(
+    (envelope): envelope is CommittedEnvelope => envelope.form === "committed",
   );
+  const outputEvents = outputEnvelopesOf(committed);
+  const output = outputEvents.at(-1)?.event.value as Output;
+  const stepEntries = stepEntriesOf(outputEvents);
+
+  const threads = collectThreads(committed);
+  const tools = pairTools(committed);
+  const { allMessages, messagesByThread, lastAssistantOverall, lastAssistantByThread, usage } =
+    foldMessages(committed);
 
   return {
     output,
     world,
     tools,
-    traversal: stepEntries.map((envelope) => ({
-      node: envelope.stepId as NodeId,
-      thread: envelope.threadId,
-      ...(envelope.stepName ? { name: envelope.stepName } : {}),
-    })),
-    visits: stepEntries.map((envelope) => {
-      const prev = lastOutputByThread.get(envelope.threadId);
-      const input = prev !== undefined ? [prev] : [];
-      lastOutputByThread.set(envelope.threadId, envelope.event.value);
-      return {
-        node: envelope.stepId as NodeId,
-        input,
-        output: envelope.event.value,
-        thread: envelope.threadId,
-      };
-    }),
+    traversal: foldTraversal(stepEntries),
+    visits: foldVisits(stepEntries),
     usage,
     latency,
     threads,

@@ -1,9 +1,7 @@
 // Eval dataset — Fixtures, Example, example(). A row is a world, the fixtures
 // that act on it, and the input that enters it.
 //
-// Stub only — the `example()` builder is trivial (just shapes its argument
-// into an Example), but kept as a stub for Story 0 uniformity; no story
-// currently gates behind it, so this may be filled in alongside Story 14/15.
+// example() just shapes its argument into an Example — no logic beyond that.
 
 import type { Message, Binding, ModelPort, Profile } from "../../index.js";
 

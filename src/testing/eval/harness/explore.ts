@@ -7,7 +7,7 @@ import type { Agent } from "../subject.js";
 import type { Example } from "../fixtures.js";
 import type { Scorer } from "../scorers.js";
 import type { Distribution } from "../regression.js";
-import { aggregate } from "./aggregate.js";
+import { aggregate, mean } from "./aggregate.js";
 import type { Metrics, Rank } from "./rank.js";
 import { byScore } from "./rank.js";
 import { runRow } from "./run-row.js";
@@ -80,10 +80,6 @@ export async function runExplore<World, Output = unknown>(
   variants.sort((a, b) => rankBy(b.metrics) - rankBy(a.metrics));
 
   return { variants };
-}
-
-function mean(values: number[]): number {
-  return values.length === 0 ? 0 : values.reduce((sum, v) => sum + v, 0) / values.length;
 }
 
 /** Registers a ranking eval across variants — never fails CI. @public */
