@@ -1,8 +1,5 @@
 // Eval scorers — one primitive: a Run to a number in 0..1, with a default
 // per-run bar. Pure — hand-built Run literals, no engine.
-//
-// Stub only — see the epic's Story 9 architecture note for the concrete
-// behaviour each earns.
 
 import type { Run } from "../graph/run.js";
 
@@ -20,30 +17,36 @@ export interface Scorer<World = unknown, Output = unknown> {
   score: (run: Run<World, Output>) => number | Promise<number>;
 }
 
-function notImplemented(name: string): never {
-  throw new Error(`${name}: not implemented`);
+function scorer<World, Output>(
+  name: string,
+  bars: Bars | undefined,
+  score: Scorer<World, Output>["score"],
+): Scorer<World, Output> {
+  return {
+    name,
+    minimumScore: bars?.minimumScore ?? 1,
+    ...(bars?.minimumPassRate !== undefined ? { minimumPassRate: bars.minimumPassRate } : {}),
+    score,
+  };
 }
 
 /** Did a call to `name` appear in run.tools. @public */
 export function toolCalled(name: string, bars?: Bars): Scorer {
-  void name;
-  void bars;
-  return notImplemented("toolCalled");
+  return scorer(`toolCalled(${name})`, bars, (run) =>
+    run.tools.some((c) => c.name === name) ? 1 : 0,
+  );
 }
 
 /** Did a call to `name` whose input satisfies `ok` appear in run.tools. @public */
 export function toolCalledWith(name: string, ok: (input: unknown) => boolean, bars?: Bars): Scorer {
-  void name;
-  void ok;
-  void bars;
-  return notImplemented("toolCalledWith");
+  return scorer(`toolCalledWith(${name})`, bars, (run) =>
+    run.tools.some((c) => c.name === name && ok(c.input)) ? 1 : 0,
+  );
 }
 
 /** Does `ok(run.world)` hold. @public */
 export function worldMatches<World>(ok: (world: World) => boolean, bars?: Bars): Scorer<World> {
-  void ok;
-  void bars;
-  return notImplemented("worldMatches");
+  return scorer("worldMatches", bars, (run) => (ok(run.world) ? 1 : 0));
 }
 
 /** Does `ok(run.output)` hold. @public */
@@ -51,17 +54,26 @@ export function outputMatches<Output>(
   ok: (output: Output) => boolean,
   bars?: Bars,
 ): Scorer<unknown, Output> {
-  void ok;
-  void bars;
-  return notImplemented("outputMatches");
+  return scorer("outputMatches", bars, (run) => (ok(run.output) ? 1 : 0));
 }
 
 /** Does `run.lastReply(thread)` match `pattern`. @public */
 export function saidOn(thread: string | undefined, pattern: string | RegExp, bars?: Bars): Scorer {
-  void thread;
-  void pattern;
-  void bars;
-  return notImplemented("saidOn");
+  return scorer("saidOn", bars, (run) => {
+    const reply = run.lastReply(thread);
+    if (!reply) return 0;
+    const text = reply.content
+      .filter((block): block is Extract<typeof block, { type: "text" }> => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+    return pattern instanceof RegExp
+      ? pattern.test(text)
+        ? 1
+        : 0
+      : text.includes(pattern)
+        ? 1
+        : 0;
+  });
 }
 
 /** Escape hatch — a scorer from any `(run) => number`. @public */
@@ -70,8 +82,5 @@ export function scoreBy<World, Output>(
   fn: Scorer<World, Output>["score"],
   bars?: Bars,
 ): Scorer<World, Output> {
-  void name;
-  void fn;
-  void bars;
-  return notImplemented("scoreBy");
+  return scorer(name, bars, fn);
 }
