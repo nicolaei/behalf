@@ -97,7 +97,7 @@ async function runOneRow<World, Output>(
 ): Promise<Run<World, Output>> {
   const started = Date.now();
   const world = row.world();
-  const fixtures = row.fixtures(world);
+  const fixtures = row.fixtures(world, spec.of.profile);
   const ready = await runtime({
     models: () => fixtures.models ?? throwNoModelConfigured(),
     bindings: fixtures.bindings,
