@@ -76,13 +76,16 @@ export function seedUseNode(
   currentInput: unknown,
   thread: Thread,
   runtime: Runtime,
+  alreadyLogged = false,
 ): { seed: Message; thread: Thread } {
   const fallback: Message | undefined = thread.messages.at(-1);
   const seed: Message | undefined =
     reason ?? (looksLikeMessage(currentInput) ? currentInput : fallback);
   if (!seed) throw new Error("use node has no message to seed its subgraph with");
   const seededThread = reason ? thread : withMessage(thread, seed);
-  runtime.store.append({ message: seed }, { type: "message", threadId: seededThread.id });
+  if (!alreadyLogged) {
+    runtime.store.append({ message: seed }, { type: "message", threadId: seededThread.id });
+  }
   return { seed, thread: seededThread };
 }
 
@@ -93,9 +96,10 @@ async function driveUseNode(
   reason: Message | undefined,
   currentInput: unknown,
   ctx: ExecutionContext,
+  isEntryFirstPass: boolean,
 ): Promise<RouteResult> {
   const { flow, runtime } = ctx;
-  const { seed, thread } = seedUseNode(reason, currentInput, ctx.thread, runtime);
+  const { seed, thread } = seedUseNode(reason, currentInput, ctx.thread, runtime, isEntryFirstPass);
 
   const result = await driveGraph(node.subgraph, runtime, thread, seed);
 
@@ -548,10 +552,20 @@ export async function driveGraph(
   // so the node's first error sees attempts: 0. Keyed by node id since a
   // retry re-runs the same node without ever changing `current`.
   const attemptsByNode = new Map<NodeId, number>();
+  // True only for the very first loop iteration, and only while it's still
+  // processing the entry node — the caller (runFlow or a parent
+  // seedUseNode) already logged `input` as this node's incoming message, so
+  // a `use` node here must not log it again. Any later iteration that
+  // happens to route back to the entry node's id (e.g. a loop) finds this
+  // false, since it's cleared right after the first pass regardless of
+  // which node kind actually ran.
 
+  let isFirstIteration = true;
   while (current) {
     const node = flow.nodes.get(current);
     if (!node) throw new Error(`graph "${flow.name}" has no node "${current}"`);
+    const isEntryFirstPass = isFirstIteration && current === flow.entry;
+    isFirstIteration = false;
 
     // Consumed by whichever node runs next, regardless of its kind — a join's
     // pendingInputs must never survive past the node it was meant for.
@@ -561,12 +575,19 @@ export async function driveGraph(
     if (node.kind === "finish") return { thread: currentThread, output: currentInput };
 
     if (node.kind === "use") {
-      const routed = await driveUseNode(node, current, reason, currentInput, {
-        flow,
-        runtime,
-        thread: currentThread,
-        attemptsByNode,
-      });
+      const routed = await driveUseNode(
+        node,
+        current,
+        reason,
+        currentInput,
+        {
+          flow,
+          runtime,
+          thread: currentThread,
+          attemptsByNode,
+        },
+        isEntryFirstPass,
+      );
       currentThread = routed.thread;
       currentInput = routed.input;
       reason = routed.reason;
