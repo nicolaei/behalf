@@ -4,7 +4,7 @@
 // Stub only — see the epic's Story 7 architecture note for the concrete
 // behaviour this earns.
 
-import type { Handle } from "../../index.js";
+import type { NodeRef } from "./traversal.js";
 import type { Run } from "./run.js";
 
 function notImplemented(name: string): never {
@@ -14,7 +14,7 @@ function notImplemented(name: string): never {
 /** Was `node` visited — how many times, with what input/output. @public */
 export function nodeCalled<World, Output = unknown>(
   run: Run<World, Output>,
-  node: Handle,
+  node: NodeRef,
   opts?: {
     times?: number;
     input?: (input: unknown[]) => boolean;
