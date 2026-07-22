@@ -12,14 +12,14 @@ import React, { useEffect, useRef, useState } from "react";
 import { Box, Text } from "ink";
 import TextInput from "ink-text-input";
 import { runFlow, userText } from "behalf";
-import type { Runtime, Message } from "behalf";
+import type { Runtime, Message, StepError } from "behalf";
 import { chat, DEFAULT_MODEL, assistant } from "./chat.js";
 
 export const MODEL_ID = DEFAULT_MODEL.identifier;
 export const REASONING_LEVEL = assistant.reasoning;
 
 type TranscriptEntry =
-  | { kind: "message"; role: "user" | "assistant" | "other"; text: string }
+  | { kind: "message"; role: "user" | "assistant" | "other"; text: string; thinkingChars?: number }
   | {
       kind: "tool";
       correlationId: string;
@@ -42,11 +42,45 @@ function textOf(message: Message): string {
     .join("");
 }
 
+// Thinking blocks carry the model's own reasoning — never dumped into the
+// transcript verbatim, just surfaced as a collapsed char count (see the
+// "💭" line in entryOf/the renderer below).
+function thinkingCharsOf(message: Message): number | undefined {
+  const chars = message.content
+    .filter(
+      (block): block is Extract<typeof block, { type: "thinking" }> => block.type === "thinking",
+    )
+    .reduce((total, block) => total + block.text.length, 0);
+  return chars > 0 ? chars : undefined;
+}
+
 function entryOf(message: Message): TranscriptEntry | undefined {
   if (message.role === "user") return { kind: "message", role: "user", text: textOf(message) };
   if (message.role === "assistant")
-    return { kind: "message", role: "assistant", text: textOf(message) };
+    return {
+      kind: "message",
+      role: "assistant",
+      text: textOf(message),
+      thinkingChars: thinkingCharsOf(message),
+    };
   return undefined; // system messages: skip silently
+}
+
+// A rejected `runFlow` is always a plain `Error` whose `.cause` is the
+// `StepError` the failing step (or `handleStepError`'s retry-exhausted path)
+// built — see `handleStepError` in src/engine/runtime/step-runner.ts:
+// `throw new Error(emit.error.message, { cause: emit.error })`. Surface the
+// StepError's `type` too, not just the generic message string.
+function formatRunError(cause: unknown): string {
+  const stepError =
+    cause instanceof Error &&
+    cause.cause &&
+    typeof cause.cause === "object" &&
+    "type" in cause.cause
+      ? (cause.cause as StepError)
+      : undefined;
+  if (stepError) return `[${stepError.type}] ${stepError.message}`;
+  return cause instanceof Error ? cause.message : String(cause);
 }
 
 function formatValue(value: unknown): string {
@@ -159,7 +193,7 @@ export function App({ ready }: { ready: Runtime }) {
     if (!started.current) {
       started.current = true;
       runFlow(chat, userText(trimmed), ready).catch((cause) => {
-        setError(cause instanceof Error ? cause.message : String(cause));
+        setError(formatRunError(cause));
       });
       return;
     }
@@ -188,10 +222,15 @@ export function App({ ready }: { ready: Runtime }) {
         {transcript.map((entry, index) => {
           if (entry.kind === "message") {
             return (
-              <Text key={index}>
-                <Text bold>{entry.role === "user" ? "You: " : "Assistant: "}</Text>
-                {entry.text}
-              </Text>
+              <Box key={index} flexDirection="column">
+                {entry.thinkingChars !== undefined && (
+                  <Text dimColor>💭 (thinking, {entry.thinkingChars} chars)</Text>
+                )}
+                <Text>
+                  <Text bold>{entry.role === "user" ? "You: " : "Assistant: "}</Text>
+                  {entry.text}
+                </Text>
+              </Box>
             );
           }
           const elapsed =
