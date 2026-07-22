@@ -87,6 +87,10 @@ export function foldRun<World, Output = unknown>(
   let hasReasoning = false;
   let hasCacheRead = false;
   let hasCacheWrite = false;
+  const allMessages: Message[] = [];
+  const messagesByThread = new Map<string, Message[]>();
+  let lastAssistantOverall: AssistantMessage | undefined;
+  const lastAssistantByThread = new Map<string, AssistantMessage>();
 
   for (const envelope of committed) {
     if (envelope.threadId !== undefined && !seenThreads.has(envelope.threadId)) {
@@ -117,7 +121,17 @@ export function foldRun<World, Output = unknown>(
     } else if (envelope.type === "message") {
       const event = envelope.event as Event["message"];
       const message = event.message;
+      allMessages.push(message);
+      if (envelope.threadId !== undefined) {
+        const list = messagesByThread.get(envelope.threadId) ?? [];
+        list.push(message);
+        messagesByThread.set(envelope.threadId, list);
+      }
       if (message.role === "assistant") {
+        lastAssistantOverall = message;
+        if (envelope.threadId !== undefined) {
+          lastAssistantByThread.set(envelope.threadId, message);
+        }
         const messageUsage = message.usage;
         usage.input += messageUsage.input;
         usage.output += messageUsage.output;
@@ -169,8 +183,10 @@ export function foldRun<World, Output = unknown>(
     usage,
     latency,
     threads,
-    lastReply: () => undefined,
-    messages: () => [],
+    lastReply: (thread) =>
+      thread === undefined ? lastAssistantOverall : lastAssistantByThread.get(thread),
+    messages: (thread) =>
+      thread === undefined ? allMessages : (messagesByThread.get(thread) ?? []),
   };
 }
 

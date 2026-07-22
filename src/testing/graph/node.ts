@@ -32,13 +32,13 @@ export function nodeCalled<World, Output = unknown>(
     throw new Error(`expected ${nodeId} to have been visited, but it was not`);
   }
 
-  if (opts?.input) {
+  if (matches.length > 0 && opts?.input) {
     const inputPred = opts.input;
     const ok = matches.some((v) => inputPred(v.input));
     if (!ok) throw new Error(`expected some visit of ${nodeId} to satisfy the input predicate`);
   }
 
-  if (opts?.output) {
+  if (matches.length > 0 && opts?.output) {
     const outputPred = opts.output;
     const ok = matches.some((v) => outputPred(v.output));
     if (!ok) throw new Error(`expected some visit of ${nodeId} to satisfy the output predicate`);

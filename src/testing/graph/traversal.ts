@@ -121,6 +121,16 @@ function matchTree(entries: Entry[], offset: number, spec: Traverse, locate: Loc
       return pos;
     }
     case "loop": {
+      // times: 0 means "never happens here" — nothing to locate (locate always
+      // throws on absence), so check the adjacent run directly instead.
+      if (spec.times === 0) {
+        let adjacent = 0;
+        while (entries[offset + adjacent]?.node === spec.node) adjacent++;
+        if (adjacent !== 0) {
+          throw new Error(`expected loop of ${spec.node} exactly 0 times, got ${String(adjacent)}`);
+        }
+        return offset;
+      }
       const start = locate(entries, offset, spec.node);
       let count = 0;
       while (entries[start + count]?.node === spec.node) count++;

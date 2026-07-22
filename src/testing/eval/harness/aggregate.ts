@@ -12,9 +12,11 @@ function median(sorted: number[]): number {
 /** Folds a raw score array into mean/median/stddev/min/max/passRate. `minimumScore` is the bar passRate is computed against. @public */
 export function aggregate(scores: number[], minimumScore: number): Distribution {
   const sorted = [...scores].sort((a, b) => a - b);
-  const mean = scores.reduce((sum, s) => sum + s, 0) / scores.length;
-  const variance = scores.reduce((sum, s) => sum + (s - mean) ** 2, 0) / scores.length;
-  const passRate = scores.filter((s) => s >= minimumScore).length / scores.length;
+  const mean = scores.length === 0 ? 0 : scores.reduce((sum, s) => sum + s, 0) / scores.length;
+  const variance =
+    scores.length === 0 ? 0 : scores.reduce((sum, s) => sum + (s - mean) ** 2, 0) / scores.length;
+  const passRate =
+    scores.length === 0 ? 0 : scores.filter((s) => s >= minimumScore).length / scores.length;
   return {
     mean,
     median: median(sorted),
