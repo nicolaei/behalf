@@ -22,6 +22,7 @@ const STAGE_NAMES = ["asker", "red", "green", "refactor"] as const;
 type StageName = (typeof STAGE_NAMES)[number];
 
 type TranscriptEntry =
+  | { kind: "header" }
   | { kind: "banner"; stage: StageName }
   | { kind: "message"; role: "user" | "assistant" | "other"; text: string; thinkingChars?: number }
   | {
@@ -116,7 +117,7 @@ function AskCard({
 }) {
   const [value, setValue] = useState("");
   return (
-    <Box flexDirection="column">
+    <Box flexDirection="column" borderStyle="round" paddingX={1}>
       <Text bold color="cyan">
         ? {pending.question}
       </Text>
@@ -146,7 +147,9 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
   // matters: once a plain reactive Box's content grows taller than the
   // terminal, Ink can no longer erase-and-redraw it in place and instead
   // appends a whole new frame on every re-render.
-  const [settled, setSettled] = useState<TranscriptEntry[]>([]);
+  // Seeded with the one-time header so it prints once at the very top of
+  // scrollback, before any transcript content.
+  const [settled, setSettled] = useState<TranscriptEntry[]>([{ kind: "header" }]);
   const [live, setLive] = useState<Extract<TranscriptEntry, { kind: "tool" }>[]>([]);
   const [streaming, setStreaming] = useState<StreamingReply | undefined>(undefined);
   const [input, setInput] = useState("");
@@ -273,12 +276,22 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
 
   return (
     <>
-      {/* Static must live at the top level, NOT inside the bordered Box:
-          its items are committed to scrollback once and never re-diffed,
-          which only works when nothing (like a border) has to re-render
-          around them. The bordered chrome below stays small and bounded. */}
+      {/* Static must live at the top level: its items are committed to
+          scrollback once and never re-diffed, which only works when nothing
+          has to re-render around them. Everything below it (stage strip,
+          live lines, input) stays small and bounded. */}
       <Static items={settled}>
         {(entry, index) => {
+          if (entry.kind === "header") {
+            return (
+              <Box key={index} flexDirection="column" marginBottom={1}>
+                <Text bold>multi-step-agent</Text>
+                <Text dimColor>
+                  model: {MODEL_ID} · reasoning: {REASONING_LEVEL}
+                </Text>
+              </Box>
+            );
+          }
           if (entry.kind === "banner") {
             return (
               <Text key={index} dimColor>
@@ -311,16 +324,12 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
           );
         }}
       </Static>
-      <Box flexDirection="column" borderStyle="round" paddingX={1}>
-        <Text bold> multi-step-agent </Text>
-        <Text dimColor>
-          model: {MODEL_ID} · reasoning: {REASONING_LEVEL}
-        </Text>
+      <Box flexDirection="column">
         <Box marginY={1}>
           <StageStrip current={currentStage} />
         </Box>
         <Box flexDirection="column">
-          {settled.length === 0 && live.length === 0 && !streaming && (
+          {settled.length <= 1 && live.length === 0 && !streaming && (
             <Text dimColor>(describe the page you want below to start)</Text>
           )}
           {live.map((entry) => {
