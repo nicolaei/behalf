@@ -7,9 +7,9 @@
 
 import type { Message, Binding, ModelPort } from "../../index.js";
 
-/** The fakes acting on a world: fake tool bindings, and (in a graph test) fake models. @public */
+/** The fakes acting on a world: fake tool bindings, and (in a graph test) a fake model port. `models` is a single port — same convention as `runtime({models: () => scriptedPort, ...})` elsewhere — used regardless of which `Model` the flow requests, since a test fixture only ever has one script in play. @public */
 export interface Fixtures {
-  models?: ModelPort[];
+  models?: ModelPort;
   bindings: Binding[];
 }
 
