@@ -47,6 +47,41 @@ describe("runScenario regression", () => {
 
     expect(result.passed).toBe(true);
     expect(store.read("t1")?.["const"]?.mean).toBe(1);
+    // No prior baseline existed to compare against — `regressed` must be
+    // absent, not `false` (an absent field means "not checked", `false` would
+    // wrongly claim a comparison happened and it passed).
+    const constResult = result.scorers.find((s) => s.name === "const");
+    expect(constResult).not.toHaveProperty("regressed");
+  });
+
+  it("writes each scorer's baseline independently — a regressing scorer doesn't strand its siblings", async () => {
+    const store = memoryBaselineStore();
+    store.write("t1", {
+      a: { mean: 1, median: 1, stddev: 0, min: 1, max: 1, passRate: 1 },
+      b: { mean: 0, median: 0, stddev: 0, min: 0, max: 0, passRate: 1 },
+    });
+    const tinyAgent = agent("tiny", { model: fakePort().model, system: "t", tools: [] });
+
+    await runScenario({
+      of: tinyAgent,
+      world: () => ({}),
+      fixtures: () => ({ models: fakePort(), bindings: [] }),
+      input: userText("hi"),
+      scorers: [
+        // regresses: clears its own bar (0.5) but falls short of fixed(0.1)'s
+        // 1 - 0.1 = 0.9 threshold against the stored baseline mean of 1.
+        scoreBy("a", () => 0.8, { minimumScore: 0.5 }),
+        // improves: clears its own bar and clears fixed(0.1)'s threshold
+        // against the stored baseline mean of 0.
+        scoreBy("b", () => 1, { minimumScore: 0.5 }),
+      ],
+      regression: fixed(0.1),
+      baseline: { store, test: "t1" },
+    });
+
+    const after = store.read("t1");
+    expect(after?.["a"]?.mean).toBe(1); // regressed — baseline preserved, not stranded-forward
+    expect(after?.["b"]?.mean).toBe(1); // didn't regress — baseline advances
   });
 
   it("fails when the current run regresses beyond the policy threshold, even though it clears its own bar", async () => {

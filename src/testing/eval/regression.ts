@@ -1,7 +1,7 @@
 // Eval regression — variance/fixed policies compared against a stored
 // per-scorer Distribution, via a pluggable BaselineStore (JSONL by default).
 
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 
 /** A scorer's score distribution across a scenario's runs. @public */
 export interface Distribution {
@@ -69,12 +69,10 @@ export function jsonlBaselineStore(path: string): BaselineStore {
       return entries.length > 0 ? entries[entries.length - 1]?.scorers : undefined;
     },
     write(test: string, scorers: Record<string, Distribution>): void {
-      const line = `${JSON.stringify({ test, scorers })}\n`;
-      if (!existsSync(path)) {
-        writeFileSync(path, line);
-      } else {
-        appendFileSync(path, line);
-      }
+      // appendFileSync creates the file if it doesn't exist yet, same as the
+      // writeFileSync branch this replaces — but atomically, with no separate
+      // existsSync check-then-act window a concurrent writer could land in.
+      appendFileSync(path, `${JSON.stringify({ test, scorers })}\n`);
     },
   };
 }

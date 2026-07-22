@@ -86,27 +86,30 @@ export async function runScenario<World, Output = unknown>(
       });
       const priorDistribution = priorScorers?.[scorer.name];
       const regressed =
-        spec.regression && priorDistribution
+        spec.regression && priorDistribution !== undefined
           ? checkRegression(spec.regression, priorDistribution, distribution) === "fail"
-          : false;
+          : undefined;
       return {
         name: scorer.name,
         passed: result.passed,
         distribution,
-        ...(spec.regression ? { regressed } : {}),
+        ...(regressed !== undefined ? { regressed } : {}),
       };
     }),
   );
 
   const passed = scorers.every((s) => s.passed) && scorers.every((s) => !s.regressed);
 
-  // Only ratchet the baseline forward on a run that didn't regress — a failing
-  // or regressed run shouldn't become the new bar future runs are judged against.
-  if (spec.baseline && passed) {
-    spec.baseline.store.write(
-      spec.baseline.test,
-      Object.fromEntries(scorers.map((s) => [s.name, s.distribution])),
-    );
+  // Ratchet each scorer's own baseline forward independently — a scorer that
+  // regressed (or failed its own bar) keeps its old baseline so it isn't
+  // judged against its own bad run next time, but that shouldn't strand a
+  // sibling scorer that passed and didn't regress from advancing too.
+  if (spec.baseline) {
+    const merged: Record<string, Distribution> = { ...priorScorers };
+    for (const s of scorers) {
+      if (s.passed && !s.regressed) merged[s.name] = s.distribution;
+    }
+    spec.baseline.store.write(spec.baseline.test, merged);
   }
 
   return { passed, scorers };

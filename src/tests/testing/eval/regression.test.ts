@@ -91,4 +91,23 @@ describe("BaselineStore JSONL adapter", () => {
   it("read returns undefined for an unknown test", () => {
     expect(jsonlBaselineStore(tmpPath).read("never-seen")).toBeUndefined();
   });
+
+  it("last-write-wins when the same test is written twice (append-only log)", () => {
+    const store = jsonlBaselineStore(tmpPath);
+    store.write("my-test", {
+      toolCalled: { mean: 1, median: 1, stddev: 0, min: 1, max: 1, passRate: 1 },
+    });
+    store.write("my-test", {
+      toolCalled: { mean: 2, median: 2, stddev: 0, min: 2, max: 2, passRate: 1 },
+    });
+    expect(store.read("my-test")?.["toolCalled"]?.mean).toBe(2);
+  });
+
+  it("a second write for a different test doesn't clobber the first (both readable)", () => {
+    const store = jsonlBaselineStore(tmpPath);
+    store.write("test-a", { s: { mean: 1, median: 1, stddev: 0, min: 1, max: 1, passRate: 1 } });
+    store.write("test-b", { s: { mean: 2, median: 2, stddev: 0, min: 2, max: 2, passRate: 1 } });
+    expect(store.read("test-a")?.["s"]?.mean).toBe(1);
+    expect(store.read("test-b")?.["s"]?.mean).toBe(2);
+  });
 });

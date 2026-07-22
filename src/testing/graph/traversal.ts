@@ -2,8 +2,10 @@
 // containsTraversal (subsequence), built from a small tree DSL: sequence,
 // group, loop, branch. Pure — reads Run.traversal, no engine.
 //
-// Both matchers share one tree-walk (matchTree) and differ only in how a bare
-// node is located (locateExact vs locateSubseq).
+// Both matchers share one tree-walk (matchTree), parameterized by a Locator
+// that says how a bare node is found from an offset (locateExact vs
+// locateSubseq) and whether it occurs at all from an offset onward (used
+// only by loop(times: 0)).
 
 import type { Handle, NodeId } from "../../index.js";
 import type { Run } from "./run.js";
@@ -74,17 +76,15 @@ function matchGroup(
   entries: Entry[],
   offset: number,
   branches: Traverse[],
-  locate: Locate,
+  locator: Locator,
 ): number {
   if (branches.length === 0) return offset;
   let lastError: unknown;
-  for (let i = 0; i < branches.length; i++) {
-    const branch = branches.at(i);
-    if (branch === undefined) continue;
+  for (const [i, candidate] of branches.entries()) {
     const rest = [...branches.slice(0, i), ...branches.slice(i + 1)];
     try {
-      const pos = matchTree(entries, offset, branch, locate);
-      return matchGroup(entries, pos, rest, locate);
+      const pos = matchTree(entries, offset, candidate, locator);
+      return matchGroup(entries, pos, rest, locator);
     } catch (err) {
       lastError = err;
     }
@@ -97,8 +97,11 @@ function describeGot(entries: Entry[], offset: number): string {
   return entries[offset] ? String(entries[offset].node) : "end of traversal";
 }
 
-/** Where a `node`/`branch`/`loop` spec's node is found from `offset` — the one thing exact vs subsequence matching disagree on. Throws with a message naming the expected node on failure. */
-type Locate = (entries: Entry[], offset: number, node: NodeId) => number;
+/** How `matchTree` finds a bare `node`/`branch`/`loop` spec's node from `offset`, and whether it occurs at all from `offset` onward — the two things exact vs subsequence matching disagree on. `find` throws with a message naming the expected node on failure; `occurs` backs `loop(times: 0)`'s absence check. */
+interface Locator {
+  find(entries: Entry[], offset: number, node: NodeId): number;
+  occurs(entries: Entry[], offset: number, node: NodeId): boolean;
+}
 
 /** Exact matching: the node must sit right at `offset` — no gaps allowed. */
 function locateExact(entries: Entry[], offset: number, node: NodeId): number {
@@ -120,6 +123,17 @@ function locateSubseq(entries: Entry[], offset: number, node: NodeId): number {
   return found;
 }
 
+/** Exact matching: the node must sit right at `offset` — matchesTraversal's full-consumption check catches a stray occurrence anywhere else, so `occurs` only needs to check `offset` itself. */
+const exactLocator: Locator = {
+  find: locateExact,
+  occurs: (entries, offset, node) => entries[offset]?.node === node,
+};
+
+/** Subsequence matching: gaps are allowed everywhere, so `occurs` needs a real forward scan — there's no full-consumption check to catch a stray occurrence elsewhere. */
+const subseqLocator: Locator = {
+  find: locateSubseq,
+  occurs: (entries, offset, node) => findNode(entries, offset, node) !== -1,
+};
 function findNode(entries: Entry[], from: number, node: NodeId): number {
   for (let i = from; i < entries.length; i++) {
     if (entries[i]?.node === node) return i;
@@ -127,31 +141,30 @@ function findNode(entries: Entry[], from: number, node: NodeId): number {
   return -1;
 }
 
-/** Walks `spec` against `entries` from `offset`, using `locate` to decide where a bare node/loop-start may sit — adjacency-only for exact matching, anywhere-onward for subsequence matching. Returns the position just past the match. Shared by matchesTraversal and containsTraversal; only `locate` differs between them. */
-function matchTree(entries: Entry[], offset: number, spec: Traverse, locate: Locate): number {
+/** Walks `spec` against `entries` from `offset`, using `locator` to decide where a bare node/loop-start may sit and whether it occurs at all — adjacency-only for exact matching, anywhere-onward for subsequence matching. Returns the position just past the match. Shared by matchesTraversal and containsTraversal; only `locator` differs between them. */
+function matchTree(entries: Entry[], offset: number, spec: Traverse, locator: Locator): number {
   switch (spec.kind) {
     case "node":
     case "branch":
-      return locate(entries, offset, spec.node) + 1;
+      return locator.find(entries, offset, spec.node) + 1;
     case "sequence": {
       let pos = offset;
       for (const item of spec.items) {
-        pos = matchTree(entries, pos, item, locate);
+        pos = matchTree(entries, pos, item, locator);
       }
       return pos;
     }
     case "loop": {
-      // times: 0 means "never happens here" — nothing to locate (locate always
-      // throws on absence), so check the adjacent run directly instead.
+      // times: 0 means "never occurs here" — nothing to locate (find always
+      // throws on absence), so check via `occurs` instead, which the locator
+      // itself defines to match its own gaps-allowed-or-not semantics.
       if (spec.times === 0) {
-        let adjacent = 0;
-        while (entries[offset + adjacent]?.node === spec.node) adjacent++;
-        if (adjacent !== 0) {
-          throw new Error(`expected loop of ${spec.node} exactly 0 times, got ${String(adjacent)}`);
+        if (locator.occurs(entries, offset, spec.node)) {
+          throw new Error(`expected loop of ${spec.node} exactly 0 times, got at least 1`);
         }
         return offset;
       }
-      const start = locate(entries, offset, spec.node);
+      const start = locator.find(entries, offset, spec.node);
       let count = 0;
       while (entries[start + count]?.node === spec.node) count++;
       if (spec.times !== undefined && count !== spec.times) {
@@ -167,7 +180,7 @@ function matchTree(entries: Entry[], offset: number, spec: Traverse, locate: Loc
       return start + count;
     }
     case "group":
-      return matchGroup(entries, offset, spec.branches, locate);
+      return matchGroup(entries, offset, spec.branches, locator);
   }
 }
 
@@ -181,7 +194,7 @@ export function matchesTraversal<World, Output = unknown>(
   spec: Traverse | NodeRef,
 ): void {
   const entries = run.traversal as Entry[];
-  const end = matchTree(entries, 0, normalizeSpec(spec), locateExact);
+  const end = matchTree(entries, 0, normalizeSpec(spec), exactLocator);
   if (end !== entries.length) {
     throw new Error(
       `expected traversal to end at position ${String(end)}, but ${String(entries.length - end)} more entries followed (next: ${describeGot(entries, end)})`,
@@ -195,5 +208,5 @@ export function containsTraversal<World, Output = unknown>(
   spec: Traverse | NodeRef,
 ): void {
   const entries = run.traversal as Entry[];
-  matchTree(entries, 0, normalizeSpec(spec), locateSubseq);
+  matchTree(entries, 0, normalizeSpec(spec), subseqLocator);
 }
