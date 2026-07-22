@@ -38,7 +38,7 @@ export interface ToolTrace {
 /** The nodes a run entered, in log order. @public */
 export type Traversal = { node: NodeId; name?: string; thread: ThreadId }[];
 
-/** One node's visit — its input, its output, and which thread it ran on. @public */
+/** One node's visit — its input, its output, and which thread it ran on. `input` is an approximation: [the previous committed output on this thread] (empty for a thread's first visit), not the engine's real resolved routing input — exact for linear/looped single-predecessor graphs, approximate for fan-out/fan-in nodes with multiple upstream branches (the log alone, without the Graph, can't recover the real value). @public */
 export interface NodeVisit {
   node: NodeId;
   input: unknown[];
@@ -83,6 +83,7 @@ export function foldRun<World, Output = unknown>(
 
   const tools: ToolTrace[] = [];
   const pendingCalls = new Map<string, { name: string; input: unknown; thread: ThreadId }>();
+  const lastOutputByThread = new Map<string, unknown>();
   const threads: { id: ThreadId; label?: string }[] = [];
   const seenThreads = new Set<string>();
   const usage: Usage = { input: 0, output: 0 };
@@ -160,7 +161,22 @@ export function foldRun<World, Output = unknown>(
         thread: envelope.threadId,
         ...(envelope.stepName ? { name: envelope.stepName } : {}),
       })),
-    visits: [],
+    visits: outputEvents
+      .filter(
+        (envelope): envelope is typeof envelope & { stepId: string; threadId: ThreadId } =>
+          envelope.stepId !== undefined && envelope.threadId !== undefined,
+      )
+      .map((envelope) => {
+        const prev = lastOutputByThread.get(envelope.threadId);
+        const input = prev !== undefined ? [prev] : [];
+        lastOutputByThread.set(envelope.threadId, envelope.event.value);
+        return {
+          node: envelope.stepId as NodeId,
+          input,
+          output: envelope.event.value,
+          thread: envelope.threadId,
+        };
+      }),
     usage,
     latency,
     threads,
