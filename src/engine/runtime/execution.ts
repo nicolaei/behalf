@@ -253,9 +253,11 @@ export function buildToolContext(
   threadId: ThreadId,
   runtime: Runtime,
   identity: StepIdentity,
+  correlationId: string,
 ): ToolContext {
   return {
     thread: threadId,
+    correlationId,
     openStream: (type) =>
       runtime.store.open({
         correlationId: freshCorrelationId(runtime),
@@ -286,7 +288,7 @@ export async function executeToolCall(
   identity: StepIdentity,
 ): Promise<unknown> {
   const handler = findToolBinding(runtime, call.name);
-  const toolContext = buildToolContext(threadId, runtime, identity);
+  const toolContext = buildToolContext(threadId, runtime, identity, call.correlationId);
   const output = await handler(call.input, toolContext);
 
   runtime.store.append(
@@ -391,7 +393,7 @@ export async function callTool<Input, Output>(
   identity: StepIdentity,
 ): Promise<Output> {
   const handler = findToolBinding(runtime, tool.name);
-  const toolContext = buildToolContext(threadId, runtime, identity);
+  const toolContext = buildToolContext(threadId, runtime, identity, freshCorrelationId(runtime));
   return handler(input, toolContext) as Promise<Output>;
 }
 
