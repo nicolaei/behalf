@@ -118,7 +118,7 @@ function AskCard({
   return (
     <Box flexDirection="column">
       <Text bold color="cyan">
-        ❓ {pending.question}
+        ? {pending.question}
       </Text>
       <Box>
         <Text dimColor>{"> "}</Text>
@@ -272,14 +272,11 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
   }
 
   return (
-    <Box flexDirection="column" borderStyle="round" paddingX={1}>
-      <Text bold> multi-step-agent </Text>
-      <Text dimColor>
-        model: {MODEL_ID} · reasoning: {REASONING_LEVEL}
-      </Text>
-      <Box marginY={1}>
-        <StageStrip current={currentStage} />
-      </Box>
+    <>
+      {/* Static must live at the top level, NOT inside the bordered Box:
+          its items are committed to scrollback once and never re-diffed,
+          which only works when nothing (like a border) has to re-render
+          around them. The bordered chrome below stays small and bounded. */}
       <Static items={settled}>
         {(entry, index) => {
           if (entry.kind === "banner") {
@@ -314,45 +311,54 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
           );
         }}
       </Static>
-      <Box flexDirection="column">
-        {settled.length === 0 && live.length === 0 && !streaming && (
-          <Text dimColor>(describe the page you want below to start)</Text>
-        )}
-        {live.map((entry) => {
-          if (entry.name === "ask") {
-            // Rendered specially below via pendingAsk/AskCard, not as a plain
-            // tool card — skip the generic rendering for it here.
+      <Box flexDirection="column" borderStyle="round" paddingX={1}>
+        <Text bold> multi-step-agent </Text>
+        <Text dimColor>
+          model: {MODEL_ID} · reasoning: {REASONING_LEVEL}
+        </Text>
+        <Box marginY={1}>
+          <StageStrip current={currentStage} />
+        </Box>
+        <Box flexDirection="column">
+          {settled.length === 0 && live.length === 0 && !streaming && (
+            <Text dimColor>(describe the page you want below to start)</Text>
+          )}
+          {live.map((entry) => {
+            if (entry.name === "ask") {
+              // Rendered specially below via pendingAsk/AskCard, not as a plain
+              // tool card — skip the generic rendering for it here.
+              return (
+                <Text key={entry.correlationId} dimColor>
+                  ? waiting on your answer…
+                </Text>
+              );
+            }
             return (
               <Text key={entry.correlationId} dimColor>
-                ❓ waiting on your answer…
+                - {entry.name}({formatValue(entry.input)}) {entry.progress ?? "…"}
               </Text>
             );
-          }
-          return (
-            <Text key={entry.correlationId} dimColor>
-              🔧 {entry.name}({formatValue(entry.input)}) {entry.progress ?? "…"}
+          })}
+          {streaming && (
+            <Text>
+              <Text bold>Assistant: </Text>
+              {streaming.text}
+              <Text dimColor>▌</Text>
             </Text>
-          );
-        })}
-        {streaming && (
-          <Text>
-            <Text bold>Assistant: </Text>
-            {streaming.text}
-            <Text dimColor>▌</Text>
-          </Text>
+          )}
+          {error && <Text color="red">Error: {error}</Text>}
+        </Box>
+        {pendingAsk ? (
+          <Box marginTop={1}>
+            <AskCard pending={pendingAsk} onSubmit={(answer) => pendingAsk.resolve(answer)} />
+          </Box>
+        ) : (
+          <Box marginTop={1}>
+            <Text dimColor>{"> "}</Text>
+            <TextInput value={input} onChange={setInput} onSubmit={submit} />
+          </Box>
         )}
-        {error && <Text color="red">Error: {error}</Text>}
       </Box>
-      {pendingAsk ? (
-        <Box marginTop={1}>
-          <AskCard pending={pendingAsk} onSubmit={(answer) => pendingAsk.resolve(answer)} />
-        </Box>
-      ) : (
-        <Box marginTop={1}>
-          <Text dimColor>{"> "}</Text>
-          <TextInput value={input} onChange={setInput} onSubmit={submit} />
-        </Box>
-      )}
-    </Box>
+    </>
   );
 }
