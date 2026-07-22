@@ -17,17 +17,17 @@ import type {
   Usage,
   Runtime,
 } from "../../index.js";
-import type { Envelope } from "../../session/index.js";
+import type { Envelope, CommittedEnvelope } from "../../session/envelope.js";
+import type { Event } from "../../session/event.js";
 import { stepUntilBlocked as lowLevelStepUntilBlocked } from "../index.js";
 import type { StepResult } from "../index.js";
 
-/** One tool call folded from a run's log — call, result, and where it happened. @public */
+/** One tool call folded from a run's log — call, result, and where it happened. `node` is omitted: a tool call's toolCall/toolResult envelopes are thread-scoped only (via appendEvent), never tagged with the requesting step's id. @public */
 export interface ToolTrace {
   name: string;
   input: unknown;
   output: unknown;
   isError?: boolean;
-  node: NodeId;
   thread: ThreadId;
 }
 
@@ -60,10 +60,6 @@ function notImplemented(name: string): never {
   throw new Error(`${name}: not implemented`);
 }
 
-function zeroUsage(): Usage {
-  return { input: 0, output: 0 };
-}
-
 /** Folds a runtime's committed log + the fixture's world into a Run. @public */
 export function foldRun<World, Output = unknown>(
   events: unknown[],
@@ -71,22 +67,90 @@ export function foldRun<World, Output = unknown>(
   latency: number,
 ): Run<World, Output> {
   const envelopes = events as Envelope[];
-  const outputEvents = envelopes.filter(
-    (envelope): envelope is Envelope<"output"> & { event: { value: unknown } } =>
-      envelope.form !== "delta" && envelope.type === "output",
+  const committed = envelopes.filter(
+    (envelope): envelope is CommittedEnvelope => envelope.form === "committed",
+  );
+  const outputEvents = committed.filter(
+    (envelope): envelope is CommittedEnvelope & { type: "output"; event: { value: unknown } } =>
+      envelope.type === "output",
   );
   const lastOutput = outputEvents.at(-1);
   const output = lastOutput?.event.value as Output;
 
+  const tools: ToolTrace[] = [];
+  const pendingCalls = new Map<string, { name: string; input: unknown; thread: ThreadId }>();
+  const threads: { id: ThreadId; label?: string }[] = [];
+  const seenThreads = new Set<string>();
+  const usage: Usage = { input: 0, output: 0 };
+  let reasoning = 0;
+  let cacheRead = 0;
+  let cacheWrite = 0;
+  let hasReasoning = false;
+  let hasCacheRead = false;
+  let hasCacheWrite = false;
+
+  for (const envelope of committed) {
+    if (envelope.threadId !== undefined && !seenThreads.has(envelope.threadId)) {
+      seenThreads.add(envelope.threadId);
+      threads.push({ id: envelope.threadId });
+    }
+
+    if (envelope.type === "toolCall" && envelope.threadId !== undefined) {
+      const event = envelope.event as Event["toolCall"];
+      pendingCalls.set(event.correlationId, {
+        name: event.name,
+        input: event.input,
+        thread: envelope.threadId,
+      });
+    } else if (envelope.type === "toolResult") {
+      const event = envelope.event as Event["toolResult"];
+      const call = pendingCalls.get(event.correlationId);
+      if (call) {
+        pendingCalls.delete(event.correlationId);
+        tools.push({
+          name: call.name,
+          input: call.input,
+          output: event.output,
+          ...(event.isError !== undefined ? { isError: event.isError } : {}),
+          thread: call.thread,
+        });
+      }
+    } else if (envelope.type === "message") {
+      const event = envelope.event as Event["message"];
+      const message = event.message;
+      if (message.role === "assistant") {
+        const messageUsage = message.usage;
+        usage.input += messageUsage.input;
+        usage.output += messageUsage.output;
+        if (messageUsage.reasoning !== undefined) {
+          hasReasoning = true;
+          reasoning += messageUsage.reasoning;
+        }
+        if (messageUsage.cacheRead !== undefined) {
+          hasCacheRead = true;
+          cacheRead += messageUsage.cacheRead;
+        }
+        if (messageUsage.cacheWrite !== undefined) {
+          hasCacheWrite = true;
+          cacheWrite += messageUsage.cacheWrite;
+        }
+      }
+    }
+  }
+
+  if (hasReasoning) usage.reasoning = reasoning;
+  if (hasCacheRead) usage.cacheRead = cacheRead;
+  if (hasCacheWrite) usage.cacheWrite = cacheWrite;
+
   return {
     output,
     world,
-    tools: [],
+    tools,
     traversal: [],
     visits: [],
-    usage: zeroUsage(),
+    usage,
     latency,
-    threads: [],
+    threads,
     lastReply: () => undefined,
     messages: () => [],
   };
