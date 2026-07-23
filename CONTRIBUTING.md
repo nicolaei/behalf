@@ -39,4 +39,33 @@ npm's [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) can only b
 package that already exists on the registry.
 So a package's very first publish has to happen manually, once, before automation can take over for
 it.
-See the release workflow's own comments for the exact commands.
+
+Do this once, in order (`core` has no `@behalf-js/*` dependencies; the other five all depend on it,
+so it needs to exist on the registry first):
+
+```bash
+npm run build
+(cd packages/core && npm publish)
+(cd packages/testing && npm publish)
+(cd packages/models-anthropic && npm publish)
+(cd packages/models-openai && npm publish)
+(cd packages/tools && npm publish)
+(cd packages/stores && npm publish)
+```
+
+This uses your own npm login (`npm whoami` to check, `npm login` if not), not Trusted Publishing.
+There's nothing to configure for it beyond having publish rights on the `@behalf-js` scope.
+
+Once a package exists on the registry, register its Trusted Publisher so `release.yml` can publish
+it automatically from then on: on npmjs.com, go to that package's **Settings → Trusted Publisher**
+and add a GitHub Actions publisher with these values (the same six times, once per package):
+
+| Field               | Value         |
+| ------------------- | ------------- |
+| Organization / user | `nicolaei`    |
+| Repository          | `behalf`      |
+| Workflow filename   | `release.yml` |
+| Allowed actions     | `npm publish` |
+
+Environment name can stay blank unless a GitHub Environment with required reviewers gets added later
+as an extra approval gate.
