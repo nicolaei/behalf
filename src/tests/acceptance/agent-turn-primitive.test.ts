@@ -5,16 +5,22 @@ import {
   assistantToolCall,
   assistantToolCalls,
   assistantText,
-  loggedEnvelopes,
   orphanedToolCallIds,
   at,
 } from "./support.js";
+import { foldRun } from "../../testing/graph/index.js";
 
 // agentTurn is the library's own reusable "run a model, wait for every tool
 // call it made, fold their results into one combined message, loop" graph —
 // the generalized, exported version of agent-loop.test.ts's hand-rolled
 // forEach + waitFor(toolCall(id)) + compact pattern. examples/simple-chat's
 // chat.ts uses this instead of hand-rolling its own (buggy) loop.
+//
+// Driven with runFlow, not testing/graph's stepUntilBlocked, for the same
+// reason as agent-loop.test.ts: agentTurn's forEach branches park on the
+// runtime's background tool executor, which stepUntilBlocked's tick()-based
+// stepping doesn't drain. runFlow's own driveGraph awaits it inline; the
+// result is folded via the public foldRun for assertions.
 const CALL_COUNTS = [1, 2] as const;
 const MODEL: Model = {
   identifier: "scripted",
@@ -44,28 +50,27 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
   it("finishes, and the model's second call sees every tool call paired with its result", async () => {
     const tools = toolsFor(count);
     const profile: Profile = { model: MODEL, system: "agent", tools };
-    const capturedMessages: Message[][] = [];
     let call = 0;
     const port: ModelPort = {
       model: MODEL,
-      respond: (_profile, messages) => {
-        capturedMessages.push(messages);
+      respond: () => {
         call += 1;
         return Promise.resolve(call === 1 ? (firstReply(tools) as never) : assistantText("done"));
       },
     };
-
+    const store = adapters.stores.memoryStore();
     const ready = await runtime({
       models: () => port,
       bindings: tools.map((t) => provide(t, () => Promise.resolve({ ok: true }))),
-      store: adapters.stores.memoryStore(),
+      store,
     });
 
-    const result = await runFlow(agentTurn(profile), userText("go"), ready);
+    await runFlow(agentTurn(profile), userText("go"), ready);
+    const run = foldRun(store.events(), undefined, 0);
 
-    expect(result).toEqual({ finishedBy: "finalMessage", text: "done" });
+    expect(run.output).toEqual({ finishedBy: "finalMessage", text: "done" });
     expect(call).toBe(2);
-    expect(orphanedToolCallIds(at(capturedMessages, 1))).toEqual([]);
+    expect(orphanedToolCallIds(run.messages())).toEqual([]);
   });
 
   it("logs the collected tool results as one message event on the thread, in call order", async () => {
@@ -87,18 +92,22 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
     });
 
     await runFlow(agentTurn(profile), userText("go"), ready);
+    const run = foldRun(store.events(), undefined, 0);
 
-    const toolMessages = loggedEnvelopes(store).filter(
-      (e) => e.type === "message" && (e.event as { message: Message }).message.role === "tool",
-    );
+    const toolMessages = run.messages().filter((m) => m.role === "tool");
     expect(toolMessages).toHaveLength(1); // one combined message, never one per call
 
-    const message = (at(toolMessages, 0).event as { message: Message }).message;
-    const resultIds = message.content
-      .filter((b): b is Extract<typeof b, { type: "toolResult" }> => b.type === "toolResult")
+    const resultIds = at(toolMessages, 0)
+      .content.filter(
+        (b): b is Extract<typeof b, { type: "toolResult" }> => b.type === "toolResult",
+      )
       .map((b) => b.correlationId);
     expect(resultIds).toEqual(tools.map((_, i) => String(i + 1))); // "1", "2" — call order
-    expect(at(toolMessages, 0).threadId).toBeDefined();
+
+    // Thread-scoped, not some global fallback: the same message shows up
+    // again when read through the run's own (single) thread.
+    expect(run.threads).toHaveLength(1);
+    expect(run.messages(at(run.threads, 0).id)).toEqual(run.messages());
   });
 
   it("keeps each thread's collected results on its own thread, even when correlationIds collide", async () => {
@@ -135,14 +144,15 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
       { finishedBy: "finalMessage", text: "done" },
     ]);
 
-    const toolMessages = loggedEnvelopes(store).filter(
-      (e) => e.type === "message" && (e.event as { message: Message }).message.role === "tool",
-    );
-    expect(toolMessages).toHaveLength(2); // one per thread, never merged
-    expect(new Set(toolMessages.map((e) => e.threadId)).size).toBe(2);
-    for (const envelope of toolMessages) {
-      const message = (envelope.event as { message: Message }).message;
-      expect(message.content.filter((b) => b.type === "toolResult")).toHaveLength(count);
+    const run = foldRun(store.events(), undefined, 0);
+    expect(run.threads).toHaveLength(2); // one per agent, never merged
+
+    for (const thread of run.threads) {
+      const toolMessages = run.messages(thread.id).filter((m) => m.role === "tool");
+      expect(toolMessages).toHaveLength(1);
+      expect(at(toolMessages, 0).content.filter((b) => b.type === "toolResult")).toHaveLength(
+        count,
+      );
     }
   });
 });

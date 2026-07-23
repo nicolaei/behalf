@@ -16,9 +16,11 @@ import type {
   ModelCallResult,
   ModelPort,
   Profile,
+  ThreadId,
   WaitForResult,
 } from "../../index.js";
-import { assistantText, assistantToolCall, loggedEventTypes } from "./support.js";
+import { assistantText, assistantToolCall } from "./support.js";
+import { foldRun } from "../../testing/graph/index.js";
 
 // Rewritten for the non-blocking modelCall contract (Story 6 of the
 // decoupled model/tool-calls epic): modelCall no longer waits for tool calls
@@ -26,6 +28,14 @@ import { assistantText, assistantToolCall, loggedEventTypes } from "./support.js
 // for and folding tool results explicitly, via forEach + toolCall, instead
 // of relying on modelCall having already done that work by the time the
 // step returns.
+//
+// Driven with runFlow, not testing/graph's stepUntilBlocked: this graph's
+// forEach branches park on `waitFor(toolCall(id))`, resolved by the
+// runtime's own background tool executor — an async process independent of
+// tick()'s single-pass stepping, which stepUntilBlocked drives. runFlow's
+// driveGraph awaits that resolution inline; folding its result via the
+// public foldRun still gets every graph-test assertion (tools/messages/
+// output) without needing tick()'s resumable stepping at all.
 describe("the agent loop", () => {
   // Deferred to a factory, not built at describe-scope: `tool()` isn't real
   // yet, and a describe body runs even when its `it`s are skipped.
@@ -98,20 +108,22 @@ describe("the agent loop", () => {
 
   it("keeps looping while the model calls tools, finishes once it doesn't", async () => {
     const { agentLoop, scriptedPort, search, callCount } = scriptedFixture();
+    const store = adapters.stores.memoryStore();
     const ready = await runtime({
       models: () => scriptedPort,
       bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
-      store: adapters.stores.memoryStore(),
+      store,
     });
 
-    const result = await runFlow(agentLoop, userText("find x"), ready);
+    await runFlow(agentLoop, userText("find x"), ready);
+    const run = foldRun(store.events(), undefined, 0);
 
     // called twice — once producing a tool call, once finishing
     expect(callCount()).toBe(2);
-    expect(result).toBe("done");
+    expect(run.output).toBe("done");
   });
 
-  it("appends a tool call and its result to the session log", async () => {
+  it("pairs the tool call with its result on the run's own tool trace", async () => {
     const { agentLoop, scriptedPort, search } = scriptedFixture();
     const store = adapters.stores.memoryStore();
     const ready = await runtime({
@@ -121,9 +133,15 @@ describe("the agent loop", () => {
     });
 
     await runFlow(agentLoop, userText("find x"), ready);
+    const run = foldRun(store.events(), undefined, 0);
 
-    const types = loggedEventTypes(store);
-    expect(types).toContain("toolCall");
-    expect(types).toContain("toolResult");
+    expect(run.tools).toEqual([
+      {
+        name: "search",
+        input: { query: "x" },
+        output: { hits: ["a"] },
+        thread: expect.any(String) as ThreadId,
+      },
+    ]);
   });
 });
