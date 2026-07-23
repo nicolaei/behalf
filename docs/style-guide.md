@@ -300,6 +300,50 @@ convention) links the whole file rather than a region:
 ​```
 ```
 
+### Graph diagrams: generated, side by side
+
+A page showing a graph's *shape* (`wiring-a-graph.md`, `fan-out-and-joining.md`,
+`thinking-in-behalf.md`'s "sketch the shape" step) never hand-draws that
+diagram — `tools/graph-to-mermaid.ts` generates it from the real `Graph`
+object the code above it builds, so the picture can't drift from the wiring
+the moment someone changes it. Hand-drawn Mermaid (the "Diagrams" section
+above) is still right for a *sequence* or *state* diagram, where there's no
+real object to generate from — only for a graph's node/edge shape.
+
+Laid out side by side, code on the left and its diagram on the right —
+react.dev's own code-next-to-result rhythm, the closest plain-Markdown
+equivalent to a Sandpack embed. GitHub has no native two-column Markdown, so
+this uses an HTML `<table>`; the blank line right after every `<td>` and
+right before every `</td>` is required — without it, GitHub treats the fence
+as raw HTML text instead of a Markdown code block and renders it unstyled:
+
+```markdown
+<table>
+<tr>
+<td>
+
+​```ts source=docs/examples/wiring-a-graph/audit.ts#graph
+​```
+
+</td>
+<td>
+
+​```mermaid source=docs/examples/wiring-a-graph/audit.ts#audit
+​```
+
+</td>
+</tr>
+</table>
+```
+
+The mermaid fence's `source=` works like the code fence's, but names an
+**exported binding**, not a region: `#audit` is the `Graph` value
+`audit.ts` exports under that name. A `diagram-sync` test (`tools/diagram-sync.ts`,
+parallel to the code `docs-sync` test) imports that binding, calls
+`graphToMermaid` on it, and asserts the result is byte-identical to the
+block's content — the same guarantee the code-region sync gives, extended to
+the picture.
+
 ## Naming
 
 - Doc file slugs are kebab-case and describe the concept, not the API name
