@@ -27,7 +27,7 @@ npm install behalf
 ```
 
 ```ts
-import { agentTurn, userText, runtime, runFlow, adapters } from "behalf";
+import { defineGraph, agentTurn, userText, runtime, runFlow, adapters } from "behalf";
 import type { Profile, Model } from "behalf";
 
 const sonnet5: Model = {
@@ -37,63 +37,36 @@ const sonnet5: Model = {
   reasoning: ["off", "medium"],
 };
 
-// `standardBindings` pairs each default tool (read, write, edit, bash) with a
-// working handler. `Profile.tools` wants the bare descriptors, so pull `.tool`
-// (or `.toolset`) out of each binding.
-const { standardBindings } = adapters.tools;
-const defaultTools = standardBindings.map((binding) =>
-  binding.kind === "tool" ? binding.tool : binding.toolset,
-);
-
 const assistant: Profile = {
   model: sonnet5,
   system: "You are a helpful assistant.",
-  tools: defaultTools,
+  tools: [],
 };
 
-// `agentTurn` is itself a graph: run the model, resolve whatever tools it
-// calls, loop back until a reply uses no tools. A real chat wraps this in
-// `flow.waitFor(userInput("follow-up"))` to take a next prompt on the same
-// thread (see docs/learn/agents-in-practice). This is the one turn on its own.
-export const support = agentTurn(assistant);
-
-async function main() {
-  const ready = await runtime({
-    models: () => adapters.models.createAnthropicPort(sonnet5),
-    bindings: standardBindings,
-    store: adapters.stores.memoryStore(),
-  });
-
-  const result = await runFlow(support, userText("List the files in this directory."), ready);
-  console.log(result);
-}
-
-main().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
+// `agentTurn(assistant)` is itself a graph. `flow.use` composes it as one
+// node here, so `support` is a graph too, just one node deep for now.
+export const support = defineGraph("support", (flow) => {
+  const turn = flow.use(agentTurn(assistant));
+  flow.entry(turn);
+  turn.then(flow.finish);
 });
+
+const ready = await runtime({
+  models: () => adapters.models.createAnthropicPort(sonnet5),
+  bindings: [],
+  store: adapters.stores.memoryStore(),
+});
+
+const result = await runFlow(support, userText("Say hello in one sentence."), ready);
+console.log(result);
 ```
 
 ## Runnable examples
 
-Full standalone apps, each with its own `package.json`, as distinct from the
-small doc fragments under `docs/examples/` (meant to be read, not run):
-
-- **[`examples/simple-chat`](./examples/simple-chat/)**: a terminal chat
-  agent. Real Anthropic streaming and real filesystem tools, no mocks.
-- **[`examples/multi-step-agent`](./examples/multi-step-agent/)**: a
-  four-stage pipeline, asker → red → green → refactor, that interviews you
-  for a spec, then writes a failing test, makes it pass, and refactors it.
-
-Each has its own README with setup and auth. From the repo root:
-
-```sh
-npm install
-npm run build
-cd examples/simple-chat  # or examples/multi-step-agent
-npm install
-npm start
-```
+- **[`Simple Chat`](./examples/simple-chat/)**: a terminal chat with tools.
+- **[`Multi Step Agent`](./examples/multi-step-agent/)**:
+  a four-stage coding pipeline that interviews you for a spec,
+  then writes a failing test, makes it pass, and refactors it.
 
 ## Documentation
 
