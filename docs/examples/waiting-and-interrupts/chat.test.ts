@@ -73,9 +73,6 @@ describe("chat", () => {
     expect(await done).toBe("Conversation ended.");
     // Both scripted replies were actually used — the loop-back really called
     // respond a second time, not just replayed the first reply.
-    expect(assistantTexts(store)).toEqual([
-      "Hello!",
-      "Why did the chicken cross the road?",
-    ]);
+    expect(assistantTexts(store)).toEqual(["Hello!", "Why did the chicken cross the road?"]);
   });
 });

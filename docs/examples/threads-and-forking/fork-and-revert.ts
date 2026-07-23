@@ -9,7 +9,7 @@
 // draft/review back-and-forth. Driven with a scripted ModelPort in
 // fork-and-revert.test.ts, so all three actions are actually exercised.
 
-import { defineGraph, userText } from "@behalf-js/core";
+import { defineGraph, outputs, userText } from "@behalf-js/core";
 import type { Graph, Profile, Model, StepContext } from "@behalf-js/core";
 
 const draftModel: Model = {
@@ -64,10 +64,12 @@ export const draftReview: Graph = defineGraph("fork-and-revert", (flow) => {
     return context.output(readVerdict(context));
   });
 
-  const notify = flow.step(async (context) => {
-    const verdict = context.inputs[0] as Verdict;
-    return context.output(`Notified: ${verdict.text}`);
-  });
+  const notify = flow.step(
+    outputs((context) => {
+      const verdict = context.inputs[0] as Verdict;
+      return `Notified: ${verdict.text}`;
+    }),
+  );
 
   flow.entry(draft);
 

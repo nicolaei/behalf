@@ -40,10 +40,12 @@ A step reads its work from one of two places: the conversation, or the previous 
 `route` reads the second one, differently from `classify`:
 
 ```ts source=docs/examples/steps-and-emits/two-ways.ts#route
-  const route = flow.step(async (context) => {
-    const label = context.inputs[0] as "bug" | "feature";
-    return context.output(label === "bug" ? triagePlan : featurePlan);
-  });
+  const route = flow.step(
+    outputs((context) => {
+      const label = context.inputs[0] as "bug" | "feature";
+      return label === "bug" ? triagePlan : featurePlan;
+    }),
+  );
 ```
 
 `context.inputs[0]` is the exact value `classify` just returned, not a message: no model saw it, no

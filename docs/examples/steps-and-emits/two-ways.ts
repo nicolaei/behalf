@@ -5,7 +5,7 @@
 // two-ways.test.ts, not a real provider, so both routes are actually
 // exercised by a test.
 
-import { defineGraph } from "@behalf-js/core";
+import { defineGraph, outputs } from "@behalf-js/core";
 import type { Graph, Profile, Model, StepContext } from "@behalf-js/core";
 
 const classifierModel: Model = {
@@ -41,10 +41,12 @@ export const twoWays: Graph = defineGraph("two-ways", (flow) => {
   // #endregion classify
 
   // #region route
-  const route = flow.step(async (context) => {
-    const label = context.inputs[0] as "bug" | "feature";
-    return context.output(label === "bug" ? triagePlan : featurePlan);
-  });
+  const route = flow.step(
+    outputs((context) => {
+      const label = context.inputs[0] as "bug" | "feature";
+      return label === "bug" ? triagePlan : featurePlan;
+    }),
+  );
   // #endregion route
 
   flow.entry(classify);
