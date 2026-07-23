@@ -7,21 +7,18 @@
 > 2. _(of software)_ an autonomous system executing tasks and making
 > decisions under delegated user authority.
 
-Behalf is a TypeScript library for building agent workflows as code: a graph
-of typed, testable steps, not a stack of natural-language instructions.
+Behalf is a TypeScript library for building agents as code.
 
-Most agent behavior today lives in **skills**: prose files telling a model
-what to do. Skills are easy to write and hard to make deterministic: you
-can't typecheck a paragraph, or unit-test an instruction. Behalf represents
-that behavior as a graph of steps instead, a persona calling a model, a
-tool running, a wait for input. A single skill, a whole workflow, and a
-multi-agent system are all just this one shape, at any scale.
+Most agent behavior today lives in **skills**: prose files telling a model what to do.
+Skills are easy to write and hard to make deterministic and reason about.
 
-A flow is code, so it's typechecked, unit-tested, and steppable one node at
-a time. Scoring a persona or checking a flow's coverage is a normal test,
-not a prompt review. And `use()` embeds one graph inside another, so a
-step, a workflow, and a system built from many workflows are the same
-shape.
+You can't typecheck a paragraph, or unit-test an instruction.
+
+Behalf represents that behavior as a graph of steps instead,
+with data to represent agents and tools.
+
+A skill for coding might turn into a single agent, or multiple agents in a workflow.
+And any of these collections of agents can themselves be composed.
 
 ## Get started
 
@@ -30,18 +27,50 @@ npm install behalf
 ```
 
 ```ts
-import { defineGraph, agentTurn, userInput } from "behalf";
+import { agentTurn, userText, runtime, runFlow, adapters } from "behalf";
+import type { Profile, Model } from "behalf";
 
-// `assistant` is a Profile: a model, a system prompt, and its tools
-// (see docs/learn/describing-a-flow). One persona, looped until it replies
-// without using a tool, waiting for the next prompt between turns: an
-// entire interactive chat, expressed as a graph.
-export const chat = defineGraph("chat", (flow) => {
-  const turn = flow.use(agentTurn(assistant));
-  const wait = flow.waitFor(userInput("follow-up"));
-  flow.entry(turn);
-  turn.then(wait);
-  wait.then(turn);
+const sonnet5: Model = {
+  identifier: "claude-sonnet-5",
+  provider: "anthropic",
+  contextWindow: 1_000_000,
+  reasoning: ["off", "medium"],
+};
+
+// `standardBindings` pairs each default tool (read, write, edit, bash) with a
+// working handler. `Profile.tools` wants the bare descriptors, so pull `.tool`
+// (or `.toolset`) out of each binding.
+const { standardBindings } = adapters.tools;
+const defaultTools = standardBindings.map((binding) =>
+  binding.kind === "tool" ? binding.tool : binding.toolset,
+);
+
+const assistant: Profile = {
+  model: sonnet5,
+  system: "You are a helpful assistant.",
+  tools: defaultTools,
+};
+
+// `agentTurn` is itself a graph: run the model, resolve whatever tools it
+// calls, loop back until a reply uses no tools. A real chat wraps this in
+// `flow.waitFor(userInput("follow-up"))` to take a next prompt on the same
+// thread (see docs/learn/agents-in-practice). This is the one turn on its own.
+export const support = agentTurn(assistant);
+
+async function main() {
+  const ready = await runtime({
+    models: () => adapters.models.createAnthropicPort(sonnet5),
+    bindings: standardBindings,
+    store: adapters.stores.memoryStore(),
+  });
+
+  const result = await runFlow(support, userText("List the files in this directory."), ready);
+  console.log(result);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
 });
 ```
 
