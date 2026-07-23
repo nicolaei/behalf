@@ -33,6 +33,19 @@ export default defineConfig([
     },
   },
 
+  // docs/examples/ — typechecked, tested doc snippets; see docs/examples/tsconfig.json
+  // (its own project) and docs/style-guide.md's "Example files" section.
+  {
+    files: ["docs/examples/**/*.ts"],
+    extends: [tseslint.configs.strictTypeChecked, tseslint.configs.stylisticTypeChecked],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir,
+      },
+    },
+  },
+
   // Root-level config files: syntax-only, no type program backs them.
   {
     files: ["*.config.js", "*.config.ts", "eslint.config.js"],

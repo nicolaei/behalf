@@ -15,6 +15,8 @@
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit",
     "typecheck:tools": "tsc --noEmit --project tools/tsconfig.json",
+    "typecheck:docs-examples": "tsc --noEmit --project docs/examples/tsconfig.json",
+    "typecheck:examples": "tsc --noEmit --project examples/simple-chat/tsconfig.json && tsc --noEmit --project examples/multi-step-agent/tsconfig.json",
     "lint": "eslint .",
     "lint:md": "markdownlint-cli2 \"docs/**/*.md\" \"README.md\"",
     "lint:links": "remark --quiet --frail docs README.md",
@@ -22,7 +24,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "check": "npm run format:check && npm run typecheck && npm run typecheck:tools && npm run lint && npm run lint:docs",
-    "verify": "npm run check && npm test",
+    "verify": "npm run build && npm run check && npm run typecheck:docs-examples && npm run typecheck:examples && npm test",
     "fix": "npm run format && npm run lint -- --fix"
   },
   "devDependencies": {

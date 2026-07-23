@@ -25,7 +25,7 @@ And any of these collections of agents can themselves be composed.
 npm install behalf
 ```
 
-```ts
+```ts source=docs/examples/readme/quick-start.ts
 import { defineGraph, agentTurn, userText, runtime, runFlow, adapters } from "behalf";
 import type { Profile, Model } from "behalf";
 
