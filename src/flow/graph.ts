@@ -8,10 +8,11 @@ import type { ThreadAction } from "./thread.js";
 /** Opaque brand for node identifiers within a graph. @public */
 export type NodeId = string & { readonly __brand: "NodeId" };
 
-/** Options attached to an edge — optional thread action and prompt transform. @public */
+/** Options attached to an edge — optional thread action, prompt transform, and a human-readable label (used by `graphToMermaid`; purely descriptive, never read by the engine). @public */
 export interface EdgeOptions {
   threadAction?: ThreadAction; // omitted = "same"
   prompt?: (output: unknown) => Message;
+  label?: string; // e.g. "no tools used" — shown instead of the generic when/otherwise/then name
 }
 
 /** One node's declaration, as captured by the `Flow` builder. */

@@ -20,6 +20,19 @@ export default defineConfig([
     },
   },
 
+  // tools/ — repo-internal dev tooling, not part of the published package;
+  // see tools/tsconfig.json (its own project, not src/'s).
+  {
+    files: ["tools/**/*.ts"],
+    extends: [tseslint.configs.strictTypeChecked, tseslint.configs.stylisticTypeChecked],
+    languageOptions: {
+      parserOptions: {
+        projectService: true,
+        tsconfigRootDir,
+      },
+    },
+  },
+
   // Root-level config files: syntax-only, no type program backs them.
   {
     files: ["*.config.js", "*.config.ts", "eslint.config.js"],
