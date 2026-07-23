@@ -74,6 +74,27 @@ main().catch((error) => {
 });
 ```
 
+## Runnable examples
+
+Full standalone apps, each with its own `package.json`, as distinct from the
+small doc fragments under `docs/examples/` (meant to be read, not run):
+
+- **[`examples/simple-chat`](./examples/simple-chat/)**: a terminal chat
+  agent. Real Anthropic streaming and real filesystem tools, no mocks.
+- **[`examples/multi-step-agent`](./examples/multi-step-agent/)**: a
+  four-stage pipeline, asker → red → green → refactor, that interviews you
+  for a spec, then writes a failing test, makes it pass, and refactors it.
+
+Each has its own README with setup and auth. From the repo root:
+
+```sh
+npm install
+npm run build
+cd examples/simple-chat  # or examples/multi-step-agent
+npm install
+npm start
+```
+
 ## Documentation
 
 - **[Learn](./docs/learn/README.md)** walks through the library's concepts,
