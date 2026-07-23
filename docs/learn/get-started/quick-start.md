@@ -103,9 +103,8 @@ in-memory assertion once you want to test a flow instead of running it live.
   (`agentTurn`) as a single node
 - `runtime()` resolves models and holds the session store; `runFlow()` seeds a message and drives to
   a result
-
-Next: design a flow of your own, from a blank page, using the same methodology behind every example
-in this guide.
+- Next: design a flow of your own, from a blank page, using the same methodology, in
+  [Thinking in behalf](./thinking-in-behalf.md)
 
 ---
 

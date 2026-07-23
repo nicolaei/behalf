@@ -25,6 +25,8 @@ classification step, one job.
 Draw the branches before wiring them.
 A ticket that resolves on its own finishes immediately; a ticket that needs a person waits for their
 reply, then answers using it.
+This is a fragment, not the whole file: threading, the wait point, and error handling are still to
+come, added incrementally over the rest of this page.
 
 <table>
 <tr>
@@ -35,8 +37,14 @@ export const triage: Graph = defineGraph("triage", (flow) => {
   const classify = flow.step(
     async (context) => {
       await context.modelCall(triagePersona);
-      const decision = lastAssistantText(context).includes("ESCALATE") ? "escalate" : "resolve";
-      return context.output({ decision });
+      const reply = lastAssistantText(context).trim();
+      if (reply !== "RESOLVE" && reply !== "ESCALATE") {
+        return context.fail({
+          type: "validation",
+          message: `expected "RESOLVE" or "ESCALATE", got "${reply}"`,
+        });
+      }
+      return context.output({ decision: reply === "ESCALATE" ? "escalate" : "resolve" });
     },
     { label: "triage" },
   );
@@ -87,6 +95,8 @@ flowchart TB
 Three steps, one branch, one wait point. `classify` decides which edge fires; `auto-resolve` and
 `respond` both end at the same `finish`, since the caller only cares about the final reply, not
 which path produced it.
+Notice `classify` also fails loudly on a reply that's neither "RESOLVE" nor "ESCALATE", instead of
+silently guessing one of the two: Step 5 wires up what happens next.
 
 ## Step 3: Choose threading
 
@@ -149,9 +159,8 @@ default retry-with-backoff handler after whatever list you pass, so returning `u
 - Choose `same`/`fork`/`new` per edge, and say why, even when the choice is the default
 - A wait point is `waitFor(userInput(kind))`; the `kind` is a label you invent, not an API name
 - Error handling is the last step, layered onto a working happy path, not built in from the start
-
-Next: the primitives this methodology assembles, `Step`, the four `Emit`s, and how a graph's wiring
-actually works.
+- Next: the primitives this methodology assembles, in
+  [Steps and emits](../building-the-graph/steps-and-emits.md)
 
 ---
 

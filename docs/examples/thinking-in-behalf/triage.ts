@@ -41,8 +41,14 @@ export const triage: Graph = defineGraph("triage", (flow) => {
   const classify = flow.step(
     async (context) => {
       await context.modelCall(triagePersona);
-      const decision = lastAssistantText(context).includes("ESCALATE") ? "escalate" : "resolve";
-      return context.output({ decision });
+      const reply = lastAssistantText(context).trim();
+      if (reply !== "RESOLVE" && reply !== "ESCALATE") {
+        return context.fail({
+          type: "validation",
+          message: `expected "RESOLVE" or "ESCALATE", got "${reply}"`,
+        });
+      }
+      return context.output({ decision: reply === "ESCALATE" ? "escalate" : "resolve" });
     },
     { label: "triage" },
   );
