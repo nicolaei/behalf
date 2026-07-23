@@ -2,9 +2,8 @@
 
 <!-- OUTLINE — skeleton only, no full prose yet. See docs/style-guide.md. -->
 
-`behalf/testing` wraps the engine's internal `tick`/`tickUntilSuspended` in a
-test author's own vocabulary — the same way a fake-timer library wraps a
-runtime's clock.
+`behalf/testing` wraps the engine's internal `tick`/`tickUntilSuspended` in a test author's own
+vocabulary — the same way a fake-timer library wraps a runtime's clock.
 
 ## You will learn
 
@@ -15,22 +14,24 @@ runtime's clock.
 
 ## Why a separate entry point
 
-_Purpose-built verbs (`StepState`, `laneId`) instead of raw engine internals
-(`CursorState`, `parent`). TODO._
+_Purpose-built verbs (`StepState`, `laneId`) instead of raw engine internals (`CursorState`,
+`parent`).
+TODO._
 
 ## Stepping one node at a time
 
-_`stepOnce` — one `StepResult`, one `StepState` per independently-progressing
-lane. Example ref: `docs/examples/testing-your-flows/step-through.ts#step-once`._
+_`stepOnce` — one `StepResult`, one `StepState` per independently-progressing lane.
+Example ref: `docs/examples/testing-your-flows/step-through.ts#step-once`._
 
 ## Driving until blocked
 
-_`stepUntilBlocked` — every lane parked or done. Example ref: `#until-blocked`._
+_`stepUntilBlocked` — every lane parked or done.
+Example ref: `#until-blocked`._
 
 ## Stepping until a condition
 
-_`stepUntil(flow, runtime, condition)`, `atNode(handle)`; `"stalled"` vs
-`"budget-exceeded"`. Example ref: `#step-until`._
+_`stepUntil(flow, runtime, condition)`, `atNode(handle)`; `"stalled"` vs `"budget-exceeded"`.
+Example ref: `#step-until`._
 
 ## Recap
 
@@ -38,7 +39,8 @@ _`stepUntil(flow, runtime, condition)`, `atNode(handle)`; `"stalled"` vs
 
 ---
 
-**Reference:** reference.md § Testing (full block: stepOnce/stepUntilBlocked, stepUntil/atNode/StepUntilError).
-**Examples:** `docs/examples/testing-your-flows/step-through.ts` — regions: `step-once`, `until-blocked`, `step-until`.
-**Section:** [Testing](./README.md)
-**Prev / Next:** [Model ports and bindings](../wiring-a-runtime/model-ports-and-bindings.md) / [Setting up fakes](./setting-up-fakes.md)
+**Reference:** reference.md § Testing (full block: stepOnce/stepUntilBlocked,
+stepUntil/atNode/StepUntilError). **Examples:** `docs/examples/testing-your-flows/step-through.ts` —
+regions: `step-once`, `until-blocked`, `step-until`. **Section:** [Testing](./README.md) **Prev /
+Next:** [Model ports and bindings](../wiring-a-runtime/model-ports-and-bindings.md) /
+[Setting up fakes](./setting-up-fakes.md)

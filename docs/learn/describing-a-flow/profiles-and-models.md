@@ -2,8 +2,8 @@
 
 <!-- OUTLINE — skeleton only, no full prose yet. See docs/style-guide.md. -->
 
-A `Model` describes what a provider can do; a `Profile` is the persona built
-on top of one — the thing a step actually calls.
+A `Model` describes what a provider can do; a `Profile` is the persona built on top of one — the
+thing a step actually calls.
 
 ## You will learn
 
@@ -19,12 +19,14 @@ Example ref: `docs/examples/profiles-and-models/basic.ts#model`._
 
 ## Profile
 
-_model + system + tools + optional reasoning. Example ref: `#profile`._
+_model + system + tools + optional reasoning.
+Example ref: `#profile`._
 
 ## Reasoning levels and coverage
 
-_Why an unsupported level is a coverage-check failure, not a runtime surprise
-— forward ref to `satisfiesFlows` in Running flows. TODO._
+_Why an unsupported level is a coverage-check failure, not a runtime surprise — forward ref to
+`satisfiesFlows` in Running flows.
+TODO._
 
 ## Recap
 
@@ -32,7 +34,7 @@ _Why an unsupported level is a coverage-check failure, not a runtime surprise
 
 ---
 
-**Reference:** reference.md § Model, § Profile.
-**Examples:** `docs/examples/profiles-and-models/basic.ts` — regions: `model`, `profile`.
-**Section:** [Describing a flow](./README.md)
-**Prev / Next:** [Messages and content](./messages-and-content.md) / [Tools and handlers](./tools-and-handlers.md)
+**Reference:** reference.md § Model, § Profile. **Examples:**
+`docs/examples/profiles-and-models/basic.ts` — regions: `model`, `profile`. **Section:**
+[Describing a flow](./README.md) **Prev / Next:** [Messages and content](./messages-and-content.md)
+/ [Tools and handlers](./tools-and-handlers.md)

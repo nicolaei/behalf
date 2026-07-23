@@ -2,8 +2,8 @@
 
 <!-- OUTLINE — skeleton only, no full prose yet. See docs/style-guide.md. -->
 
-Every turn is built from `Message`s and their content blocks — this page is
-the vocabulary the rest of the docs assume you already have.
+Every turn is built from `Message`s and their content blocks — this page is the vocabulary the rest
+of the docs assume you already have.
 
 ## You will learn
 
@@ -15,19 +15,20 @@ the vocabulary the rest of the docs assume you already have.
 
 ## Roles and content blocks
 
-_system/user/assistant/tool, `ContentBlock` union. Example ref:
-`docs/examples/messages-and-content/basic.ts#message`._
+_system/user/assistant/tool, `ContentBlock` union.
+Example ref: `docs/examples/messages-and-content/basic.ts#message`._
 
 ## Thinking blocks and the signature
 
-_Why `text` can be empty for some providers (the full thinking is encrypted
-into `signature` instead), why a port never mutates one — reasoned generically,
-no provider named (see style-guide.md's provider-naming rule). TODO._
+_Why `text` can be empty for some providers (the full thinking is encrypted into `signature`
+instead), why a port never mutates one — reasoned generically, no provider named (see
+style-guide.md's provider-naming rule).
+TODO._
 
 ## Intent and kind
 
-_`standard`/`steering`/`abort`; `kind` as the routing label. Example ref:
-`#user-message`._
+_`standard`/`steering`/`abort`; `kind` as the routing label.
+Example ref: `#user-message`._
 
 ## Recap
 
@@ -35,7 +36,8 @@ _`standard`/`steering`/`abort`; `kind` as the routing label. Example ref:
 
 ---
 
-**Reference:** reference.md § Message (full block).
-**Examples:** `docs/examples/messages-and-content/basic.ts` — regions: `message`, `user-message`, `thinking-block`.
-**Section:** [Describing a flow](./README.md)
-**Prev / Next:** [Waiting and interrupts](../building-the-graph/waiting-and-interrupts.md) / [Profiles and models](./profiles-and-models.md)
+**Reference:** reference.md § Message (full block). **Examples:**
+`docs/examples/messages-and-content/basic.ts` — regions: `message`, `user-message`,
+`thinking-block`. **Section:** [Describing a flow](./README.md) **Prev / Next:**
+[Waiting and interrupts](../building-the-graph/waiting-and-interrupts.md) /
+[Profiles and models](./profiles-and-models.md)

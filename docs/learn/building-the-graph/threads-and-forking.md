@@ -2,9 +2,8 @@
 
 <!-- OUTLINE — skeleton only, no full prose yet. See docs/style-guide.md. -->
 
-A thread is one growing message context. `ThreadAction` — `same`, `fork`, or
-`new` — is the one vocabulary every edge and `invalidate` uses to choose what
-happens to it.
+A thread is one growing message context. `ThreadAction` — `same`, `fork`, or `new` — is the one
+vocabulary every edge and `invalidate` uses to choose what happens to it.
 
 ## You will learn
 
@@ -20,8 +19,8 @@ TODO._
 
 ## same, fork, new
 
-_Default continue vs. a linked branch vs. a deliberate reset. Example ref:
-`docs/examples/threads-and-forking/fork-and-revert.ts#actions`._
+_Default continue vs. a linked branch vs. a deliberate reset.
+Example ref: `docs/examples/threads-and-forking/fork-and-revert.ts#actions`._
 
 ## Reverting by forking
 
@@ -30,7 +29,8 @@ Example ref: `#revert`._
 
 ## Labeling threads
 
-_`flow.step(run, { label })`. TODO._
+_`flow.step(run, { label })`.
+TODO._
 
 ## Recap
 
@@ -38,7 +38,7 @@ _`flow.step(run, { label })`. TODO._
 
 ---
 
-**Reference:** reference.md § Threads.
-**Examples:** `docs/examples/threads-and-forking/fork-and-revert.ts` — regions: `actions`, `revert`.
-**Section:** [Building the graph](./README.md)
-**Prev / Next:** [Wiring a graph](./wiring-a-graph.md) / [Waiting and interrupts](./waiting-and-interrupts.md)
+**Reference:** reference.md § Threads. **Examples:**
+`docs/examples/threads-and-forking/fork-and-revert.ts` — regions: `actions`, `revert`. **Section:**
+[Building the graph](./README.md) **Prev / Next:** [Wiring a graph](./wiring-a-graph.md) /
+[Waiting and interrupts](./waiting-and-interrupts.md)

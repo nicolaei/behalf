@@ -4,7 +4,7 @@ import { defineGraph, runtime, runFlow, userText, adapters } from "behalf";
 import type { Profile, Model } from "behalf";
 
 const DEFAULT_MODEL: Model = {
-  identifier: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
+  identifier: "claude-sonnet-5",
   provider: "anthropic",
   contextWindow: 1_000_000,
   reasoning: ["off", "medium"],

@@ -1,4 +1,6 @@
 {
   "printWidth": 100,
-  "trailingComma": "all"
+  "trailingComma": "all",
+  "plugins": ["prettier-plugin-sentences-per-line"],
+  "proseWrap": "always"
 }

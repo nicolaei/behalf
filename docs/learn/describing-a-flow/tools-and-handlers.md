@@ -2,8 +2,8 @@
 
 <!-- OUTLINE — skeleton only, no full prose yet. See docs/style-guide.md. -->
 
-A `tool` declares one typed capability; a `ToolHandler` implements it;
-`provide`/`expand` bind the two together.
+A `tool` declares one typed capability; a `ToolHandler` implements it; `provide`/`expand` bind the
+two together.
 
 ## You will learn
 
@@ -20,17 +20,20 @@ Example ref: `docs/examples/tools-and-handlers/search-tool.ts#tool`._
 
 ## Writing a handler
 
-_Input + `ToolContext` in, `Output` out; idempotency is the handler's own
-concern since it may re-run on resume. Example ref: `#handler`._
+_Input + `ToolContext` in, `Output` out; idempotency is the handler's own concern since it may
+re-run on resume.
+Example ref: `#handler`._
 
 ## Binding: provide and expand
 
-_Mixing them is a compile error. Example ref: `#binding`._
+_Mixing them is a compile error.
+Example ref: `#binding`._
 
 ## Streaming progress and spawning a sub-flow
 
-_`context.openStream`, `context.runFlow` — brief, forward ref to Streaming
-progress and Running flows. TODO._
+_`context.openStream`, `context.runFlow` — brief, forward ref to Streaming progress and Running
+flows.
+TODO._
 
 ## Recap
 
@@ -38,7 +41,8 @@ progress and Running flows. TODO._
 
 ---
 
-**Reference:** reference.md § tool / toolset, § ToolHandler, § provide / expand.
-**Examples:** `docs/examples/tools-and-handlers/search-tool.ts` — regions: `tool`, `handler`, `binding`.
-**Section:** [Describing a flow](./README.md)
-**Prev / Next:** [Profiles and models](./profiles-and-models.md) / [The agent loop](../agents-in-practice/the-agent-loop.md)
+**Reference:** reference.md § tool / toolset, § ToolHandler, § provide / expand. **Examples:**
+`docs/examples/tools-and-handlers/search-tool.ts` — regions: `tool`, `handler`, `binding`.
+**Section:** [Describing a flow](./README.md) **Prev / Next:**
+[Profiles and models](./profiles-and-models.md) /
+[The agent loop](../agents-in-practice/the-agent-loop.md)

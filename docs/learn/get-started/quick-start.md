@@ -2,8 +2,8 @@
 
 <!-- OUTLINE — skeleton only, no full prose yet. See docs/style-guide.md. -->
 
-Install behalf, describe a persona, wire the smallest possible graph, and run
-one turn — the fastest path from nothing to a working reply.
+Install behalf, describe a persona, wire the smallest possible graph, and run one turn — the fastest
+path from nothing to a working reply.
 
 ## You will learn
 
@@ -14,23 +14,22 @@ one turn — the fastest path from nothing to a working reply.
 
 ## Install
 
-_One command, one sentence on what "private": true / the entry point means for
-consumers — TODO._
+_One command, one sentence on what "private": true / the entry point means for consumers — TODO._
 
 ## Describe a persona
 
-_A minimal `Profile` — model + system + empty tools. Example ref:
-`docs/examples/quick-start/basic.ts#profile`._
+_A minimal `Profile` — model + system + empty tools.
+Example ref: `docs/examples/quick-start/basic.ts#profile`._
 
 ## Wire the graph
 
-_The smallest `defineGraph`: one step, `flow.entry`, `flow.finish`. Example
-ref: `#graph`._
+_The smallest `defineGraph`: one step, `flow.entry`, `flow.finish`.
+Example ref: `#graph`._
 
 ## Run it
 
-_`runtime({ models, bindings: [], store })` then `runFlow(...)`. Example ref:
-`#run`._
+_`runtime({ models, bindings: [], store })` then `runFlow(...)`.
+Example ref: `#run`._
 
 ## Recap
 
@@ -38,7 +37,7 @@ _`runtime({ models, bindings: [], store })` then `runFlow(...)`. Example ref:
 
 ---
 
-**Reference:** reference.md § Profile, § defineGraph, § runtime/runFlow.
-**Examples:** `docs/examples/quick-start/basic.ts` — regions: `profile`, `graph`, `run`; plus a "Full example" block for the whole file.
-**Section:** [Get started](./README.md)
-**Next:** [Thinking in behalf](./thinking-in-behalf.md)
+**Reference:** reference.md § Profile, § defineGraph, § runtime/runFlow. **Examples:**
+`docs/examples/quick-start/basic.ts` — regions: `profile`, `graph`, `run`; plus a "Full example"
+block for the whole file. **Section:** [Get started](./README.md) **Next:**
+[Thinking in behalf](./thinking-in-behalf.md)
