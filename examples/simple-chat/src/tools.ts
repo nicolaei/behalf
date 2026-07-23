@@ -44,8 +44,76 @@ const listDirectoryBinding: Binding = provide(listDirectory, async ({ path: targ
 
 const getCwdBinding: Binding = provide(getCwd, async () => ({ cwd: process.cwd() }));
 
+// M5 — deliberately slow, progress-streaming recursive search. Walks the
+// directory tree under `path` via real `readdir`/`readFile` I/O (no
+// artificial delay — a real tree is slow enough on its own) and reports a
+// substring match's file + line number. Emits a delta after every file it
+// scans, tagged with the tool call's own `correlationId`, so the UI can
+// correlate progress back to the right tool card while the search runs.
+export const searchFiles = tool<
+  { path: string; query: string },
+  { matches: { file: string; line: number }[] }
+>(
+  "search_files",
+  "Recursively search files under a directory for a substring match.",
+  z.object({ path: z.string(), query: z.string() }),
+);
+
+async function collectFiles(root: string): Promise<string[]> {
+  const files: string[] = [];
+  async function walk(dir: string): Promise<void> {
+    let entries;
+    try {
+      entries = await readdir(dir, { withFileTypes: true });
+    } catch {
+      return; // unreadable directory (permissions, race, etc.) — skip it
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) await walk(full);
+      else if (entry.isFile()) files.push(full);
+    }
+  }
+  await walk(root);
+  return files;
+}
+
+const searchFilesBinding: Binding = provide(
+  searchFiles,
+  async ({ path: target, query }, context) => {
+    const root = resolvePath(target);
+    const files = await collectFiles(root);
+    const stream = context.openStream("output");
+    const matches: { file: string; line: number }[] = [];
+    let scanned = 0;
+    for (const file of files) {
+      try {
+        const content = await fsReadFile(file, "utf-8");
+        const lines = content.split("\n");
+        for (let index = 0; index < lines.length; index++) {
+          if (lines[index].includes(query)) matches.push({ file, line: index + 1 });
+        }
+      } catch {
+        // unreadable file (binary, permissions, etc.) — skip it, keep searching
+      }
+      scanned++;
+      stream.delta({
+        correlationId: context.correlationId,
+        text: `scanned ${scanned}/${files.length} files (${matches.length} hits so far)`,
+      });
+    }
+    stream.commit({ value: { matches } });
+    return { matches };
+  },
+);
+
 // `Tool` refs, for `Profile.tools`.
-export const fsTools = [readFile, listDirectory, getCwd];
+export const fsTools = [readFile, listDirectory, getCwd, searchFiles];
 
 // `Binding`s, for `runtime({ bindings })`.
-export const fsBindings = [readFileBinding, listDirectoryBinding, getCwdBinding];
+export const fsBindings = [
+  readFileBinding,
+  listDirectoryBinding,
+  getCwdBinding,
+  searchFilesBinding,
+];

@@ -1,0 +1,23 @@
+{
+  "name": "multi-step-agent",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A four-stage agent pipeline built on behalf: an asker agent interviews the user, then red/green/refactor agents write a failing test, make it pass, and clean it up — each stage its own agentTurn, chained by threadAction: \"new\".",
+  "scripts": {
+    "start": "tsx src/index.tsx"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.0",
+    "behalf": "file:../..",
+    "ink": "^5.2.0",
+    "ink-text-input": "^6.0.0",
+    "react": "^18.3.1",
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^6.0.3"
+  }
+}

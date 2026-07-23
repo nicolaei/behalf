@@ -46,3 +46,13 @@ export const defaultErrorHandler: ErrorHandler = (error, context) => {
   const after = DEFAULT_RETRY_BASE_DELAY_MS * 2 ** context.attempts;
   return { action: "retry", after };
 };
+
+/** A thrown error that says its own retryability — the one thing only the raiser (e.g. a ModelPort) actually knows. runStep reads this via instanceof instead of hardcoding retryable:false for every throw. @public */
+export class RetryableError extends Error {
+  readonly retryable: boolean;
+  constructor(message: string, options: { retryable: boolean; cause?: unknown }) {
+    super(message, options.cause !== undefined ? { cause: options.cause } : undefined);
+    this.name = "RetryableError";
+    this.retryable = options.retryable;
+  }
+}

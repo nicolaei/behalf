@@ -30,3 +30,5 @@ export type {
   WaitForResult,
 } from "./step.js";
 export { outputs, compacts, join } from "./step.js";
+export { agentTurn } from "./agent-turn.js";
+export type { FinishOn, AgentTurnOptions, AgentTurnResult } from "./agent-turn.js";

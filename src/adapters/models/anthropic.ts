@@ -13,6 +13,7 @@ import type { Profile } from "../../flow/profile.js";
 import type { Tool, Toolset } from "../../flow/tool.js";
 import type { ContentBlock, Message, AssistantMessage, Usage } from "../../flow/message.js";
 import type { DeltaSink } from "../../session/envelope.js";
+import { RetryableError } from "../../engine/errors.js";
 
 /** One round-trip token round trip: a resolved credential mode for the Anthropic API. @public */
 export type AnthropicAuth = { mode: "oauth"; token: string } | { mode: "apiKey"; key: string };
@@ -68,22 +69,24 @@ export function createAnthropicClient(auth: AnthropicAuth): Anthropic {
 }
 
 const DEFAULT_MAX_TOKENS = 8192;
-const DEFAULT_THINKING_BUDGET = 4096;
 
-/** Thinking token budgets by reasoning level — deliberately coarse, not over-engineered. */
-const THINKING_BUDGETS: Record<string, number> = {
-  minimal: 1024,
-  low: 2048,
-  medium: 4096,
-  high: 8192,
-  xhigh: 16384,
+/** `Profile.reasoning` levels mapped to Anthropic's `output_config.effort` — the current
+ * API's own vocabulary for thinking effort. `minimal` has no `effort` equivalent; it maps
+ * to the lowest real level rather than inventing one. Deliberately coarse, not over-engineered. */
+const EFFORT_BY_REASONING: Record<string, Anthropic.OutputConfig["effort"]> = {
+  minimal: "low",
+  low: "low",
+  medium: "medium",
+  high: "high",
+  xhigh: "xhigh",
 };
 
 /** The shape `toAnthropicRequest` hands to `client.messages.create`. */
 export interface AnthropicRequest {
-  system: string;
+  system: string | Anthropic.TextBlockParam[];
   messages: Anthropic.MessageParam[];
   thinking?: Anthropic.ThinkingConfigParam;
+  effort?: Anthropic.OutputConfig["effort"];
   tools?: Anthropic.Tool[];
 }
 /** OAuth (Claude Pro/Max subscription) tokens are scoped to Claude Code's own tool surface — these are the exact tool names it will accept. @public */
@@ -204,9 +207,11 @@ function systemText(block: ContentBlock): string {
  * `Profile.system` is the primary system prompt source; any `system`-role
  * Messages in the history (docs/reference.md doesn't rule these out) are
  * appended after it so both land in Anthropic's single top-level `system` param.
- * In OAuth mode, Anthropic requires the Claude Code identity block to lead
- * the system prompt — the token is scoped to that client identity and the API
- * rejects/mishandles requests that don't present as Claude Code.
+ * In OAuth mode, Anthropic requires `system` to be an array of blocks whose
+ * FIRST block is exactly the Claude Code identity string — the endpoint
+ * verifies that block verbatim and rejects anything else (including the
+ * identity concatenated into a single system string) with a bogus 429
+ * rate_limit_error. Verified against the live API.
  */
 export function toAnthropicRequest(
   profile: Profile,
@@ -218,27 +223,37 @@ export function toAnthropicRequest(
     .map((m) => m.content.map(systemText).join(""))
     .filter((text) => text.length > 0);
 
-  const system = [...(isOAuth ? [CLAUDE_CODE_IDENTITY] : []), profile.system, ...systemFromHistory]
+  const rest = [profile.system, ...systemFromHistory]
     .filter((text) => text.length > 0)
     .join("\n\n");
+
+  const system: string | Anthropic.TextBlockParam[] = isOAuth
+    ? [
+        { type: "text", text: CLAUDE_CODE_IDENTITY },
+        ...(rest.length > 0 ? [{ type: "text" as const, text: rest }] : []),
+      ]
+    : rest;
 
   const anthropicMessages = messages
     .map((m) => toAnthropicMessage(m, isOAuth))
     .filter((m): m is Anthropic.MessageParam => m !== undefined);
 
   const reasoning = profile.reasoning;
+  // Anthropic's current API (claude-sonnet-5 and later) rejects the older
+  // `{type:"enabled", budget_tokens}` shape outright (400: "thinking.type.enabled"
+  // is not supported for this model. Use thinking.type.adaptive and
+  // output_config.effort") — adaptive+effort is the one shape that works
+  // across current models.
   const thinking: Anthropic.ThinkingConfigParam | undefined =
-    reasoning && reasoning !== "off"
-      ? {
-          type: "enabled",
-          budget_tokens: THINKING_BUDGETS[reasoning] ?? DEFAULT_THINKING_BUDGET,
-        }
-      : undefined;
+    reasoning && reasoning !== "off" ? { type: "adaptive" } : undefined;
+  const effort: Anthropic.OutputConfig["effort"] | undefined =
+    reasoning && reasoning !== "off" ? (EFFORT_BY_REASONING[reasoning] ?? "medium") : undefined;
 
   return {
     system,
     messages: anthropicMessages,
     ...(thinking ? { thinking } : {}),
+    ...(effort ? { effort } : {}),
     ...(profile.tools.length > 0
       ? { tools: profile.tools.map((t) => toAnthropicToolDef(t, isOAuth)) }
       : {}),
@@ -306,6 +321,12 @@ function usageFromMessageDelta(usage: Partial<Anthropic.MessageDeltaUsage> | und
   };
 }
 
+/** Anthropic's SDK throws with a numeric `status`; 429 (rate limit) and 5xx (transient server errors) are worth retrying, everything else isn't. @public */
+export function isRetryableAnthropicError(cause: unknown): boolean {
+  const status = (cause as { status?: number } | undefined)?.status;
+  return status === 429 || (status !== undefined && status >= 500);
+}
+
 /**
  * One port per Anthropic model. `respond` streams the model's response via
  * `client.messages.stream`, pushing token-level deltas to `stream: DeltaSink`
@@ -335,6 +356,7 @@ export function createAnthropicPort(model: Model, client?: Anthropic): ModelPort
         system: request.system,
         messages: request.messages,
         ...(request.thinking ? { thinking: request.thinking } : {}),
+        ...(request.effort ? { output_config: { effort: request.effort } } : {}),
         ...(request.tools ? { tools: request.tools } : {}),
       });
 
@@ -347,100 +369,110 @@ export function createAnthropicPort(model: Model, client?: Anthropic): ModelPort
       const content: ContentBlock[] = [];
       let usage: Usage = { input: 0, output: 0 };
 
-      for await (const event of rawStream) {
-        switch (event.type) {
-          case "content_block_start": {
-            const block = event.content_block;
-            if (block.type === "tool_use") {
-              const correlationId = block.id;
-              const name = isOAuth ? fromClaudeCodeName(block.name, toolNames) : block.name;
-              correlationIds.set(event.index, correlationId);
-              blockKinds.set(event.index, "toolCall");
-              toolNamesByIndex.set(event.index, name);
-              stream.delta({ correlationId, open: "toolCall", name });
-            } else if (block.type === "text") {
-              const correlationId = String(event.index);
-              correlationIds.set(event.index, correlationId);
-              blockKinds.set(event.index, "text");
-              stream.delta({ correlationId, open: "text" });
-            } else if (block.type === "thinking") {
-              const correlationId = String(event.index);
-              correlationIds.set(event.index, correlationId);
-              blockKinds.set(event.index, "thinking");
-              stream.delta({ correlationId, open: "thinking" });
+      try {
+        for await (const event of rawStream) {
+          switch (event.type) {
+            case "content_block_start": {
+              const block = event.content_block;
+              if (block.type === "tool_use") {
+                const correlationId = block.id;
+                const name = isOAuth ? fromClaudeCodeName(block.name, toolNames) : block.name;
+                correlationIds.set(event.index, correlationId);
+                blockKinds.set(event.index, "toolCall");
+                toolNamesByIndex.set(event.index, name);
+                stream.delta({ correlationId, open: "toolCall", name });
+              } else if (block.type === "text") {
+                const correlationId = String(event.index);
+                correlationIds.set(event.index, correlationId);
+                blockKinds.set(event.index, "text");
+                stream.delta({ correlationId, open: "text" });
+              } else if (block.type === "thinking") {
+                const correlationId = String(event.index);
+                correlationIds.set(event.index, correlationId);
+                blockKinds.set(event.index, "thinking");
+                stream.delta({ correlationId, open: "thinking" });
+              }
+              // Server-tool blocks (web_search, code_execution, …) have no ContentBlock
+              // analogue yet — silently skip streaming them, matching fromAnthropicBlock's
+              // fallback for the non-streaming path.
+              break;
             }
-            // Server-tool blocks (web_search, code_execution, …) have no ContentBlock
-            // analogue yet — silently skip streaming them, matching fromAnthropicBlock's
-            // fallback for the non-streaming path.
-            break;
-          }
-          case "content_block_delta": {
-            const correlationId = correlationIds.get(event.index);
-            if (correlationId === undefined) break;
-            if (event.delta.type === "text_delta") {
-              textByIndex.set(event.index, (textByIndex.get(event.index) ?? "") + event.delta.text);
-              stream.delta({ correlationId, text: event.delta.text });
-            } else if (event.delta.type === "thinking_delta") {
-              textByIndex.set(
-                event.index,
-                (textByIndex.get(event.index) ?? "") + event.delta.thinking,
-              );
-              stream.delta({ correlationId, text: event.delta.thinking });
-            } else if (event.delta.type === "input_json_delta") {
-              partialInputByIndex.set(
-                event.index,
-                (partialInputByIndex.get(event.index) ?? "") + event.delta.partial_json,
-              );
-              stream.delta({ correlationId, partialInput: event.delta.partial_json });
-            } else if (event.delta.type === "signature_delta") {
-              signatureByIndex.set(event.index, event.delta.signature);
+            case "content_block_delta": {
+              const correlationId = correlationIds.get(event.index);
+              if (correlationId === undefined) break;
+              if (event.delta.type === "text_delta") {
+                textByIndex.set(
+                  event.index,
+                  (textByIndex.get(event.index) ?? "") + event.delta.text,
+                );
+                stream.delta({ correlationId, text: event.delta.text });
+              } else if (event.delta.type === "thinking_delta") {
+                textByIndex.set(
+                  event.index,
+                  (textByIndex.get(event.index) ?? "") + event.delta.thinking,
+                );
+                stream.delta({ correlationId, text: event.delta.thinking });
+              } else if (event.delta.type === "input_json_delta") {
+                partialInputByIndex.set(
+                  event.index,
+                  (partialInputByIndex.get(event.index) ?? "") + event.delta.partial_json,
+                );
+                stream.delta({ correlationId, partialInput: event.delta.partial_json });
+              } else if (event.delta.type === "signature_delta") {
+                signatureByIndex.set(event.index, event.delta.signature);
+              }
+              break;
             }
-            break;
-          }
-          case "content_block_stop": {
-            const correlationId = correlationIds.get(event.index);
-            if (correlationId === undefined) break;
-            stream.delta({ correlationId, close: true });
-            const kind = blockKinds.get(event.index);
-            if (kind === "toolCall") {
-              const name = toolNamesByIndex.get(event.index) ?? "";
-              const rawInput = partialInputByIndex.get(event.index) ?? "";
-              content.push({
-                type: "toolCall",
-                correlationId,
-                name,
-                input: JSON.parse(rawInput || "{}"),
-              });
-            } else if (kind === "text") {
-              content.push({ type: "text", text: textByIndex.get(event.index) ?? "" });
-            } else if (kind === "thinking") {
-              const signature = signatureByIndex.get(event.index);
-              content.push({
-                type: "thinking",
-                text: textByIndex.get(event.index) ?? "",
-                ...(signature !== undefined ? { signature } : {}),
-              });
+            case "content_block_stop": {
+              const correlationId = correlationIds.get(event.index);
+              if (correlationId === undefined) break;
+              stream.delta({ correlationId, close: true });
+              const kind = blockKinds.get(event.index);
+              if (kind === "toolCall") {
+                const name = toolNamesByIndex.get(event.index) ?? "";
+                const rawInput = partialInputByIndex.get(event.index) ?? "";
+                content.push({
+                  type: "toolCall",
+                  correlationId,
+                  name,
+                  input: JSON.parse(rawInput || "{}"),
+                });
+              } else if (kind === "text") {
+                content.push({ type: "text", text: textByIndex.get(event.index) ?? "" });
+              } else if (kind === "thinking") {
+                const signature = signatureByIndex.get(event.index);
+                content.push({
+                  type: "thinking",
+                  text: textByIndex.get(event.index) ?? "",
+                  ...(signature !== undefined ? { signature } : {}),
+                });
+              }
+              break;
             }
-            break;
+            case "message_delta": {
+              usage = usageFromMessageDelta(event.usage);
+              break;
+            }
+            default:
+              // message_start/message_stop carry nothing this port needs.
+              break;
           }
-          case "message_delta": {
-            usage = usageFromMessageDelta(event.usage);
-            break;
-          }
-          default:
-            // message_start/message_stop carry nothing this port needs.
-            break;
         }
-      }
 
-      const assistantMessage: AssistantMessage = {
-        role: "assistant",
-        provider: model.provider,
-        model: model.identifier,
-        content,
-        usage,
-      };
-      return assistantMessage;
+        const assistantMessage: AssistantMessage = {
+          role: "assistant",
+          provider: model.provider,
+          model: model.identifier,
+          content,
+          usage,
+        };
+        return assistantMessage;
+      } catch (cause) {
+        throw new RetryableError(cause instanceof Error ? cause.message : String(cause), {
+          retryable: isRetryableAnthropicError(cause),
+          cause,
+        });
+      }
     },
   };
 }

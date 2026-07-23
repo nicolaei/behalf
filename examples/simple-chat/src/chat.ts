@@ -1,17 +1,15 @@
-// M3 — the interactive chat graph, now with real filesystem tools. One
-// persona step, looped: run a turn, wait for the next prompt, run again, all
-// on the same thread (the default), so context carries across turns. A turn
-// finishes once a response uses no tools (see docs/reference.md § "Full
-// examples" #1); otherwise it loops back to respond again so the model can
-// see the tool results and continue.
+// M3 — the interactive chat graph, now with real filesystem tools. Each turn
+// runs via behalf's own agentTurn: run the model, wait for every tool call
+// it made, fold their results into one message, loop until a reply uses no
+// tools. The outer chat graph then waits for the next user prompt before
+// running another turn, same thread throughout.
 
-import { defineGraph, userInput } from "behalf";
+import { defineGraph, userInput, agentTurn } from "behalf";
 import { fsTools } from "./tools.js";
-import { isRetryableProviderError } from "./retry.js";
-import type { Profile, PersonaStep, StepContext, ModelCallResult, Model } from "behalf";
+import type { Profile, Model } from "behalf";
 
 export const DEFAULT_MODEL: Model = {
-  identifier: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-4-5-20250929",
+  identifier: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
   provider: "anthropic",
   contextWindow: 200_000,
   reasoning: ["off", "medium"],
@@ -23,37 +21,6 @@ export const assistant: Profile = {
   tools: fsTools,
   reasoning: "medium",
 };
-
-const modelStep = (profile: Profile): PersonaStep<ModelCallResult> =>
-  Object.assign(
-    async (context: StepContext) => {
-      try {
-        return context.output(await context.modelCall(profile));
-      } catch (cause) {
-        // A raw throw here is always classified `retryable: false` by the
-        // engine's generic catch — build the StepError ourselves so a real
-        // 429/5xx from the provider actually gets retried (see retry.ts).
-        return context.fail({
-          type: "provider",
-          message: cause instanceof Error ? cause.message : String(cause),
-          retryable: isRetryableProviderError(cause),
-          cause,
-        });
-      }
-    },
-    { persona: profile },
-  );
-
-const agentTurn = (persona: Profile) =>
-  defineGraph(persona.system, (flow) => {
-    const respond = flow.step(modelStep(persona));
-    flow.entry(respond);
-    // A response that used no tools ends the turn; otherwise loop back so the
-    // model can see the committed tool results and keep going.
-    respond
-      .when((result) => !(result as ModelCallResult).usedTools, flow.finish)
-      .otherwise(respond);
-  });
 
 export const chat = defineGraph("chat", (flow) => {
   const loop = flow.use(agentTurn(assistant));

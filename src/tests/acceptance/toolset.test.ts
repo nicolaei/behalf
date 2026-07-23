@@ -19,6 +19,7 @@ describe("toolset groups multiple tool handlers behind one binding", () => {
 
     const result = await search("x", {
       thread: "thread-1" as never,
+      correlationId: "test-correlation-id",
       openStream: () => {
         throw new Error("unused");
       },

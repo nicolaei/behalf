@@ -132,3 +132,42 @@ export async function awaitEventType(
   }
   throw new Error(`changes() ended without a committed "${type}" envelope`);
 }
+
+/**
+ * Every `toolCall` correlationId in an assistant message with no matching
+ * `toolResult` in the very next message — the engine's own pairing contract,
+ * independent of any model adapter's wire format. Empty means every tool
+ * call from a turn has its result folded in as a single following `tool`
+ * message before the next model call sees the thread.
+ */
+export function orphanedToolCallIds(messages: Message[]): string[] {
+  const orphans: string[] = [];
+  messages.forEach((message, index) => {
+    if (message.role !== "assistant") return;
+    const callIds = message.content
+      .filter((b): b is Extract<typeof b, { type: "toolCall" }> => b.type === "toolCall")
+      .map((b) => b.correlationId);
+    if (callIds.length === 0) return;
+
+    const next = messages[index + 1];
+    const resultIds = new Set(
+      next?.role === "tool"
+        ? next.content
+            .filter((b): b is Extract<typeof b, { type: "toolResult" }> => b.type === "toolResult")
+            .map((b) => b.correlationId)
+        : [],
+    );
+    for (const id of callIds) if (!resultIds.has(id)) orphans.push(id);
+  });
+  return orphans;
+}
+
+/** Indexes into an array, throwing a clear error instead of `undefined` — the typed alternative to a bare `arr[i]!`. */
+export function at<T>(items: readonly T[], index: number): T {
+  const item = items[index];
+  if (item === undefined)
+    throw new Error(
+      `expected an item at index ${String(index)}, array has ${String(items.length)}`,
+    );
+  return item;
+}

@@ -38,7 +38,8 @@ export function toolset(name: string, describe: string): Toolset {
 
 /** What a tool handler sees and does. It may re-run on resume, so it owns its idempotency. @public */
 export interface ToolContext {
-  thread: ThreadId;
+  readonly thread: ThreadId;
+  readonly correlationId: string; // this call's own correlationId, shared by its toolCall/toolResult pair
   openStream(type: EventType): Stream; // open a fresh, logged stream scoped to this thread
   appendEvent<T extends EventType>(payload: Event[T], type: T): void; // commit a standalone event scoped to this thread
   runFlow: (flow: Graph, initialPrompt: Message) => Promise<unknown>;

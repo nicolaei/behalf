@@ -11,6 +11,7 @@ import {
   CLAUDE_CODE_IDENTITY,
   toClaudeCodeName,
   fromClaudeCodeName,
+  isRetryableAnthropicError,
 } from "./anthropic.js";
 import type { Profile } from "../../flow/profile.js";
 import type { Message } from "../../flow/message.js";
@@ -113,7 +114,8 @@ describe("toAnthropicRequest", () => {
 
     const request = toAnthropicRequest(profile({ reasoning: "medium" }), messages);
 
-    expect(request.thinking).toEqual({ type: "enabled", budget_tokens: 4096 });
+    expect(request.thinking).toEqual({ type: "adaptive" });
+    expect(request.effort).toBe("medium");
   });
 
   it("carries a thinking block's signature through unmodified", () => {
@@ -137,15 +139,20 @@ describe("toAnthropicRequest", () => {
     ]);
   });
 
-  it("prepends the Claude Code identity block first when isOAuth is true", () => {
+  it("sends system as an array whose first block is exactly the Claude Code identity when isOAuth is true", () => {
+    // Anthropic's OAuth endpoint verifies the FIRST system block equals the
+    // identity string exactly — concatenating it into one string gets rejected
+    // with a bogus 429 rate_limit_error. Verified against the live API.
     const messages: Message[] = [
       { role: "user", intent: "standard", content: [{ type: "text", text: "hi" }] },
     ];
 
     const request = toAnthropicRequest(profile(), messages, true);
 
-    expect(request.system.startsWith(CLAUDE_CODE_IDENTITY)).toBe(true);
-    expect(request.system).toBe(`${CLAUDE_CODE_IDENTITY}\n\ntest persona`);
+    expect(request.system).toEqual([
+      { type: "text", text: CLAUDE_CODE_IDENTITY },
+      { type: "text", text: "test persona" },
+    ]);
   });
 
   it("omits the Claude Code identity block when isOAuth is false (the default)", () => {
@@ -157,6 +164,34 @@ describe("toAnthropicRequest", () => {
 
     expect(request.system).toBe("test persona");
     expect(request.system).not.toContain("Claude Code");
+  });
+
+  it("maps a tool call paired with its result to adjacent tool_use/tool_result blocks", () => {
+    const messages: Message[] = [
+      { role: "user", intent: "standard", content: [{ type: "text", text: "go" }] },
+      {
+        role: "assistant",
+        provider: "test",
+        model: "m",
+        content: [{ type: "toolCall", correlationId: "1", name: "search", input: { query: "x" } }],
+        usage: { input: 1, output: 1 },
+      },
+      {
+        role: "tool",
+        content: [{ type: "toolResult", correlationId: "1", output: { hits: ["a"] } }],
+      },
+    ];
+
+    const request = toAnthropicRequest(profile(), messages);
+
+    expect(request.messages[1]).toEqual({
+      role: "assistant",
+      content: [{ type: "tool_use", id: "1", name: "search", input: { query: "x" } }],
+    });
+    expect(request.messages[2]).toEqual({
+      role: "user",
+      content: [{ type: "tool_result", tool_use_id: "1", content: '{"hits":["a"]}' }],
+    });
   });
 });
 
@@ -393,5 +428,23 @@ describe("Claude Code tool name mapping (OAuth)", () => {
       name: "Read",
       input: { path: "x" },
     });
+  });
+});
+
+describe("isRetryableAnthropicError", () => {
+  it("is retryable for a 429", () => {
+    expect(isRetryableAnthropicError({ status: 429 })).toBe(true);
+  });
+
+  it("is retryable for a 5xx", () => {
+    expect(isRetryableAnthropicError({ status: 503 })).toBe(true);
+  });
+
+  it("is not retryable for a 4xx other than 429", () => {
+    expect(isRetryableAnthropicError({ status: 400 })).toBe(false);
+  });
+
+  it("is not retryable when there is no status at all", () => {
+    expect(isRetryableAnthropicError(new Error("boom"))).toBe(false);
   });
 });
