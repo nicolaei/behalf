@@ -1,5 +1,13 @@
 # Architecture
 
+<!-- markdownlint-disable MD024 MD025 -->
+<!-- This document uses multiple top-level `#` sections as "parts" of one
+     long reference doc (Architecture, Flow authors, Systems running flows,
+     Testing, Session store, Gateway), each repeating an "Interfaces" /
+     "Full examples" sub-heading. Predates docs/style-guide.md's one-H1,
+     no-duplicate-heading convention; grandfathered here rather than split
+     into files, per style-guide.md's "Where this doesn't apply". -->
+
 A session is one append-only event log plus an inbox. Clients submit messages
 into the inbox through the gateway; the engine drains the inbox, runs steps, and
 appends outcomes to the log; state is the fold of the log. The store also carries
@@ -541,7 +549,6 @@ export const audit = defineGraph("audit", (flow) => {
   reply.then(flow.finish);
 });
 ```
-```
 
 ```ts
 // 3 · A composed pipeline of agent loops with world-state steps between them.
@@ -939,7 +946,6 @@ await stepUntil(feature, ready, atNode(review));
 
 ---
 
-
 # Session store
 
 The durable spine of a session: an append-only log of envelopes, an inbox of
@@ -1057,13 +1063,6 @@ interface SessionStore {
   open(pending: { correlationId: string; type: EventType; stepId: string; stepName?: string; threadId: ThreadId }): Stream;
   changes(): AsyncIterable<Envelope>;
 }
-
-type Stream = {
-  delta(part: Delta): void; // broadcast partial content — not persisted
-  commit(event: Event[EventType]): void; // finalize into the log
-  abort(): void; // commit what streamed, mark the envelope aborted
-};
-```
 
 type Stream = {
   delta(part: Delta): void; // broadcast partial content — not persisted
