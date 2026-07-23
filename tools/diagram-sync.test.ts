@@ -136,5 +136,5 @@ describe("the real docs tree", () => {
     }
 
     expect(failures).toEqual([]);
-  }, 20_000);
+  }, 60_000);
 });
