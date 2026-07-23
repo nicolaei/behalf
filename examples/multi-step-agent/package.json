@@ -9,7 +9,9 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.70.0",
-    "behalf": "file:../..",
+    "@behalf-js/core": "file:../../packages/core",
+    "@behalf-js/models-anthropic": "file:../../packages/models-anthropic",
+    "@behalf-js/stores": "file:../../packages/stores",
     "ink": "^5.2.0",
     "ink-text-input": "^6.0.0",
     "react": "^18.3.1",

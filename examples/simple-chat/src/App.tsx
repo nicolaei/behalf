@@ -19,8 +19,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import TextInput from "ink-text-input";
-import { runFlow, userText } from "behalf";
-import type { Runtime, Message, StepError } from "behalf";
+import { runFlow, userText } from "@behalf-js/core";
+import type { Runtime, Message, StepError } from "@behalf-js/core";
 import { chat, DEFAULT_MODEL, assistant } from "./chat.js";
 
 export const MODEL_ID = DEFAULT_MODEL.identifier;

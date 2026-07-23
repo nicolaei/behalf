@@ -3,8 +3,8 @@
 // sees a stage's own tool-call chatter, only the previous stage's own result,
 // carried forward through each edge's `prompt` transform.
 
-import { defineGraph, agentTurn, userText } from "behalf";
-import type { AgentTurnResult } from "behalf";
+import { defineGraph, agentTurn, userText } from "@behalf-js/core";
+import type { AgentTurnResult } from "@behalf-js/core";
 import { askerProfile, redProfile, greenProfile, refactorProfile } from "./profiles.js";
 
 function reportOf(result: AgentTurnResult): string {

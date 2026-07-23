@@ -2,7 +2,7 @@
 // lives in index.tsx, next to submit-spec's binding, since both are
 // UI-bound rather than doing real I/O.
 
-import { tool } from "behalf";
+import { tool } from "@behalf-js/core";
 import { z } from "zod";
 
 export const ask = tool<{ question: string }, { answer: string }>(

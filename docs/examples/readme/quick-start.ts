@@ -1,5 +1,7 @@
-import { defineGraph, agentTurn, userText, runtime, runFlow, adapters } from "behalf";
-import type { Profile, Model } from "behalf";
+import { defineGraph, agentTurn, userText, runtime, runFlow } from "@behalf-js/core";
+import type { Profile, Model } from "@behalf-js/core";
+import { createAnthropicPort } from "@behalf-js/models-anthropic";
+import { memoryStore } from "@behalf-js/stores";
 
 const sonnet5: Model = {
   identifier: "claude-sonnet-5",
@@ -21,9 +23,9 @@ export const workflow = defineGraph("support", (flow) => {
 });
 
 const ready = await runtime({
-  models: () => adapters.models.createAnthropicPort(sonnet5),
+  models: () => createAnthropicPort(sonnet5),
   bindings: [],
-  store: adapters.stores.memoryStore(),
+  store: memoryStore(),
 });
 
 const result = await runFlow(workflow, userText("Say hello world in one sentence."), ready);

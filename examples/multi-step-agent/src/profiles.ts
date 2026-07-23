@@ -1,7 +1,7 @@
 // The four personas that make up the pipeline: asker interviews the user,
 // then red/green/refactor each do their own TDD stage on the resulting spec.
 
-import type { Profile, Model } from "behalf";
+import type { Profile, Model } from "@behalf-js/core";
 import { ask } from "./tools/ask.js";
 import { submitSpec } from "./tools/submit-spec.js";
 import { fsTools } from "./tools/fs.js";

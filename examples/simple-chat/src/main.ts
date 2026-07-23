@@ -1,10 +1,12 @@
 // M1 — one real, non-interactive model call. No tools, no UI loop (that's M2/M3).
 
-import { defineGraph, runtime, runFlow, userText, adapters } from "behalf";
-import type { Profile, Model } from "behalf";
+import { defineGraph, runtime, runFlow, userText } from "@behalf-js/core";
+import type { Profile, Model } from "@behalf-js/core";
+import { createAnthropicPort } from "@behalf-js/models-anthropic";
+import { memoryStore } from "@behalf-js/stores";
 
 const DEFAULT_MODEL: Model = {
-  identifier: "claude-sonnet-5",
+  identifier: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",
   provider: "anthropic",
   contextWindow: 1_000_000,
   reasoning: ["off", "medium"],
@@ -42,9 +44,9 @@ const sayHello = defineGraph("say-hello", (flow) => {
 
 async function main() {
   const ready = await runtime({
-    models: () => adapters.models.createAnthropicPort(DEFAULT_MODEL),
+    models: () => createAnthropicPort(DEFAULT_MODEL),
     bindings: [],
-    store: adapters.stores.memoryStore(),
+    store: memoryStore(),
   });
 
   const text = await runFlow(sayHello, userText("Say hello in one sentence."), ready);

@@ -1,7 +1,9 @@
 import React, { useEffect, useState } from "react";
 import { render, Box, Text } from "ink";
-import { runtime, adapters } from "behalf";
-import type { Runtime } from "behalf";
+import { runtime } from "@behalf-js/core";
+import type { Runtime } from "@behalf-js/core";
+import { createAnthropicPort } from "@behalf-js/models-anthropic";
+import { memoryStore } from "@behalf-js/stores";
 import { App } from "./App.js";
 import { DEFAULT_MODEL } from "./chat.js";
 import { fsBindings } from "./tools.js";
@@ -14,10 +16,10 @@ function Root() {
   useEffect(() => {
     let cancelled = false;
     runtime({
-      models: () => adapters.models.createAnthropicPort(DEFAULT_MODEL),
+      models: () => createAnthropicPort(DEFAULT_MODEL),
       bindings: fsBindings,
       errorHandlers: [rateLimitBackoff],
-      store: adapters.stores.memoryStore(),
+      store: memoryStore(),
     }).then(
       (resolved) => {
         if (!cancelled) setReady(resolved);

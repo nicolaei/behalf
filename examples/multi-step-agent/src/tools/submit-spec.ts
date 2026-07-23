@@ -2,7 +2,7 @@
 // `finishOn` target and hand the asker's structured result forward to the
 // `red` stage — its binding (in index.tsx) just echoes its own input back.
 
-import { tool } from "behalf";
+import { tool } from "@behalf-js/core";
 import { z } from "zod";
 
 export const submitSpec = tool<

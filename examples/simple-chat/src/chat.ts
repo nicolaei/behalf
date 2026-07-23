@@ -4,9 +4,9 @@
 // tools. The outer chat graph then waits for the next user prompt before
 // running another turn, same thread throughout.
 
-import { defineGraph, userInput, agentTurn } from "behalf";
+import { defineGraph, userInput, agentTurn } from "@behalf-js/core";
 import { fsTools } from "./tools.js";
-import type { Profile, Model } from "behalf";
+import type { Profile, Model } from "@behalf-js/core";
 
 export const DEFAULT_MODEL: Model = {
   identifier: process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5",

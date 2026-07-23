@@ -16,8 +16,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import TextInput from "ink-text-input";
-import { runFlow, userText } from "behalf";
-import type { Runtime, Message, StepError, ThreadId } from "behalf";
+import { runFlow, userText } from "@behalf-js/core";
+import type { Runtime, Message, StepError, ThreadId } from "@behalf-js/core";
 import { pipeline } from "./pipeline.js";
 import { DEFAULT_MODEL, askerProfile } from "./profiles.js";
 import type { AskBridge, PendingAsk } from "./ask-bridge.js";

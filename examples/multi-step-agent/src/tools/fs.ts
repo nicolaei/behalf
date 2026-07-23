@@ -8,8 +8,8 @@ import { writeFile as fsWriteFile, readFile as fsReadFile, mkdir } from "node:fs
 import { exec } from "node:child_process";
 import { promisify } from "node:util";
 import path from "node:path";
-import { tool, provide } from "behalf";
-import type { Binding } from "behalf";
+import { tool, provide } from "@behalf-js/core";
+import type { Binding } from "@behalf-js/core";
 import { z } from "zod";
 
 const execAsync = promisify(exec);

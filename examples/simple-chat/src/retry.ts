@@ -9,7 +9,7 @@
 // replacement: honors the API's `Retry-After` header when present,
 // otherwise backs off in whole seconds, with a real retry cap.
 
-import type { ErrorHandler } from "behalf";
+import type { ErrorHandler } from "@behalf-js/core";
 
 const MAX_ATTEMPTS = 5;
 const BASE_DELAY_MS = 2_000;

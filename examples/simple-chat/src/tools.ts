@@ -6,8 +6,8 @@
 
 import { readFile as fsReadFile, readdir } from "node:fs/promises";
 import path from "node:path";
-import { tool, provide } from "behalf";
-import type { Binding } from "behalf";
+import { tool, provide } from "@behalf-js/core";
+import type { Binding } from "@behalf-js/core";
 import { z } from "zod";
 
 function resolvePath(input: string): string {
