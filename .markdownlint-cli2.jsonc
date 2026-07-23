@@ -1,0 +1,18 @@
+{
+  // Markdown correctness rules for docs/ and top-level README.md.
+  // Line length is intentionally not enforced here — prose wrap is a
+  // human/agent-applied convention (see the writing-prose skill), not a
+  // lint rule; enforcing it would flag long link-heavy list lines and
+  // wide tables for no real benefit.
+  "config": {
+    "default": true,
+    "MD013": false,
+    // Allow the two inline elements docs/style-guide.md's callout
+    // convention actually uses (collapsible "Deep dive" boxes).
+    "MD033": { "allowed_elements": ["details", "summary"] },
+    // We only ever use fenced (```), backtick code blocks — pin it so a
+    // stray indented block or ~~~ fence gets flagged as inconsistent.
+    "MD046": { "style": "fenced" },
+    "MD048": { "style": "backtick" },
+  },
+}

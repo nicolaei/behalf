@@ -15,9 +15,12 @@
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
+    "lint:md": "markdownlint-cli2 \"docs/**/*.md\" \"README.md\"",
+    "lint:links": "remark --quiet --frail docs README.md",
+    "lint:docs": "npm run lint:md && npm run lint:links",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "npm run format:check && npm run typecheck && npm run lint",
+    "check": "npm run format:check && npm run typecheck && npm run lint && npm run lint:docs",
     "verify": "npm run check && npm test",
     "fix": "npm run format && npm run lint -- --fix"
   },
@@ -28,7 +31,10 @@
     "prettier": "^3.9.5",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.64.0",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "markdownlint-cli2": "^0.23.1",
+    "remark-cli": "^12.0.1",
+    "remark-validate-links": "^13.1.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.112.4",
