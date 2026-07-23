@@ -1,5 +1,6 @@
 // Dev tooling — checks that a fenced `mermaid source=file#exportName` block in a
-// doc is byte-identical to graphToMermaid(the real Graph that binding names).
+// doc is byte-identical (modulo node-id renumbering, see canonicalizeNodeIds
+// below) to graphToMermaid(the real Graph that binding names).
 // A diagram can drift the moment someone edits the graph and forgets to
 // regenerate the picture; this is what catches that, the same guarantee
 // docs/style-guide.md's code-region sync gives a code snippet.
@@ -40,6 +41,29 @@ export function extractMermaidSourceBlocks(markdown: string): MermaidSourceBlock
   return blocks;
 }
 
+const NODE_ID_PATTERN = /\bnode-\d+\b/g;
+
+/** Renumbers every `node-<n>` token to a canonical `node-<k>` in order of first appearance.
+ *
+ * `NodeId`s are a process-wide sequence, deliberately not scoped per `defineGraph()` call (see
+ * graph.ts's own docstring on why: a `use()`d subgraph must never collide with its parent's ids).
+ * That means the literal number a graph's nodes get depends on how many *other* graphs happened to
+ * be built earlier in the same process — including, here, an unrelated example from a different
+ * doc checked earlier in the same test run. The diagram this function guards against drifting is a
+ * *shape* (which nodes, which edges, which labels), not a specific id assignment, so canonicalizing
+ * both sides before comparing keeps the check honest to that intent without coupling it to
+ * process-wide import order. */
+export function canonicalizeNodeIds(mermaid: string): string {
+  const seen = new Map<string, string>();
+  return mermaid.replace(NODE_ID_PATTERN, (token) => {
+    const canonical = seen.get(token);
+    if (canonical) return canonical;
+    const next = `node-${String(seen.size + 1)}`;
+    seen.set(token, next);
+    return next;
+  });
+}
+
 /** The result of comparing one sourced block against the real graph it names. */
 export interface DiagramSyncResult {
   source: string;
@@ -49,7 +73,10 @@ export interface DiagramSyncResult {
   actual: string; // what graphToMermaid(theRealGraph) produces right now
 }
 
-/** Checks every sourced mermaid block in `markdown` against the real graph each one names. `repoRoot` resolves `source`. */
+/** Checks every sourced mermaid block in `markdown` against the real graph each one names.
+ * `repoRoot` resolves `source`. Compares node ids canonically (see `canonicalizeNodeIds`), so an
+ * unrelated graph imported earlier in the same process can't shift this one's id numbering and
+ * produce a false failure. */
 export async function checkDiagramSync(
   markdown: string,
   repoRoot: string,
@@ -68,7 +95,7 @@ export async function checkDiagramSync(
     results.push({
       source: block.source,
       exportName: block.exportName,
-      ok: actual === block.content,
+      ok: canonicalizeNodeIds(actual) === canonicalizeNodeIds(block.content),
       expected: block.content,
       actual,
     });
