@@ -36,6 +36,7 @@ Merging a PR with a pending changeset opens (or updates) a "Version Packages" PR
 ## First publish of a new package
 
 npm's [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) can only be configured for a
-package that already exists on the registry, so a package's very first publish has to happen
-manually, once, before automation can take over for it.
+package that already exists on the registry.
+So a package's very first publish has to happen manually, once, before automation can take over for
+it.
 See the release workflow's own comments for the exact commands.

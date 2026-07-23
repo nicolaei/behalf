@@ -1,0 +1,58 @@
+name: Release
+
+# Runs on every push to main. changesets/action decides what to do:
+#   - pending changesets in .changeset/ -> opens/updates a "Version Packages" PR
+#     (bumps every @behalf-js/* package's version, in lockstep, and writes
+#     CHANGELOG.md entries) but does not publish anything.
+#   - that PR just got merged (no pending changesets left) -> runs the
+#     publish-script below, which builds and runs `changeset publish`.
+#
+# Publishing itself uses npm Trusted Publishing (OIDC). See CONTRIBUTING.md
+# and the comment below for what has to be true on npmjs.com before this
+# workflow can publish a given package for the first time.
+on:
+  push:
+    branches:
+      - main
+
+concurrency: ${{ github.workflow }}-${{ github.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+  # The one permission Trusted Publishing actually needs: lets this workflow
+  # mint a short-lived OIDC token npm exchanges for a publish credential, so
+  # no NPM_TOKEN secret has to live in this repo.
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          registry-url: "https://registry.npmjs.org"
+
+      # Trusted Publishing needs npm 11.5.1+; the version bundled with a given
+      # setup-node release drifts, so pin the floor explicitly rather than
+      # trust whatever ships with node-version above.
+      - name: Ensure npm meets the Trusted Publishing minimum (11.5.1+)
+        run: npm install -g npm@^11.5.1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create Release Pull Request or Publish
+        uses: changesets/action@v1
+        with:
+          publish: npm run release
+          version: npm run version-packages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
