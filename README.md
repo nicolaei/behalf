@@ -11,7 +11,6 @@ Behalf is a TypeScript library for building agents as code.
 
 Most agent behavior today lives in **skills**: prose files telling a model what to do.
 Skills are easy to write and hard to make deterministic and reason about.
-
 You can't typecheck a paragraph, or unit-test an instruction.
 
 Behalf represents that behavior as a graph of steps instead,
@@ -43,9 +42,7 @@ const assistant: Profile = {
   tools: [],
 };
 
-// `agentTurn(assistant)` is itself a graph. `flow.use` composes it as one
-// node here, so `support` is a graph too, just one node deep for now.
-export const support = defineGraph("support", (flow) => {
+export const workflow = defineGraph("support", (flow) => {
   const turn = flow.use(agentTurn(assistant));
   flow.entry(turn);
   turn.then(flow.finish);
@@ -57,14 +54,14 @@ const ready = await runtime({
   store: adapters.stores.memoryStore(),
 });
 
-const result = await runFlow(support, userText("Say hello in one sentence."), ready);
+const result = await runFlow(workflow, userText("Say hello world in one sentence."), ready);
 console.log(result);
 ```
 
 ## Runnable examples
 
-- **[`Simple Chat`](./examples/simple-chat/)**: a terminal chat with tools.
-- **[`Multi Step Agent`](./examples/multi-step-agent/)**:
+- **[Simple chat](./examples/simple-chat/)**: a terminal chat with tools.
+- **[Multi step agent](./examples/multi-step-agent/)**:
   a four-stage coding pipeline that interviews you for a spec,
   then writes a failing test, makes it pass, and refactors it.
 
