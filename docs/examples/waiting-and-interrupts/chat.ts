@@ -37,7 +37,9 @@ export const chat: Graph = defineGraph("chat", (flow) => {
   });
 
   // #region wait-for
+  // #region user-input
   const waitForPrompt = flow.waitFor(userInput("follow-up"));
+  // #endregion user-input
   // #endregion wait-for
 
   // #region interrupt
@@ -51,9 +53,7 @@ export const chat: Graph = defineGraph("chat", (flow) => {
   flow.entry(respond);
   respond.then(waitForPrompt);
 
-  // #region user-input
   waitForPrompt.then(respond);
-  // #endregion user-input
 
   stop.then(stopped);
   stopped.then(flow.finish);

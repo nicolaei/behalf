@@ -5,9 +5,9 @@ A step is a node's body: the function that does the actual work. `StepContext` i
 
 ## You will learn
 
-- What `StepContext` exposes: `thread`, `inputs`, `modelCall`, `callTool`
-- The difference between reading `context.inputs` and `context.thread.messages`
-- The four kinds of `Emit`: `output`, `compact`, `invalidate`, `error`
+- How to read `StepContext`'s `thread`, `inputs`, `modelCall`, and `callTool`
+- How to choose between reading `context.inputs` and `context.thread.messages`
+- How to return each of the four kinds of `Emit`: `output`, `compact`, `invalidate`, `error`
 - How a `PersonaStep` differs from a plain `Step`
 
 ## StepContext
@@ -36,8 +36,8 @@ reply asks for, and appends all of it to the log, so by the time it resolves,
 
 ## Reading input two ways
 
-A step's next question is usually: where does its work come from, the conversation or the previous
-node? `route` answers it differently from `classify`:
+A step reads its work from one of two places: the conversation, or the previous node's exact output.
+`route` reads the second one, differently from `classify`:
 
 ```ts source=docs/examples/steps-and-emits/two-ways.ts#route
   const route = flow.step(async (context) => {

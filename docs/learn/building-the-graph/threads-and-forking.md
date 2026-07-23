@@ -5,7 +5,7 @@ vocabulary every edge and `invalidate` uses to choose what happens to it.
 
 ## You will learn
 
-- What a thread is, and what `forkedFrom` vs `parentThreadId` each mean
+- How to tell `forkedFrom` and `parentThreadId` apart
 - When to reach for `same`, `fork`, or `new`
 - How forking from an earlier point is how you revert and branch
 - How `{ label: "coder" }` gives a thread a stable, addressable name

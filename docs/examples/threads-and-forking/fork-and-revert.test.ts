@@ -60,9 +60,7 @@ describe("draftReview", () => {
 
     const result = await runFlow(draftReview, userText("Add a dark mode toggle."), ready);
 
-    expect(result).toBe(
-      "Notified: Adds a dark mode toggle to settings, off by default.",
-    );
+    expect(result).toBe("Notified: Adds a dark mode toggle to settings, off by default.");
   });
 
   it("seeds the forked retry with the review's feedback as its next prompt", async () => {
@@ -77,9 +75,27 @@ describe("draftReview", () => {
 
     // First call: the graph's own entry prompt. Second call: the forked retry,
     // seeded with the rejection's feedback instead of the original request.
-    expect(draftPrompts).toEqual([
-      "Add a dark mode toggle.",
-      "mention the default is off",
-    ]);
+    expect(draftPrompts).toEqual(["Add a dark mode toggle.", "mention the default is off"]);
+  });
+
+  it("runs notify on a thread distinct from draft and review's, per its 'new' threadAction", async () => {
+    const { port } = scriptedPort();
+    const store = memoryStore();
+    const ready = await runtime({
+      models: () => port,
+      bindings: [],
+      store,
+    });
+
+    await runFlow(draftReview, userText("Add a dark mode toggle."), ready);
+
+    const outputThreadIds = store
+      .events()
+      .filter((envelope) => envelope.form === "committed" && envelope.type === "output")
+      .map((envelope) => envelope.threadId);
+
+    // draft's first run and notify's run are the first and last "output" events on the
+    // log; "new" means notify never shares a thread with anything that came before it.
+    expect(outputThreadIds.at(-1)).not.toBe(outputThreadIds.at(0));
   });
 });

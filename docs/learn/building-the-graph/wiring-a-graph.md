@@ -4,8 +4,8 @@
 
 ## You will learn
 
-- The five node kinds: `step`, `use`, `waitFor`, `interrupt`, `finish`
-- The three edge kinds: `when`, `otherwise`, `then`
+- How to pick the right node kind: `step`, `use`, `waitFor`, `interrupt`, `finish`
+- How to route a node's output with `when`, `otherwise`, and `then`
 - How `then` with an array fans out, each target on its own forked thread
 - How a join is recognized structurally and must use the `join()` builder
 - How an edge back to an earlier node forms a loop

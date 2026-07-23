@@ -5,10 +5,10 @@ waiting on a message or a signal.
 
 ## You will learn
 
-- The three fields of a `Waitable`: `provider`, `label`, `match`
-- How `waitFor` parks until its `Waitable` resolves
-- How `interrupt` races alongside a `waitFor`, always armed, whichever condition resolves first wins
-- How `userInput(kind)` is the one built-in `Waitable`
+- How to read a `Waitable`'s three fields (`provider`, `label`, `match`)
+- How to park a thread with `waitFor` until its `Waitable` resolves
+- How to race a `waitFor` against an always-armed `interrupt`
+- How to use `userInput(kind)`, the one built-in `Waitable`
 
 ## Waitable
 
@@ -68,10 +68,10 @@ differs.
 arrives.
 
 ```ts source=docs/examples/waiting-and-interrupts/chat.ts#user-input
-  waitForPrompt.then(respond);
+  const waitForPrompt = flow.waitFor(userInput("follow-up"));
 ```
 
-The `kind` string, `"follow-up"`, `"stop"` above, is a label you invent, not an API name.
+The `kind` string, `"follow-up"` above, is a label you invent, not an API name.
 Whoever eventually sends that message (a chat client, a CLI, another system) tags it with the exact
 string a `waitFor` or `interrupt` is listening for; nothing else about the message's shape matters
 to `userInput`.
