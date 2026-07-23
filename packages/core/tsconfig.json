@@ -1,0 +1,11 @@
+{
+  // Full project — src plus tests. Not built directly; ESLint's projectService
+  // and editors pick this up by default. The actual dist build uses
+  // tsconfig.build.json (excludes tests), referenced from the root solution file.
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "noEmit": true
+  },
+  "include": ["src/**/*.ts"]
+}

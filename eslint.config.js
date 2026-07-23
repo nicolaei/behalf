@@ -10,7 +10,7 @@ export default defineConfig([
 
   // Type-aware rules — only where a real tsconfig program covers the files.
   {
-    files: ["src/**/*.ts"],
+    files: ["packages/*/src/**/*.ts"],
     extends: [tseslint.configs.strictTypeChecked, tseslint.configs.stylisticTypeChecked],
     languageOptions: {
       parserOptions: {
@@ -57,7 +57,7 @@ export default defineConfig([
   // (future public test helpers). Internal engine/flow/adapter/session/gateway
   // modules are off-limits.
   {
-    files: ["src/tests/acceptance/**/*.ts"],
+    files: ["packages/core/src/tests/acceptance/**/*.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
@@ -87,8 +87,8 @@ export default defineConfig([
   // This rule blocks that: only files inside src/engine/runtime/ itself, or
   // src/engine/runtime.ts (the barrel), may import a sub-module directly.
   {
-    files: ["src/**/*.ts"],
-    ignores: ["src/engine/runtime/**", "src/engine/runtime.ts"],
+    files: ["packages/core/src/**/*.ts"],
+    ignores: ["packages/core/src/engine/runtime/**", "packages/core/src/engine/runtime.ts"],
     rules: {
       "no-restricted-imports": [
         "error",

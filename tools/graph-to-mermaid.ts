@@ -9,9 +9,9 @@
 // doesn't export, like NodeKind/EdgeDefinition) rather than importing the
 // built "behalf" package, since it's in-repo tooling, not a consumer.
 
-import type { Graph, NodeId, NodeKind, EdgeDefinition } from "../src/flow/graph.js";
-import type { PersonaStep, JoinStep } from "../src/flow/step.js";
-import type { ThreadAction } from "../src/flow/thread.js";
+import type { Graph, NodeId, NodeKind, EdgeDefinition } from "../packages/core/src/flow/graph.js";
+import type { PersonaStep, JoinStep } from "../packages/core/src/flow/step.js";
+import type { ThreadAction } from "../packages/core/src/flow/thread.js";
 
 function escapeLabel(label: string): string {
   return label.replace(/"/g, "&quot;");

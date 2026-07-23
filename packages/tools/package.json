@@ -1,0 +1,29 @@
+{
+  "name": "@behalf-js/tools",
+  "version": "0.0.0",
+  "description": "Standard tool bindings for behalf — read, write, edit, bash.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicolaei/behalf.git",
+    "directory": "packages/tools"
+  },
+  "dependencies": {
+    "@behalf-js/core": "^0.0.0",
+    "zod": "^4.1.13"
+  }
+}

@@ -1,19 +1,17 @@
 {
-  "name": "behalf",
+  "name": "behalf-monorepo",
   "version": "0.0.0",
   "private": true,
-  "description": "A framework and library for writing agent workflows with LLMs.",
+  "description": "Workspace root for the @behalf-js/* packages — never itself published.",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": "./dist/index.js"
-  },
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "build": "tsc --project tsconfig.json",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
     "typecheck:tools": "tsc --noEmit --project tools/tsconfig.json",
     "typecheck:docs-examples": "tsc --noEmit --project docs/examples/tsconfig.json",
     "typecheck:examples": "tsc --noEmit --project examples/simple-chat/tsconfig.json && tsc --noEmit --project examples/multi-step-agent/tsconfig.json",
@@ -25,9 +23,13 @@
     "format:check": "prettier --check .",
     "check": "npm run format:check && npm run typecheck && npm run typecheck:tools && npm run lint && npm run lint:docs",
     "verify": "npm run build && npm run check && npm run typecheck:docs-examples && npm run typecheck:examples && npm test",
-    "fix": "npm run format && npm run lint -- --fix"
+    "fix": "npm run format && npm run lint -- --fix",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "npm run build && changeset publish"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.29.7",
     "@types/node": "^26.1.1",
     "eslint": "^10.7.0",
     "eslint-config-prettier": "^10.1.8",
@@ -39,9 +41,5 @@
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.64.0",
     "vitest": "^4.1.10"
-  },
-  "dependencies": {
-    "@anthropic-ai/sdk": "^0.112.4",
-    "zod": "^4.1.13"
   }
 }

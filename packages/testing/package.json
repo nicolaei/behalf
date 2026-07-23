@@ -1,0 +1,31 @@
+{
+  "name": "@behalf-js/testing",
+  "version": "0.0.0",
+  "description": "Test-author vocabulary for behalf flows — stepOnce/stepUntilBlocked/stepUntil, and a fake ModelPort.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicolaei/behalf.git",
+    "directory": "packages/testing"
+  },
+  "dependencies": {
+    "@behalf-js/core": "^0.0.0"
+  },
+  "devDependencies": {
+    "@behalf-js/stores": "^0.0.0"
+  }
+}

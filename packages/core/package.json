@@ -1,0 +1,36 @@
+{
+  "name": "@behalf-js/core",
+  "version": "0.0.0",
+  "description": "Build agent workflows as typed, testable graphs — the flow-authoring DSL and the engine that runs it.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./internal": {
+      "types": "./dist/internal.d.ts",
+      "default": "./dist/internal.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nicolaei/behalf.git",
+    "directory": "packages/core"
+  },
+  "dependencies": {
+    "zod": "^4.1.13"
+  },
+  "devDependencies": {
+    "@behalf-js/stores": "^0.0.0",
+    "@behalf-js/testing": "^0.0.0"
+  }
+}

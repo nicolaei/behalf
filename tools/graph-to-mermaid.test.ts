@@ -2,12 +2,12 @@
 // diagram can be generated from (and kept honest against) the graph it
 // depicts, instead of hand-drawn and free to drift.
 import { describe, it, expect } from "vitest";
-import { defineGraph } from "../src/flow/graph.js";
-import type { Graph, NodeId, NodeKind } from "../src/flow/graph.js";
-import { userInput } from "../src/flow/waitable.js";
-import { join } from "../src/flow/step.js";
-import type { StepContext } from "../src/flow/step.js";
-import type { Profile } from "../src/flow/profile.js";
+import { defineGraph } from "../packages/core/src/flow/graph.js";
+import type { Graph, NodeId, NodeKind } from "../packages/core/src/flow/graph.js";
+import { userInput } from "../packages/core/src/flow/waitable.js";
+import { join } from "../packages/core/src/flow/step.js";
+import type { StepContext } from "../packages/core/src/flow/step.js";
+import type { Profile } from "../packages/core/src/flow/profile.js";
 import { graphToMermaid } from "./graph-to-mermaid.js";
 
 /** Finds the one node of `kind` a test graph is known to have, or fails loudly. */
