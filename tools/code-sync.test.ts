@@ -28,6 +28,14 @@ describe("extractSourcedCodeBlocks", () => {
     ]);
   });
 
+  it("extracts a hyphenated region reference", () => {
+    const markdown = ["```ts source=a/b.ts#wait-point", "const x = 1;", "```"].join("\n");
+
+    expect(extractSourcedCodeBlocks(markdown)).toEqual([
+      { source: "a/b.ts", region: "wait-point", content: "const x = 1;" },
+    ]);
+  });
+
   it("ignores a mermaid source block (diagram-sync's job, not this one)", () => {
     const markdown = ["```mermaid source=a/b.ts#audit", "flowchart TB", "```"].join("\n");
 

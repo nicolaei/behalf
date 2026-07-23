@@ -7,9 +7,11 @@
   "config": {
     "default": true,
     "MD013": false,
-    // Allow the two inline elements docs/style-guide.md's callout
-    // convention actually uses (collapsible "Deep dive" boxes).
-    "MD033": { "allowed_elements": ["details", "summary"] },
+    // Allow the inline elements docs/style-guide.md's own conventions use:
+    // collapsible "Deep dive" boxes (details/summary), and the
+    // code-left/diagram-right layout for a graph's shape next to its
+    // generated diagram (table/tr/td, GitHub's only two-column option).
+    "MD033": { "allowed_elements": ["details", "summary", "table", "tr", "td"] },
     // We only ever use fenced (```), backtick code blocks — pin it so a
     // stray indented block or ~~~ fence gets flagged as inconsistent.
     "MD046": { "style": "fenced" },

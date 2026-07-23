@@ -24,7 +24,7 @@ export interface CodeSourceBlock {
   content: string; // the block's body, trimmed of its trailing newline
 }
 
-const INFO_PATTERN = /^source=(\S+?)(?:#(\w+))?$/;
+const INFO_PATTERN = /^source=(\S+?)(?:#([\w-]+))?$/;
 
 /** Finds every sourced code block in `markdown` — a plain code block with no `source=`, and any `mermaid` block (diagram-sync's job), are left alone. */
 export function extractSourcedCodeBlocks(markdown: string): CodeSourceBlock[] {
