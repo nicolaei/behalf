@@ -76,5 +76,6 @@ console.log(result);
 
 ## Status
 
-Pre-1.0 and unpublished (`private: true`, `0.0.0`).
+Pre-1.0 and not yet published.
+Six packages under `@behalf-js/*`, all versioned together at `0.0.x`.
 The API is still moving; expect breaking changes without notice until this note goes away.

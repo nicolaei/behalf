@@ -289,15 +289,17 @@ acceptance test; see below).
 
 ### How a doc example gets typechecked and tested
 
-`docs/examples/**/*.ts` is added to the root `tsconfig.json`'s `include`.
+`docs/examples/` has its own `tsconfig.json`, included in the root's `typecheck:docs-examples`
+script.
 Every doc example imports the library the way a real consumer would, from the built package, same as
-`examples/simple-chat` and `examples/multi-step-agent`: `import { defineGraph } from "behalf";`,
-never a relative path into `src/`.
+`examples/simple-chat` and `examples/multi-step-agent`:
+`import { defineGraph } from "@behalf-js/core";`, never a relative path into a package's `src/`.
+behalf ships as six scoped packages under `@behalf-js/*` (`core`, `testing`, `models-anthropic`,
+`models-openai`, `tools`, `stores`); a doc example imports whichever ones its snippet actually uses.
 
 That means `npm run build` must run before a doc example's types are checked against its current
-shape.
-The docs verification script (`npm run verify:docs`, added alongside the existing `verify`) runs
-`build` first, so this is automatic and never a manual step to remember.
+shape. `npm run verify` runs `build` first (via `typecheck:docs-examples`), so this is automatic and
+never a manual step to remember.
 
 Every doc example file has a matching `*.test.ts` (or is covered by one `docs/examples/**/*.test.ts`
 runner) so `npm test` actually exercises it.
@@ -310,7 +312,7 @@ markers (`#region`/`#endregion`), free editor folding as a side benefit:
 
 ```ts
 // docs/examples/hello-world/basic.ts
-import { defineGraph, agentTurn, type Profile } from "behalf";
+import { defineGraph, agentTurn, type Profile } from "@behalf-js/core";
 
 // #region setup
 export const assistant: Profile = {
@@ -457,8 +459,9 @@ stray extra heading in a `docs/learn/` page is still caught.
   unrelated edits; regions can't, and get free VS Code folding as a bonus.
   The `docs-sync` test's failure message reports current line numbers regardless, so nothing is
   lost.
-- **Doc examples import from the built package** (`"behalf"`), matching how a real consumer would
-  use the library, the same as `examples/simple-chat` and `examples/multi-step-agent`.
+- **Doc examples import from the built packages** (`@behalf-js/core`, and whichever other
+  `@behalf-js/*` package the snippet needs), matching how a real consumer would use the library, the
+  same as `examples/simple-chat` and `examples/multi-step-agent`.
   The docs verification script runs `npm run build` first so this never requires a manual step.
 - **No separate `docs/guides/` folder.** How-to guides live in `docs/learn/` alongside concept and
   tutorial pages, told apart by a verb-phrase slug (`add-a-tool.md`) instead of location.
