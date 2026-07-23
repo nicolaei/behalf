@@ -305,6 +305,16 @@ Every doc example file has a matching `*.test.ts` (or is covered by one `docs/ex
 runner) so `npm test` actually exercises it.
 A snippet that compiles but throws at runtime is still a broken doc.
 
+> [!NOTE] One exception: a "full example" whose entire job is "copy this, plug in your own key, run
+> it against a real provider" (the Quick start page's example, the README's own snippet) is
+> typechecked but not exercised by a test, the same as `examples/simple-chat` and
+> `examples/multi-step-agent`.
+> Its top-level code calls a real `ModelPort` and can't run without a live key, so there's nothing a
+> test could assert against.
+> This exception is narrow: an example demonstrating specific behavior (a branch, a wait point, an
+> error path) must still use `fakePort` or a scripted `ModelPort` and get a real test.
+> Reaching for this exception there instead is avoiding the work, not a legitimate use of it.
+
 ### Referencing a slice of a file from a code block
 
 Mark the reusable slice in the source file with a named region, using VS Code's native folding

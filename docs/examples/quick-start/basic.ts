@@ -3,6 +3,7 @@ import type { Profile, Model } from "@behalf-js/core";
 import { createAnthropicPort } from "@behalf-js/models-anthropic";
 import { memoryStore } from "@behalf-js/stores";
 
+// #region profile
 const sonnet5: Model = {
   identifier: "claude-sonnet-5",
   provider: "anthropic",
@@ -15,13 +16,17 @@ const assistant: Profile = {
   system: "You are a helpful assistant.",
   tools: [],
 };
+// #endregion profile
 
-export const workflow = defineGraph("support", (flow) => {
+// #region graph
+export const workflow = defineGraph("quick-start", (flow) => {
   const turn = flow.use(agentTurn(assistant));
   flow.entry(turn);
   turn.then(flow.finish);
 });
+// #endregion graph
 
+// #region run
 const ready = await runtime({
   models: () => createAnthropicPort(sonnet5),
   bindings: [],
@@ -30,3 +35,4 @@ const ready = await runtime({
 
 const result = await runFlow(workflow, userText("Say hello world in one sentence."), ready);
 console.log(result);
+// #endregion run
