@@ -1,6 +1,6 @@
 {
   "name": "@behalf-js/models-anthropic",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "Anthropic ModelPort adapter for behalf — real requests, Claude Code OAuth support, delta streaming.",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,11 +23,11 @@
     "directory": "packages/models-anthropic"
   },
   "dependencies": {
-    "@behalf-js/core": "^0.0.0",
+    "@behalf-js/core": "^0.0.1",
     "@anthropic-ai/sdk": "^0.112.4",
     "zod": "^4.1.13"
   },
   "devDependencies": {
-    "@behalf-js/stores": "^0.0.0"
+    "@behalf-js/stores": "^0.0.1"
   }
 }

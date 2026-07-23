@@ -1,6 +1,6 @@
 {
   "name": "@behalf-js/stores",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "SessionStore adapters for behalf. An in-memory store, for tests and local dev.",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,6 +23,6 @@
     "directory": "packages/stores"
   },
   "dependencies": {
-    "@behalf-js/core": "^0.0.0"
+    "@behalf-js/core": "^0.0.1"
   }
 }

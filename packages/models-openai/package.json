@@ -1,6 +1,6 @@
 {
   "name": "@behalf-js/models-openai",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "description": "OpenAI ModelPort adapter for behalf. Stub — not yet implemented.",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,6 +23,6 @@
     "directory": "packages/models-openai"
   },
   "dependencies": {
-    "@behalf-js/core": "^0.0.0"
+    "@behalf-js/core": "^0.0.1"
   }
 }
