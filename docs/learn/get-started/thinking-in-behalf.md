@@ -46,9 +46,7 @@ export const triage: Graph = defineGraph("triage", (flow) => {
     { label: "auto-resolve" },
   );
 
-  // #region wait-point
   const waitForHuman = flow.waitFor(userInput("human-reply"));
-  // #endregion wait-point
 
   const respond = flow.step(
     outputs((context) => {

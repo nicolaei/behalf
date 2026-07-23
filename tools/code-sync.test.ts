@@ -6,7 +6,7 @@ import { describe, it, expect } from "vitest";
 import path from "node:path";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import { extractSourcedCodeBlocks, checkCodeSync } from "./code-sync.js";
+import { extractSourcedCodeBlocks, checkCodeSync, stripRegionMarkers } from "./code-sync.js";
 
 const repoRoot = path.resolve(fileURLToPath(import.meta.url), "..", "..");
 const fixtureSource = "tools/__fixtures__/code-sync/example.ts";
@@ -61,14 +61,37 @@ describe("extractSourcedCodeBlocks", () => {
   });
 });
 
-describe("checkCodeSync", () => {
-  it("passes when a whole-file reference matches the real file exactly", async () => {
-    const fileContent = await readFile(path.join(repoRoot, fixtureSource), "utf8");
-    const markdown = [
-      `\`\`\`ts source=${fixtureSource}`,
-      fileContent.replace(/\n$/, ""),
-      "```",
+describe("stripRegionMarkers", () => {
+  it("removes a #region/#endregion pair, leaving the content between them", () => {
+    const content = [
+      "before",
+      "// #region setup",
+      "const x = 1;",
+      "// #endregion setup",
+      "after",
     ].join("\n");
+
+    expect(stripRegionMarkers(content)).toBe(["before", "const x = 1;", "after"].join("\n"));
+  });
+
+  it("removes a hyphenated region's markers too", () => {
+    const content = ["// #region wait-point", "const x = 1;", "// #endregion wait-point"].join(
+      "\n",
+    );
+
+    expect(stripRegionMarkers(content)).toBe("const x = 1;");
+  });
+
+  it("leaves content with no markers untouched", () => {
+    expect(stripRegionMarkers("const x = 1;")).toBe("const x = 1;");
+  });
+});
+
+describe("checkCodeSync", () => {
+  it("passes when a whole-file reference matches the real file, markers stripped", async () => {
+    const fileContent = await readFile(path.join(repoRoot, fixtureSource), "utf8");
+    const stripped = stripRegionMarkers(fileContent.replace(/\n$/, ""));
+    const markdown = [`\`\`\`ts source=${fixtureSource}`, stripped, "```"].join("\n");
 
     const results = await checkCodeSync(markdown, repoRoot);
 
@@ -77,8 +100,8 @@ describe("checkCodeSync", () => {
         source: fixtureSource,
         region: undefined,
         ok: true,
-        expected: fileContent.replace(/\n$/, ""),
-        actual: fileContent.replace(/\n$/, ""),
+        expected: stripped,
+        actual: stripped,
       },
     ]);
   });

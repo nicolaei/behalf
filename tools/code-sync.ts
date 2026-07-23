@@ -61,6 +61,16 @@ function extractRegion(fileContent: string, region: string, source: string): str
     .replace(/\n$/, "");
 }
 
+const REGION_MARKER_PATTERN = /^\s*\/\/\s*#(?:end)?region\b.*$/;
+
+/** Strips every `#region`/`#endregion` marker line: a reader sees the code a region names, not the doc-tooling's own folding markers (including any nested region's markers a slice happens to contain). */
+export function stripRegionMarkers(content: string): string {
+  return content
+    .split("\n")
+    .filter((line) => !REGION_MARKER_PATTERN.test(line))
+    .join("\n");
+}
+
 /** Checks every sourced code block in `markdown` against the real file each one names. `repoRoot` resolves `source`. */
 export async function checkCodeSync(markdown: string, repoRoot: string): Promise<CodeSyncResult[]> {
   const results: CodeSyncResult[] = [];
@@ -72,9 +82,10 @@ export async function checkCodeSync(markdown: string, repoRoot: string): Promise
     } catch {
       throw new Error(`${block.source} does not exist (referenced by a code source= block)`);
     }
-    const actual = block.region
+    const raw = block.region
       ? extractRegion(fileContent, block.region, block.source)
       : fileContent.replace(/\n$/, "");
+    const actual = stripRegionMarkers(raw);
     results.push({
       source: block.source,
       region: block.region,
