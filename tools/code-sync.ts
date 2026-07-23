@@ -1,34 +1,39 @@
-// Dev tooling — checks that a `​```lang source=file` or `​```lang source=file#region`
+// Dev tooling — checks that a fenced `lang source=file` or `lang source=file#region`
 // block in a doc is byte-identical to the real file (or the named region
 // within it). A code snippet can drift from the file it claims to show the
 // moment someone edits the file and forgets the doc; this is what catches
 // that. Parallel to diagram-sync.ts, which does the same job for a
-// `​```mermaid source=file#exportName` block — deliberately not handled
+// a `mermaid source=file#exportName` block — deliberately not handled
 // here, since a mermaid block names an exported binding to import and
 // render, not a text region to extract.
+//
+// Only looks at top-level fences (markdown-fences.ts): an illustrative
+// example nested inside an outer, higher-backtick-count fence (the standard
+// CommonMark way to show a literal fence as text) is real content of that
+// outer block, never a fence of its own, so it's naturally invisible here —
+// no escape character needed.
 
 import path from "node:path";
 import { readFile } from "node:fs/promises";
+import { findTopLevelFences } from "./markdown-fences.js";
 
-/** One `​```lang source=...` (or `...#region`) block found in a doc. */
+/** One fenced `lang source=...` (or `...#region`) block found in a doc. */
 export interface CodeSourceBlock {
   source: string; // repo-root-relative path, e.g. "docs/examples/hello-world/basic.ts"
   region: string | undefined; // absent = the whole file
   content: string; // the block's body, trimmed of its trailing newline
 }
 
-// Excludes `mermaid` (diagram-sync's job) and a leading zero-width space
-// (docs/style-guide.md's own escape convention for showing this syntax
-// without triggering it, e.g. in a worked illustration).
-const BLOCK_PATTERN = /(?<!\u200b)```(?!mermaid)\w+ source=(\S+?)(?:#(\w+))?\n([\s\S]*?)```/g;
+const INFO_PATTERN = /^source=(\S+?)(?:#(\w+))?$/;
 
-/** Finds every sourced code block in `markdown` — a plain code block with no `source=`, and any `mermaid` block, are left alone. */
+/** Finds every sourced code block in `markdown` — a plain code block with no `source=`, and any `mermaid` block (diagram-sync's job), are left alone. */
 export function extractSourcedCodeBlocks(markdown: string): CodeSourceBlock[] {
   const blocks: CodeSourceBlock[] = [];
-  for (const match of markdown.matchAll(BLOCK_PATTERN)) {
-    const [, source, region, body] = match;
-    if (!source || body === undefined) continue;
-    blocks.push({ source, region, content: body.replace(/\n$/, "") });
+  for (const fence of findTopLevelFences(markdown)) {
+    if (fence.lang === "mermaid") continue;
+    const match = INFO_PATTERN.exec(fence.info);
+    if (!match?.[1]) continue;
+    blocks.push({ source: match[1], region: match[2], content: fence.content });
   }
   return blocks;
 }

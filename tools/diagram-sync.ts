@@ -1,4 +1,4 @@
-// Dev tooling — checks that a `​```mermaid source=file#exportName` block in a
+// Dev tooling — checks that a fenced `mermaid source=file#exportName` block in a
 // doc is byte-identical to graphToMermaid(the real Graph that binding names).
 // A diagram can drift the moment someone edits the graph and forgets to
 // regenerate the picture; this is what catches that, the same guarantee
@@ -6,31 +6,36 @@
 //
 // Lives under tools/ for the same reason graph-to-mermaid.ts does: this is
 // repo-internal verification, not part of the published package.
+//
+// Only looks at top-level fences (markdown-fences.ts): an illustrative
+// example nested inside an outer, higher-backtick-count fence (the standard
+// CommonMark way to show a literal fence as text) is real content of that
+// outer block, never a fence of its own, so it's naturally invisible here —
+// no escape character needed.
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Graph } from "../src/flow/graph.js";
 import { graphToMermaid } from "./graph-to-mermaid.js";
+import { findTopLevelFences } from "./markdown-fences.js";
 
-/** One `​```mermaid source=...#...` block found in a doc. */
+/** One fenced `mermaid source=...#...` block found in a doc. */
 export interface MermaidSourceBlock {
   source: string; // repo-root-relative path, e.g. "docs/examples/wiring-a-graph/audit.ts"
   exportName: string; // the exported Graph binding's name, e.g. "audit"
   content: string; // the block's body, trimmed of its trailing newline
 }
 
-// A leading zero-width space (docs/style-guide.md's own escape convention for
-// showing this syntax without triggering it, e.g. in a worked illustration)
-// excludes a match — real usage never has one.
-const BLOCK_PATTERN = /(?<!\u200b)```mermaid source=(\S+)#(\w+)\n([\s\S]*?)```/g;
+const INFO_PATTERN = /^source=(\S+)#(\w+)$/;
 
 /** Finds every sourced mermaid block in `markdown` — a plain mermaid block with no `source=` is left alone. */
 export function extractMermaidSourceBlocks(markdown: string): MermaidSourceBlock[] {
   const blocks: MermaidSourceBlock[] = [];
-  for (const match of markdown.matchAll(BLOCK_PATTERN)) {
-    const [, source, exportName, body] = match;
-    if (!source || !exportName || body === undefined) continue;
-    blocks.push({ source, exportName, content: body.replace(/\n$/, "") });
+  for (const fence of findTopLevelFences(markdown)) {
+    if (fence.lang !== "mermaid") continue;
+    const match = INFO_PATTERN.exec(fence.info);
+    if (!match?.[1] || !match[2]) continue;
+    blocks.push({ source: match[1], exportName: match[2], content: fence.content });
   }
   return blocks;
 }

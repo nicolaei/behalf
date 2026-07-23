@@ -1,4 +1,4 @@
-// diagram-sync — extracts `​```mermaid source=file#exportName` blocks from a
+// diagram-sync — extracts fenced `mermaid source=file#exportName` blocks from a
 // doc, imports the real Graph each one names, and checks the embedded
 // diagram is byte-identical to graphToMermaid(thatGraph). A diagram can't
 // silently drift from the wiring it depicts, the same guarantee the
@@ -54,10 +54,14 @@ describe("extractMermaidSourceBlocks", () => {
     ]);
   });
 
-  it("ignores an illustrative block escaped with a leading zero-width space (docs/style-guide.md's convention for showing syntax without triggering it)", () => {
-    const markdown = ["\u200b```mermaid source=a/b.ts#thing", "flowchart TB", "\u200b```"].join(
-      "\n",
-    );
+  it("ignores a fence nested inside an outer, higher-backtick-count fence (an illustrative example, not real usage)", () => {
+    const markdown = [
+      "````markdown",
+      "```mermaid source=a/b.ts#thing",
+      "flowchart TB",
+      "```",
+      "````",
+    ].join("\n");
 
     expect(extractMermaidSourceBlocks(markdown)).toEqual([]);
   });

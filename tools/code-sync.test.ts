@@ -1,4 +1,4 @@
-// code-sync — extracts `​```lang source=file` and `​```lang source=file#region`
+// code-sync — extracts fenced `lang source=file` and `lang source=file#region`
 // blocks from a doc and checks each is byte-identical to the real file (or the
 // named region within it). A code snippet can't silently drift from the file
 // it claims to show; a mismatch is what "properly tested" means for docs.
@@ -40,8 +40,14 @@ describe("extractSourcedCodeBlocks", () => {
     expect(extractSourcedCodeBlocks(markdown)).toEqual([]);
   });
 
-  it("ignores an illustrative block escaped with a leading zero-width space", () => {
-    const markdown = ["\u200b```ts source=a/b.ts#setup", "const x = 1;", "\u200b```"].join("\n");
+  it("ignores a fence nested inside an outer, higher-backtick-count fence (an illustrative example, not real usage)", () => {
+    const markdown = [
+      "````markdown",
+      "```ts source=a/b.ts#setup",
+      "const x = 1;",
+      "```",
+      "````",
+    ].join("\n");
 
     expect(extractSourcedCodeBlocks(markdown)).toEqual([]);
   });
