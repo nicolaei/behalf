@@ -4,8 +4,7 @@
 
 import type { Graph, NodeId, EdgeDefinition } from "../../flow/graph.js";
 import type { ThreadId } from "../../flow/thread.js";
-import type { Message, MessageKind, UserMessage } from "../../flow/message.js";
-import { messageKindOf, tryMessageKindOf } from "../../flow/waitable.js";
+import type { Message, MessageKind } from "../../flow/message.js";
 import type { Emit, StepContext, WaitForResult } from "../../flow/step.js";
 import type { Runtime } from "../runtime.js";
 import { freshCorrelationId } from "./ids.js";
@@ -16,8 +15,8 @@ import {
   appendOutput,
   applyThreadAction,
   withMessage,
-  route,
-  // StateTracker no longer referenced directly here — ExecutionScope owns it.
+  // route/StateTracker no longer referenced directly here — runWaitForNode
+  // and ExecutionScope own them.
 } from "./routing.js";
 import {
   runStep,
@@ -27,15 +26,15 @@ import {
   type ExecutionContext,
   ExecutionScope,
 } from "./step-runner.js";
+import { runModelCall, callTool } from "./execution.js";
 import {
-  runModelCall,
-  callTool,
-  waitForMessage,
-  waitForSignal,
-  peekSignalMatch,
-  peekMessageFromInbox,
-} from "./execution.js";
-import { driveWaitForMessage, findInterruptNodes } from "./drive.js";
+  findInterruptNodes,
+  runWaitForNode,
+  blockingMessageSource,
+  peekingMessageSource,
+  type MessageSource,
+  type WaitContext,
+} from "./drive.js";
 import type { CursorState, TickOutcome } from "./tick.js";
 
 /** What running one fan-out branch to completion settled with — a normal reach of its convergence node, or a nested `invalidate` emit that means the fan-out step itself must be rerun instead of joining. */
@@ -98,28 +97,19 @@ export function findSingleThenEdge(
 /**
  * Runs one node inside a fan-out branch: builds its `StepContext`, retries on
  * error via the shared `handleStepError` path, commits a `compact` the same
- * way the main loop does, and logs a plain output. A `waitFor` node is
- * consumed the same way `driveWaitForMessage` handles it everywhere else —
- * folding the message into the branch's own thread and (if armed) running an
- * interrupt — but obtaining the message itself differs by `waitMode`:
- * `"block"` (runBranch/runFlow) waits for one to arrive via the shared
- * `waitForMessage`; `"peek"` (tick's `advanceFanOutGroup`, the default) takes
- * one non-blocking shot at the inbox and reports `{ kind: "parked" }` if
- * nothing is there yet, mirroring how tick's own top-level waitFor handling
- * never blocks. A non-message (e.g. signal-based) `Waitable` on the branch's
- * own `waitFor` node takes the same non-message branch `driveWaitForNode`
- * and tick's own waitFor handling do: `"block"` parks on `waitForSignal`;
- * `"peek"` checks `match()` against the committed log, draining and
- * committing at most one pending signal before re-checking, and reports
- * `{ kind: "parked" }` if still unmatched — never extending to interrupt
- * racing inside a branch, which stays out of scope here just as it did for
- * the top-level non-message waitFor path.
- * notImplemented — out of scope for a branch. Only a plain `step`'s result
- * never follows an edge (that's the caller's job, since `runBranch` walks a
- * whole chain to the join while tick's per-call branch advance stops after
- * one node); a `waitFor`'s result already names the routed next node — its
- * own edge (or an armed interrupt's) — since folding the message and routing
- * off it is one inseparable step, same as everywhere else in the engine.
+ * way the main loop does, and logs a plain output. A `waitFor` node is driven
+ * through `runWaitForNode` — the same shared implementation `driveGraph` and
+ * `tick()` both use — picking `blockingMessageSource` for `waitMode: "block"`
+ * (runBranch/runFlow) or `peekingMessageSource` for `"peek"` (tick's
+ * `advanceFanOutGroup`, the default), so a branch's waitFor behaves exactly
+ * like a top-level one under whichever mode is in play, with no separate
+ * copy of that logic to keep in sync. `notImplemented` — out of scope for a
+ * branch. Only a plain `step`'s result never follows an edge (that's the
+ * caller's job, since `runBranch` walks a whole chain to the join while
+ * tick's per-call branch advance stops after one node); a `waitFor`'s result
+ * already names the routed next node — its own edge (or an armed
+ * interrupt's) — since folding the message and routing off it is one
+ * inseparable step, same as everywhere else in the engine.
  */
 export async function runBranchNode(
   nodeId: NodeId,
@@ -168,56 +158,21 @@ export async function runBranchNode(
 
   if (nodeDef.kind === "waitFor") {
     const interrupts = findInterruptNodes(flow);
-    const waitKind = tryMessageKindOf(nodeDef.waitable);
-
-    // A non-message (e.g. signal-based) Waitable: no message to fold, so
-    // this mirrors driveWaitForNode's own non-message branch (waitForSignal)
-    // for "block" mode, and tick's peek-and-drain-one-signal shape for
-    // "peek" mode — same scope as Story 2/3, not extending to interrupt
-    // racing inside a branch.
-    if (waitKind === undefined) {
-      if (waitMode === "block") {
-        const result = await waitForSignal(runtime.store, nodeDef.waitable);
-        const routed = route(
-          flow.edges,
-          nodeId,
-          { ok: true, result } satisfies WaitForResult,
-          thread,
-          runtime,
-        );
-        return { kind: "routed", thread: routed.thread, to: routed.to, input: routed.input };
-      }
-
-      const matched = peekSignalMatch(runtime.store, nodeDef.waitable);
-      if (matched === undefined)
-        return { kind: "parked", waitingFor: [nodeDef.waitable.label], thread };
-
-      const routed = route(
-        flow.edges,
-        nodeId,
-        { ok: true, result: matched } satisfies WaitForResult,
-        thread,
-        runtime,
-      );
-      return { kind: "routed", thread: routed.thread, to: routed.to, input: routed.input };
-    }
-
-    const kinds = [waitKind, ...interrupts.map((interrupt) => messageKindOf(interrupt.waitable))];
-    const message: UserMessage | undefined =
-      waitMode === "block"
-        ? await waitForMessage(runtime.store, kinds)
-        : peekMessageFromInbox(runtime.store, kinds);
-    if (!message) return { kind: "parked", waitingFor: kinds, thread };
-
-    const routed = await driveWaitForMessage(message, nodeId, {
+    const source: MessageSource =
+      waitMode === "block" ? blockingMessageSource(runtime) : peekingMessageSource(runtime);
+    const wait: WaitContext = {
       interrupts,
       context: branchContext,
       flow,
       runtime,
       setThread,
       stateTracker,
-    });
-    return { kind: "routed", thread: routed.thread, to: routed.to, input: routed.input };
+    };
+    const outcome = await runWaitForNode(nodeDef, nodeId, wait, source);
+    if (outcome.kind === "parked") {
+      return { kind: "parked", waitingFor: outcome.waitingFor, thread };
+    }
+    return { kind: "routed", thread: outcome.thread, to: outcome.to, input: outcome.input };
   }
 
   if (nodeDef.kind !== "step") notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
