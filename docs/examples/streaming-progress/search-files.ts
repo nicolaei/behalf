@@ -22,7 +22,7 @@ async function collectFiles(root: string): Promise<string[]> {
     try {
       entries = await readdir(dir, { withFileTypes: true });
     } catch {
-      return; // unreadable directory (permissions, race, etc.) — skip it
+      return; // unreadable directory (permissions, race, etc.): skip it
     }
     for (const entry of entries) {
       const full = path.join(dir, entry.name);
@@ -49,12 +49,12 @@ export const searchFilesBinding: Binding = provide(searchFiles, async (input, co
         if (line.includes(input.query)) matches.push({ file, line: index + 1 });
       });
     } catch {
-      // unreadable file (binary, permissions, etc.) — skip it, keep searching
+      // unreadable file (binary, permissions, etc.): skip it, keep searching
     }
     scanned++;
     stream.delta({
       correlationId: context.correlationId,
-      text: `scanned ${scanned}/${files.length} files (${matches.length} hits so far)`,
+      text: `scanned ${String(scanned)}/${String(files.length)} files (${String(matches.length)} hits so far)`,
     });
   }
   stream.commit({ value: { matches } });
