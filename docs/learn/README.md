@@ -33,8 +33,8 @@ For exact signatures, see [`../reference.md`](../reference.md).
 
 ## [Agents in practice](./agents-in-practice/README.md)
 
-- [The agent loop](./agents-in-practice/the-agent-loop.md) — `agentTurn`, budgets, compaction as a
-  new turn on the same thread.
+- [The agent loop](./agents-in-practice/the-agent-loop.md) — `agentTurn`, the loop shape, compaction
+  as a new turn on the same thread.
 - [Fan-out and joining](./agents-in-practice/fan-out-and-joining.md) — parallel branches, `join()`,
   an audit-style example.
 - [Handling errors](./agents-in-practice/handling-errors.md) — `StepError`, `ErrorHandler`, retry

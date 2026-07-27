@@ -4,6 +4,7 @@ import type { ThreadId } from "../flow/thread.js";
 import type { StepError } from "../flow/step.js";
 import type { Envelope } from "../session/index.js";
 
+// #region error-context
 /** Context passed to an error handler: the step, thread, attempt count, and session log. @public */
 export interface ErrorContext {
   step: { id: string; name?: string };
@@ -14,6 +15,7 @@ export interface ErrorContext {
 
 /** What an error handler returns: retry (optionally after a delay) or give up. @public */
 export type ErrorDecision = { action: "retry"; after?: number } | { action: "fail" };
+// #endregion error-context
 
 /** Consulted in order after a step error; the first decision wins. `undefined` defers. @public */
 export type ErrorHandler = (error: StepError, context: ErrorContext) => ErrorDecision | undefined;
@@ -34,6 +36,7 @@ const DEFAULT_RETRY_CAP = 3;
 /** Base delay (ms) for exponential backoff between retries; kept tiny so tests stay fast. */
 const DEFAULT_RETRY_BASE_DELAY_MS = 1;
 
+// #region default-handler
 /**
  * The built-in handler runtime() appends after any user-supplied handlers.
  * Retries retryable errors with exponential backoff up to a small cap, otherwise fails.
@@ -46,6 +49,7 @@ export const defaultErrorHandler: ErrorHandler = (error, context) => {
   const after = DEFAULT_RETRY_BASE_DELAY_MS * 2 ** context.attempts;
   return { action: "retry", after };
 };
+// #endregion default-handler
 
 /** A thrown error that says its own retryability — the one thing only the raiser (e.g. a ModelPort) actually knows. runStep reads this via instanceof instead of hardcoding retryable:false for every throw. @public */
 export class RetryableError extends Error {
