@@ -41,7 +41,7 @@ export const audit: Graph = defineGraph("audit", (flow) => {
 `intake` reads the last message once and hands it to three reviewer personas, each with its own
 system prompt.
 Forking gives every branch its own thread: `security`'s call to the model never sees `performance`'s
-reply, and neither sees the other's — `audit.test.ts` asserts this directly, checking that the
+reply, and neither sees the other's: `audit.test.ts` asserts this directly, checking that the
 store's committed events span at least four distinct thread ids: the original plus one per branch.
 
 ## Reaching the join
@@ -70,7 +70,7 @@ step.
 ```
 
 `context.inputs` holds one entry per branch, in the order the branches were declared in the `then`
-array — `[security's review, performance's review, style's review]` here, not arrival order. `merge`
+array: `[security's review, performance's review, style's review]` here, not arrival order. `merge`
 casts that array to `Review[]` and returns it as-is; the `reply` step right after reads it back out
 of `context.inputs[0]` to build the final summary.
 
@@ -185,7 +185,7 @@ export const audit: Graph = defineGraph("audit", (flow) => {
 ## Recap
 
 - `then([a, b, c])` fans a step's output out to several branches, each on its own forked thread
-- A branch reaches the join by an ordinary `.then()` chain — there's no special return value that
+- A branch reaches the join by an ordinary `.then()` chain: there's no special return value that
   marks "this is the last step in a branch"
 - The convergence node must be built with `join()`; the engine rejects the wiring either direction
   if it isn't

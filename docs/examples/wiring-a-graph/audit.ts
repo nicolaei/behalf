@@ -4,7 +4,7 @@
 // step turns into one recommendation. Driven with a scripted ModelPort per
 // branch in audit.test.ts, so the merge step's assertion can tell which
 // review said what. Every step carries an explicit `label`, so the generated
-// diagram (see graphToMermaid) reads as "security"/"performance"/… instead of
+// diagram (see graphToMermaid) reads as "security"/"performance"/etc. instead of
 // an auto-assigned node id.
 
 import { defineGraph, join, outputs } from "@behalf-js/core";

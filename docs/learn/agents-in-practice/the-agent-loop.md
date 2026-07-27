@@ -2,7 +2,7 @@
 
 One primitive covers three things that look different at first: a single reply, a turn that calls
 tools, and a whole interactive chat. `agentTurn` calls the model, waits out whatever tools it asked
-for, and either finishes or loops back — the same shape, however many times it repeats.
+for, and either finishes or loops back, the same shape, however many times it repeats.
 
 ## You will learn
 
@@ -29,13 +29,14 @@ A response that did use tools waits out every tool call, folds their results int
 loops back to call the model again.
 
 That fold ends with `context.compact(...)`, not `context.output(...)`.
-Per the Terms below, finishing a compaction begins a new turn — so each trip back through the loop
-is a fresh turn that already sees the folded tool result, not a continuation of the same one.
+Per the Terms below, finishing a compaction begins a new turn, so each trip back through the loop is
+a fresh turn that already sees the folded tool result, not a continuation of the same one.
 
 You can also end a turn the instant a specific tool fires, instead of waiting for a tool-free
 response: pass `finishOn: [{ on: "toolCall", name: "..." }]`, and the turn finishes early with that
 call's own result. `{ on: "finalMessage" }` (a response with no tools) is always active regardless
-of `finishOn` — you're adding an extra way out, not replacing the default one.
+of `finishOn`.
+You're adding an extra way out, not replacing the default one.
 
 ## Turn vs. response, precisely
 
@@ -68,7 +69,7 @@ export const chat = defineGraph("chat", (flow) => {
 });
 ```
 
-`waitForPrompt.then(loop)` loops back into the very turn that just ran — nothing here starts a new
+`waitForPrompt.then(loop)` loops back into the very turn that just ran: nothing here starts a new
 thread. `chat.test.ts`'s own scripted-port test proves it: the third model call's messages still
 include the very first prompt, sent two turns earlier.
 

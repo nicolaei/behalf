@@ -16,14 +16,14 @@ The runner, not the graph, decides what happens next.
 
 A rejected review, a test suite that came back red: these are opinions the flow itself should route
 on, not failures of the flow. `classify` in
-[Thinking in behalf](../get-started/thinking-in-behalf.md) does exactly this — it emits a normal
+[Thinking in behalf](../get-started/thinking-in-behalf.md) does exactly this: it emits a normal
 `output` with a `decision` field, and an ordinary `when` edge sends it down the escalate or
 auto-resolve branch.
 
 A step that's actually broken (the provider timed out, a reply didn't parse, an unexpected
 exception) is different: it emits `{ error }`, or throws and the runner wraps that throw as
 `{ type: "unexpected", retryable: false }`.
-An `error` is never routed by an edge — no `when` clause ever sees it.
+An `error` is never routed by an edge: no `when` clause ever sees it.
 Instead, the runner appends an error event and hands the decision to the runtime's `errorHandlers`.
 
 ## ErrorHandler
@@ -47,7 +47,7 @@ nothing here is specific to this page's examples, so the block above isn't sourc
 `docs/examples/` file the way the rest of this page's code is.
 
 `runtime()`'s `errorHandlers` list is consulted in order; the first one to return a decision wins.
-Returning `undefined` defers to the next handler in line, not "do nothing" — there's always at least
+Returning `undefined` defers to the next handler in line, not "do nothing": there's always at least
 one more handler after yours, since `runtime()` appends its own default last.
 
 ```ts source=docs/examples/handling-errors/backoff.ts#handler
@@ -125,8 +125,8 @@ one-size policy is wrong for a step you know more about.
   by an edge
 - `ErrorContext` gives a handler the step, its thread, its attempt count, and the session log
 - `errorHandlers` runs in order; the first decision wins, `undefined` defers to the next one
-- `retryable` is the raiser's own opinion, advisory only — a handler can retry past it or fail
-  before it, as this page's two handlers each do
+- `retryable` is the raiser's own opinion, advisory only: a handler can retry past it or fail before
+  it, as this page's two handlers each do
 - `runtime()` always appends a default handler last: retry `retryable` errors with backoff up to a
   small cap, otherwise fail
 - Next: how a runtime actually wires `models`, `bindings`, and `errorHandlers` together, in

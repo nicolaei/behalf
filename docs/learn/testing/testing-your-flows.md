@@ -5,7 +5,7 @@ vocabulary, the same way a fake-timer library wraps a runtime's clock.
 
 ## You will learn
 
-- How to recognize when a test needs `@behalf-js/testing` instead of `src/index.ts`
+- How to recognize when a test needs `@behalf-js/testing` instead of `@behalf-js/core`
 - How to choose between `stepOnce` and `stepUntilBlocked`
 - How `stepUntil` plus `atNode` drives a flow to a specific point
 - How `StepUntilError` reports a stalled or budget-exceeded flow
