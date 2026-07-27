@@ -5,8 +5,8 @@ vocabulary, the same way a fake-timer library wraps a runtime's clock.
 
 ## You will learn
 
-- Why this is a separate entry point, not part of `src/index.ts`
-- The difference between `stepOnce` and `stepUntilBlocked`
+- How to recognize when a test needs `@behalf-js/testing` instead of `src/index.ts`
+- How to choose between `stepOnce` and `stepUntilBlocked`
 - How `stepUntil` plus `atNode` drives a flow to a specific point
 - What `StepUntilError` tells you when a flow stalls or exceeds its budget
 

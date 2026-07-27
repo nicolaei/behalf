@@ -28,12 +28,13 @@ function scriptedPort(script: AssistantMessage["content"][]): ModelPort {
     model: { identifier: "scripted", provider: "test", contextWindow: 100_000, reasoning: [] },
     respond: () => {
       const content = script[call];
+      if (!content) throw new Error(`scriptedPort: no script entry for call ${String(call + 1)}`);
       call += 1;
       return Promise.resolve({
         role: "assistant",
         provider: "test",
         model: "scripted",
-        content: content ?? [{ type: "text", text: "RESOLVE" }],
+        content,
         usage: { input: 1, output: 1 },
       });
     },

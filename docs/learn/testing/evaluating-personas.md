@@ -9,7 +9,7 @@ pages.
 - How to define a table of cases (input, expected property, not necessarily exact output)
 - How to run a persona over each case with `runFlow` or `stepUntilBlocked`
 - How to score an output: exact match, a rubric function, or a grading model call
-- Where this pattern's limits are, and why it's a recipe, not a framework feature
+- How to recognize when this pattern's lack of built-in aggregation calls for your own reporting
 
 ## Defining a case table
 
@@ -51,7 +51,8 @@ stays deterministic without needing a live model for every case.
 ## Running a persona over each case
 
 `it.each(cases)` turns the table into one vitest test per case, each with its own runtime and its
-own scripted reply, so a failure names exactly which case broke.
+own scripted reply, so a failure names exactly which case broke. `triage` below is the persona under
+test: a one-step flow whose system prompt asks for exactly `"RESOLVE"` or `"ESCALATE"`.
 
 ```ts source=docs/examples/evaluating-personas/matrix.test.ts#run-each
 describe("triage persona", () => {
