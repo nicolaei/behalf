@@ -5,6 +5,7 @@
 import type { Graph, NodeId, EdgeDefinition } from "../../flow/graph.js";
 import type { ThreadId } from "../../flow/thread.js";
 import type { Message, MessageKind } from "../../flow/message.js";
+import { tryMessageKindOf } from "../../flow/waitable.js";
 import type { Emit, StepContext, WaitForResult } from "../../flow/step.js";
 import type { Runtime } from "../runtime.js";
 import { freshCorrelationId } from "./ids.js";
@@ -410,6 +411,66 @@ export function replayBranchMessage(
   applyBranchEdge(branch, thenEdge, group.joinNodeId, {
     ok: true,
     result: message,
+  } satisfies WaitForResult);
+}
+
+/**
+ * Folds one committed `signal` event into whichever branch of `group` it
+ * resolves — the fan-out-branch counterpart to `replayPosition`'s own
+ * top-level `applySignalEvent` handling, which this was missing entirely:
+ * without it, a branch parked on a signal-based `waitFor` in peek mode
+ * advances in memory on the tick() call that sees the signal arrive, but the
+ * NEXT tick() call reconstructs the group fresh from the log with no record
+ * of that advance — the drained signal event used to carry no thread
+ * attribution at all, so replay had nothing to recognize the branch by —
+ * and it re-parks at the same node forever, live progress silently
+ * discarded every call.
+ *
+ * `drainOnePendingSignal` now tags the committed event with the waitFor
+ * node's own thread id (`runWaitForNode` passes `context.thread.id`, a fan-
+ * out branch's own forked thread), so first touch works exactly like
+ * `replayBranchOutput`/`replayBranchMessage`: recognized by `threadId` once
+ * known, or — the first time this branch's own thread appears — by finding
+ * the not-yet-started, not-done branch currently parked at its own
+ * non-message `waitFor` node whose `Waitable.match()` actually succeeds
+ * against the committed log (the same test `applySignalEvent` and
+ * `peekSignalMatch` both use). Checking `match()` rather than trusting "the
+ * earliest untouched branch" matters here specifically because a signal
+ * carries no kind to multiplex by — unlike a message — so more than one
+ * branch could otherwise be parked on a distinct signal at once.
+ */
+export function replayBranchSignal(
+  group: FanOutGroup,
+  threadId: ThreadId | undefined,
+  flow: Graph,
+  runtime: Runtime,
+): void {
+  let branch = threadId
+    ? group.branches.find((candidate) => candidate.thread?.id === threadId)
+    : undefined;
+  if (!branch) {
+    branch = group.branches.find((candidate) => {
+      if (candidate.done || candidate.started) return false;
+      const nodeDef = flow.nodes.get(candidate.current);
+      if (nodeDef?.kind !== "waitFor" || tryMessageKindOf(nodeDef.waitable) !== undefined)
+        return false;
+      return nodeDef.waitable.match(runtime.store.events()) !== undefined;
+    });
+    if (!branch) return; // not a node this fan-out group owns
+    branch.started = true;
+    if (threadId) branch.thread = replayForkedThread(group.mainThread, threadId);
+  }
+
+  const nodeDef = flow.nodes.get(branch.current);
+  if (nodeDef?.kind !== "waitFor" || tryMessageKindOf(nodeDef.waitable) !== undefined) return;
+  const matched = nodeDef.waitable.match(runtime.store.events());
+  if (matched === undefined) return;
+
+  delete branch.waitingFor;
+  const thenEdge = findSingleThenEdge(flow.edges, branch.current);
+  applyBranchEdge(branch, thenEdge, group.joinNodeId, {
+    ok: true,
+    result: matched,
   } satisfies WaitForResult);
 }
 

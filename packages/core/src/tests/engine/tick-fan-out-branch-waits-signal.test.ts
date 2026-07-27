@@ -7,13 +7,14 @@ import { neverCalled } from "../acceptance/support.js";
 
 // A review of the driveGraph/tick() waitFor unification (commit 31b1a10)
 // flagged this combination as untested either before or after that change.
-// Written to close the gap, it instead found a real, pre-existing bug:
-// tickUntilSuspended (tick.ts) hangs forever — confirmed via `git stash`
-// against fan-out.ts as it stood BEFORE this session's unification, so this
-// is not a regression from that refactor, just a latent defect it happened
-// to surface. Skipped rather than left hanging in the suite; see the tracked
-// problem for the fix. Un-skip once tick's peek+signal handling for a
-// fan-out branch's own waitFor node is fixed.
+// Writing it found a real, pre-existing bug: replayPosition's fan-out
+// reconstruction (applyFanOutEvent) handled `output` and `message` events
+// folding into a branch, but had no equivalent for `signal` events — so a
+// branch parked on a signal-based waitFor advanced in memory the call it saw
+// the signal, then lost that progress on the next call's from-scratch log
+// replay, re-parking forever. Fixed via replayBranchSignal (fan-out.ts),
+// the branch counterpart to replayPosition's own top-level
+// applySignalEvent handling.
 describe("ticking a fan-out branch that waits for a signal", () => {
   function pingSignal(): Waitable<{ pong: string }> {
     return {
@@ -46,7 +47,7 @@ describe("ticking a fan-out branch that waits for a signal", () => {
     joinStep.then(flowBuilder.finish);
   });
 
-  it.skip("reports the waiting branch as parked with its signal's label, resumable across tick calls", async () => {
+  it("reports the waiting branch as parked with its signal's label, resumable across tick calls", async () => {
     const store = memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 

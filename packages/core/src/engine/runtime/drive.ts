@@ -9,6 +9,7 @@
 import { type Graph, type NodeId, type NodeKind, nodeOptionFields } from "../../flow/graph.js";
 import type { Message, MessageKind, UserMessage } from "../../flow/message.js";
 import type { Waitable } from "../../flow/waitable.js";
+import type { ThreadId } from "../../flow/thread.js";
 import { tryMessageKindOf, messageKindOf } from "../../flow/waitable.js";
 import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../../flow/step.js";
 import type { Tool } from "../../flow/tool.js";
@@ -313,7 +314,7 @@ export interface MessageSource {
    * peeking variant checks `match()` once (draining at most one pending
    * signal first) and resolves to `undefined` if still unmatched.
    */
-  signal<T>(waitable: Waitable<T>): Promise<T | undefined>;
+  signal<T>(waitable: Waitable<T>, threadId: ThreadId): Promise<T | undefined>;
 }
 
 /** The `MessageSource` `driveGraph` drives every `waitFor` node through: blocks until its Waitable (or an armed interrupt's) is satisfied, via `waitForRace`/`waitForSignal`. */
@@ -329,7 +330,7 @@ export function blockingMessageSource(runtime: Runtime): MessageSource {
           messageKind: tryMessageKindOf(interrupt.waitable),
         })),
       ),
-    signal: (waitable) => waitForSignal(runtime.store, waitable),
+    signal: (waitable, threadId) => waitForSignal(runtime.store, waitable, threadId),
   };
 }
 
@@ -352,7 +353,8 @@ export function peekingMessageSource(runtime: Runtime): MessageSource {
         : { kind: "self", message };
       return Promise.resolve(winner);
     },
-    signal: (waitable) => Promise.resolve(peekSignalMatch(runtime.store, waitable)),
+    signal: (waitable, threadId) =>
+      Promise.resolve(peekSignalMatch(runtime.store, waitable, threadId)),
   };
 }
 
@@ -386,7 +388,7 @@ export async function runWaitForNode(
   const waitKind = tryMessageKindOf(node.waitable);
 
   if (waitKind === undefined) {
-    const matched = await source.signal(node.waitable);
+    const matched = await source.signal(node.waitable, context.thread.id);
     if (matched === undefined) return { kind: "parked", waitingFor: [node.waitable.label] };
     const routed = route(
       flow.edges,

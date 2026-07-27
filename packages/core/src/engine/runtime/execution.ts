@@ -40,13 +40,13 @@ async function pollInbox<T>(
   return undefined;
 }
 
-/** Consumes one pending `signal` entry, if any is queued, and commits it to the log as a `signal` event — the "drain one pending signal and commit it" step every non-message `waitFor` path repeats (blocking here in `waitForSignal`/`waitForRace`, or peeked non-blockingly in `tick`/`runBranchNode`) until its `Waitable`'s own `match()` catches up with the log. Returns whether an entry was drained. */
-export function drainOnePendingSignal(store: SessionStore): boolean {
+/** Consumes one pending `signal` entry, if any is queued, and commits it to the log as a `signal` event — the "drain one pending signal and commit it" step every non-message `waitFor` path repeats (blocking here in `waitForSignal`/`waitForRace`, or peeked non-blockingly in `tick`/`runBranchNode`) until its `Waitable`'s own `match()` catches up with the log. `threadId`, when given, tags the committed event with the waitFor node's own thread — a fan-out branch's own forked thread, so replay can later recognize which branch this signal resolved (see `replayBranchSignal`, fan-out.ts); the top-level single-line path doesn't need it (there's only one line to attribute anything to) but passes its own thread id anyway, for parity. Returns whether an entry was drained. */
+export function drainOnePendingSignal(store: SessionStore, threadId?: ThreadId): boolean {
   const entry = store.consume((candidate) => candidate.kind === "signal");
   if (entry?.kind !== "signal") return false;
   store.append(
     { name: entry.name, ...(entry.payload !== undefined ? { payload: entry.payload } : {}) },
-    { type: "signal" },
+    { type: "signal", ...(threadId ? { threadId } : {}) },
   );
   return true;
 }
@@ -83,10 +83,14 @@ export function peekMessageFromInbox(
   return entry?.kind === "message" ? entry.message : undefined;
 }
 
-/** Checks a non-message `Waitable`'s own `match()` against the committed log, draining and committing at most one pending `signal` entry if nothing matched yet, then re-checking once more — the peek shape every non-blocking, non-message `waitFor` site (tick's own waitFor handling, `runBranchNode`'s `"peek"` mode) shares. `undefined` if still unmatched; never blocks, unlike `waitForSignal`. */
-export function peekSignalMatch<T>(store: SessionStore, waitable: Waitable<T>): T | undefined {
+/** Checks a non-message `Waitable`'s own `match()` against the committed log, draining and committing at most one pending `signal` entry (tagged with `threadId`, when given) if nothing matched yet, then re-checking once more — the peek shape every non-blocking, non-message `waitFor` site (tick's own waitFor handling, `runBranchNode`'s `"peek"` mode) shares. `undefined` if still unmatched; never blocks, unlike `waitForSignal`. */
+export function peekSignalMatch<T>(
+  store: SessionStore,
+  waitable: Waitable<T>,
+  threadId?: ThreadId,
+): T | undefined {
   let matched = waitable.match(store.events());
-  if (matched === undefined && drainOnePendingSignal(store)) {
+  if (matched === undefined && drainOnePendingSignal(store, threadId)) {
     matched = waitable.match(store.events());
   }
   return matched;
@@ -104,13 +108,17 @@ export function peekSignalMatch<T>(store: SessionStore, waitable: Waitable<T>): 
  * live inbox, since a signal's identity lives in its committed event, not in
  * anything message-shaped.
  */
-export async function waitForSignal<T>(store: SessionStore, waitable: Waitable<T>): Promise<T> {
+export async function waitForSignal<T>(
+  store: SessionStore,
+  waitable: Waitable<T>,
+  threadId?: ThreadId,
+): Promise<T> {
   const result = await pollInbox(store, () => {
     for (;;) {
       const matched = waitable.match(store.events());
       if (matched !== undefined) return { value: matched };
 
-      if (!drainOnePendingSignal(store)) return undefined;
+      if (!drainOnePendingSignal(store, threadId)) return undefined;
       // Loop back around: the freshly committed signal may or may not be
       // what `waitable` is looking for — either way, re-check `match()`
       // before trying to drain another pending entry.

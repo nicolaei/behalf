@@ -29,6 +29,7 @@ import {
   foldGroup,
   replayBranchOutput,
   replayBranchMessage,
+  replayBranchSignal,
   advanceFanOutGroup,
   branchCursorState,
 } from "./fan-out.js";
@@ -230,6 +231,9 @@ function applyFanOutEvent(
   if (envelope.type === "message") {
     const { message } = envelope.event as Event["message"];
     replayBranchMessage(group, envelope.threadId, message, ownerFlow);
+  }
+  if (envelope.type === "signal") {
+    replayBranchSignal(group, envelope.threadId, ownerFlow, runtime);
   }
   // toolCall/toolResult/compaction/invalidation/error inside a branch aren't
   // produced by any node kind `runBranchNode` supports — out of scope for
