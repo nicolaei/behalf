@@ -8,6 +8,7 @@
 
 import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
 import type { Message, UserMessage } from "../../flow/message.js";
+import type { ThreadId } from "../../flow/thread.js";
 import type { Waitable } from "../../flow/waitable.js";
 import { tryMessageKindOf } from "../../flow/waitable.js";
 import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../../flow/step.js";
@@ -26,6 +27,7 @@ import {
   applyThreadAction,
   withMessage,
   thenEdges,
+  maybeEmitStateChange,
 } from "./routing.js";
 import {
   runStep,
@@ -43,13 +45,22 @@ export interface InterruptNode {
   id: NodeId;
   waitable: Waitable<unknown>;
   run: Step;
+  label?: string;
+  state?: string;
 }
 
 /** Every `interrupt` node in the graph — armed for the whole run, not just one node. */
 export function findInterruptNodes(flow: Graph): InterruptNode[] {
   const interrupts: InterruptNode[] = [];
   for (const [id, node] of flow.nodes) {
-    if (node.kind === "interrupt") interrupts.push({ id, waitable: node.waitable, run: node.run });
+    if (node.kind === "interrupt")
+      interrupts.push({
+        id,
+        waitable: node.waitable,
+        run: node.run,
+        ...(node.label ? { label: node.label } : {}),
+        ...(node.state ? { state: node.state } : {}),
+      });
   }
   return interrupts;
 }
@@ -104,7 +115,7 @@ export function seedUseNode(
   return { seed: fallback, thread };
 }
 
-/** Runs a `use` node: seeds its subgraph, drives it inline to its own `finish`, and follows the reaching edge with its result. */
+/** Runs a `use` node: seeds its subgraph, drives it inline to its own `finish`, and follows the reaching edge with its result. The subgraph inherits `ctx.stateTracker` rather than getting a fresh one: a `use` node's subgraph runs on the reaching edge's own (unforked) thread by default, so a state declared inside it must dedupe against the outer thread's already-tracked state, the same reasoning `driveForEachNode` applies to its branches. */
 async function driveUseNode(
   node: Extract<NodeKind, { kind: "use" }>,
   nodeId: NodeId,
@@ -112,10 +123,10 @@ async function driveUseNode(
   currentInput: unknown,
   ctx: ExecutionContext,
 ): Promise<RouteResult> {
-  const { flow, runtime } = ctx;
+  const { flow, runtime, stateTracker } = ctx;
   const { seed, thread } = seedUseNode(reason, currentInput, ctx.thread, runtime);
 
-  const result = await driveGraph(node.subgraph, runtime, thread, seed);
+  const result = await driveGraph(node.subgraph, runtime, thread, seed, stateTracker);
 
   return commitRoute(
     runtime,
@@ -133,11 +144,15 @@ async function driveUseNode(
  * builds one branch `Graph` per item via `node.branch` (a dynamic, runtime-
  * sized fan-out — unlike a static `.then([a, b])` fan-out, the branch count
  * and shape aren't known until this node actually runs), drives each branch
- * as a first-class subgraph on its own forked thread — the same machinery
- * `driveUseNode` uses for a single `use`d subgraph, just one call per item —
- * and folds every branch's own result back into an array as this node's
- * single output. Branches run concurrently (`Promise.all`), same as a static
- * fan-out's `driveStepEmit` runs its branches.
+ * as a first-class subgraph on the PARENT's own unforked thread — not a
+ * forked one, unlike a static fan-out branch — and folds every branch's own
+ * result back into an array as this node's single output. Because branches
+ * share one real thread id, `ctx.stateTracker` is passed through unchanged
+ * rather than given a fresh map per branch: two branches declaring the same
+ * `state` must dedupe into one `stateChange`, the same as any other repeat
+ * entry on one thread. Branches run concurrently (`Promise.all`), same as a
+ * static fan-out's `driveStepEmit` runs its branches (which DO fork, and so
+ * DO get an independent tracker each).
  */
 async function driveForEachNode(
   node: Extract<NodeKind, { kind: "forEach" }>,
@@ -145,10 +160,10 @@ async function driveForEachNode(
   currentInput: unknown,
   ctx: ExecutionContext,
 ): Promise<RouteResult> {
-  const { flow, runtime, thread } = ctx;
+  const { flow, runtime, thread, stateTracker } = ctx;
   const items = node.items(currentInput);
   const results = await Promise.all(
-    items.map((item) => driveGraph(node.branch(item), runtime, thread, item)),
+    items.map((item) => driveGraph(node.branch(item), runtime, thread, item, stateTracker)),
   );
   const outputs = results.map((result) => result.output);
 
@@ -178,6 +193,7 @@ export async function driveWaitForMessage(
   flow: Graph,
   runtime: Runtime,
   setThread: (thread: Thread) => void,
+  stateTracker: Map<ThreadId, string>,
 ): Promise<RouteResult & { ranInterruptStep: boolean }> {
   // Consuming the message is the same step regardless of who it's for: it
   // becomes a log event and joins the thread, then whichever node was
@@ -191,7 +207,9 @@ export async function driveWaitForMessage(
     (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,
   );
   if (interrupt) {
+    maybeEmitStateChange(runtime, thread.id, stateTracker, interrupt.state);
     const stepContext: StepContext = withInputs(context, [message]);
+
     const emit = await runStep(interrupt.run, stepContext);
     // An interrupt step emitting anything but `output` isn't supported yet.
     if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
@@ -245,6 +263,7 @@ async function driveWaitForNode(
   flow: Graph,
   runtime: Runtime,
   setThread: (thread: Thread) => void,
+  stateTracker: Map<ThreadId, string>,
 ): Promise<RouteResult> {
   const waitKind = tryMessageKindOf(node.waitable);
   if (waitKind === undefined) {
@@ -277,6 +296,7 @@ async function driveWaitForNode(
       flow,
       runtime,
       setThread,
+      stateTracker,
     );
     return { thread: routed.thread, input: routed.input, reason: routed.reason, to: routed.to };
   }
@@ -294,6 +314,7 @@ async function driveWaitForNode(
       flow,
       runtime,
       setThread,
+      stateTracker,
     );
     return { thread: routed.thread, input: routed.input, reason: routed.reason, to: routed.to };
   }
@@ -304,6 +325,7 @@ async function driveWaitForNode(
   // exactly like a message-based interrupt's does in `driveWaitForMessage`.
   const interrupt = interrupts.find((candidate) => candidate.id === winner.interrupt.id);
   if (!interrupt) unreachable(`waitForRace resolved to unknown interrupt "${winner.interrupt.id}"`);
+  maybeEmitStateChange(runtime, context.thread.id, stateTracker, interrupt.state);
   const stepContext: StepContext = withInputs(context, [winner.value]);
   const emit = await runStep(interrupt.run, stepContext);
   if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
@@ -395,6 +417,9 @@ export async function driveStepEmit(
         runBranch(branch, emit.output, joinNodeId, {
           ...ctx,
           thread: applyThreadAction(thread, "fork", undefined, runtime),
+          // Each fan-out branch forks its own thread, so it gets its own
+          // fresh stateChange tracker rather than sharing the parent's.
+          stateTracker: new Map(),
         }),
       ),
     );
@@ -529,6 +554,7 @@ export async function driveGraph(
   runtime: Runtime,
   thread: Thread,
   input: unknown,
+  stateTracker: Map<ThreadId, string> = new Map<ThreadId, string>(),
 ): Promise<DriveResult> {
   // The live current thread — reassigned (not mutated) by `invalidate`, a
   // `use` node, or a threadAction when it forks or resets. `context.thread`
@@ -567,6 +593,12 @@ export async function driveGraph(
     const node = flow.nodes.get(current);
     if (!node) throw new Error(`graph "${flow.name}" has no node "${current}"`);
 
+    // A state-less node is invisible to the state machine; a declared
+    // `state` fires (or not) exactly once per node visit here, before
+    // dispatching to this node's own kind-specific handling below — so a
+    // retried step (which re-enters this loop without changing `current`)
+    // re-checks the same already-seen state and stays a no-op.
+    maybeEmitStateChange(runtime, currentThread.id, stateTracker, node.state);
     // Consumed by whichever node runs next, regardless of its kind — a join's
     // pendingInputs must never survive past the node it was meant for.
     const inputs = pendingInputs ?? [currentInput];
@@ -580,6 +612,7 @@ export async function driveGraph(
         runtime,
         thread: currentThread,
         attemptsByNode,
+        stateTracker,
       });
       currentThread = routed.thread;
       currentInput = routed.input;
@@ -594,6 +627,7 @@ export async function driveGraph(
         runtime,
         thread: currentThread,
         attemptsByNode,
+        stateTracker,
       });
       currentThread = routed.thread;
       currentInput = routed.input;
@@ -613,6 +647,7 @@ export async function driveGraph(
         (next) => {
           currentThread = next;
         },
+        stateTracker,
       );
       currentThread = routed.thread;
       currentInput = routed.input;
@@ -639,6 +674,7 @@ export async function driveGraph(
       runtime,
       thread: currentThread,
       attemptsByNode,
+      stateTracker,
     });
     if (outcome.kind === "retry") continue;
 

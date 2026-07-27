@@ -217,10 +217,25 @@ export async function advanceForEachGroup(
   if (notDone.length === 0)
     unreachable("advanceForEachGroup: no unfinished branch in a forEach group");
 
+  // Shared by every branch in this call, not one map per branch: forEach
+  // branches run on the group's own thread ids, but two branches declaring
+  // the same `state` must still dedupe into one `stateChange`, exactly as
+  // `driveForEachNode`'s own branches do on the non-tick drive path (see
+  // drive.ts's `driveForEachNode`, whose doc comment explains why). tick()
+  // still has no state-tracking of its own across separate calls — this
+  // only covers dedup among branches advanced within one call.
+  const stateTracker = new Map<ThreadId, string>();
+
   for (const branch of notDone) {
     const thread: Thread = branch.thread ?? replayForkedThread(group.mainThread, branch.threadId);
     branch.thread = thread;
-    const ctx: ExecutionContext = { flow: branch.graph, runtime, thread, attemptsByNode };
+    const ctx: ExecutionContext = {
+      flow: branch.graph,
+      runtime,
+      thread,
+      attemptsByNode,
+      stateTracker,
+    };
     const result = await runBranchNode(branch.current, branch.currentInput, ctx);
     branch.thread = result.thread;
     if (result.kind === "invalidate") notImplemented("tick: forEach branch invalidate");

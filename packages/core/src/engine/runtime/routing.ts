@@ -175,6 +175,32 @@ export function applyThreadAction(
   return reason ? withMessage(current, reason) : current;
 }
 
+/**
+ * Emits a `stateChange` event when `state` differs from the last one seen on
+ * `threadId` by `stateTracker` — omits `from` on that thread's first entry,
+ * updates the tracker either way. A no-op when `state` is `undefined`: a
+ * node with no declared state is invisible to the state machine, not a
+ * silent transition to some "undefined" phase. Shared by every node kind's
+ * own check-and-emit — `driveGraph`'s main loop, `runBranchNode`'s fan-out/
+ * forEach branches, and the two places an armed `interrupt` wins a race and
+ * takes over routing.
+ */
+export function maybeEmitStateChange(
+  runtime: Runtime,
+  threadId: ThreadId,
+  stateTracker: Map<ThreadId, string>,
+  state: string | undefined,
+): void {
+  if (state === undefined) return;
+  const previous = stateTracker.get(threadId);
+  if (previous === state) return;
+  runtime.store.append(
+    { ...(previous !== undefined ? { from: previous } : {}), to: state },
+    { type: "stateChange", threadId },
+  );
+  stateTracker.set(threadId, state);
+}
+
 /** The `then` edges leaving a node, in declared order — more than one means a fan-out. */
 export function thenEdges(edges: readonly EdgeDefinition[], from: NodeId): EdgeDefinition[] {
   return edges.filter((candidate) => candidate.from === from && candidate.edge === "then");

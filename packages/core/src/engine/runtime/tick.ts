@@ -740,6 +740,12 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         frame.flow,
         runtime,
         setThread,
+        // tick() drives one node per call and has no persistent
+        // state-tracking across calls yet (a separate, larger gap than
+        // this feature's scope) — a fresh map here only satisfies this
+        // call's own signature; an interrupt's `from` will be lost if a
+        // prior state was established on an earlier tick() call.
+        new Map(),
       );
       currentThread = routed.thread;
       frame.current = routed.to;
@@ -831,6 +837,10 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       runtime,
       thread: currentThread,
       attemptsByNode,
+      // Same tick()-has-no-cross-call-tracking limitation as the
+      // driveWaitForMessage call site above — a fresh map only satisfies
+      // this call's own signature.
+      stateTracker: new Map(),
     });
 
     if (outcome.kind === "retry") continue;

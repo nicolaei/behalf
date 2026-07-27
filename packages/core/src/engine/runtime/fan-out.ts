@@ -17,6 +17,7 @@ import {
   applyThreadAction,
   withMessage,
   route,
+  maybeEmitStateChange,
 } from "./routing.js";
 import {
   runStep,
@@ -130,10 +131,16 @@ export async function runBranchNode(
   | { kind: "routed"; thread: Thread; to: NodeId; input: unknown }
   | { kind: "parked"; waitingFor: MessageKind[]; thread: Thread }
 > {
-  const { flow, runtime } = ctx;
+  const { flow, runtime, stateTracker } = ctx;
   let thread = ctx.thread;
   const nodeDef = flow.nodes.get(nodeId);
   if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${nodeId}"`);
+
+  // A state-less node is invisible to the state machine; fires (or not)
+  // exactly once per node visit here, mirroring driveGraph's own top-of-loop
+  // check — so a branch's retried step re-checks the same already-seen
+  // state and stays a no-op.
+  maybeEmitStateChange(runtime, thread.id, stateTracker, nodeDef.state);
 
   const setThread = (next: Thread): void => {
     thread = next;
@@ -208,6 +215,7 @@ export async function runBranchNode(
       flow,
       runtime,
       setThread,
+      stateTracker,
     );
     return { kind: "routed", thread: routed.thread, to: routed.to, input: routed.input };
   }
@@ -533,6 +541,11 @@ export async function advanceFanOutGroup(
       runtime,
       thread: branchThread,
       attemptsByNode,
+      // Fresh per branch is correct here, not a stopgap: a fan-out branch
+      // forks its own thread id (see advanceFanOutGroup's own forking
+      // above), so its state tracking is independent of any sibling's,
+      // same as driveStepEmit's fan-out handling in drive.ts.
+      stateTracker: new Map(),
     });
     branch.thread = result.thread;
     if (result.kind === "invalidate") notImplemented("tick: fan-out branch invalidate");

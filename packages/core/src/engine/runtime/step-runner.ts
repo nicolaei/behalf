@@ -14,13 +14,15 @@ import type { Runtime } from "../runtime.js";
 import { type ErrorContext, type ErrorDecision, unreachable } from "../errors.js";
 import { RetryableError } from "../errors.js";
 import type { Thread } from "./routing.js";
+import type { ThreadId } from "../../flow/thread.js";
 
-/** Everything a step or branch needs to run against: the runtime it calls into, the graph it's routing through, the thread it's advancing, and the shared per-node attempt counter that survives retries. The one bundle every drive-loop and fan-out-branch function threads through instead of separate positional parameters. */
+/** Everything a step or branch needs to run against: the runtime it calls into, the graph it's routing through, the thread it's advancing, the shared per-node attempt counter that survives retries, and the shared `stateChange` tracker (last state seen per thread) for this drive scope. The one bundle every drive-loop and fan-out-branch function threads through instead of separate positional parameters. */
 export interface ExecutionContext {
   runtime: Runtime;
   flow: Graph;
   thread: Thread;
   attemptsByNode: Map<NodeId, number>;
+  stateTracker: Map<ThreadId, string>;
 }
 
 /**
