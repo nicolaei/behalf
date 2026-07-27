@@ -95,6 +95,10 @@ Put together, `intake`'s fan-out and the three reviewers converging on `merge` g
 this shape:
 
 <table>
+<colgroup>
+<col width="60%">
+<col width="40%">
+</colgroup>
 <tr>
 <td>
 
@@ -142,7 +146,7 @@ flowchart TB
 </table>
 
 This diagram is generated from the real `audit` `Graph` object, not hand-drawn, so it can't drift
-from the wiring above it: `tools/graph-to-mermaid.ts` renders it, and a test asserts the two stay
+from the code beside it: `tools/graph-to-mermaid.ts` renders it, and a test asserts the two stay
 byte-identical.
 
 This audit is deliberately small, just enough to show the wiring.

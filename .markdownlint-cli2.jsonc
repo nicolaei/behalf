@@ -11,7 +11,7 @@
     // collapsible "Deep dive" boxes (details/summary), and the
     // code-left/diagram-right layout for a graph's shape next to its
     // generated diagram (table/tr/td, GitHub's only two-column option).
-    "MD033": { "allowed_elements": ["details", "summary", "table", "tr", "td"] },
+    "MD033": { "allowed_elements": ["details", "summary", "table", "colgroup", "col", "tr", "td"] },
     // We only ever use fenced (```), backtick code blocks — pin it so a
     // stray indented block or ~~~ fence gets flagged as inconsistent.
     "MD046": { "style": "fenced" },

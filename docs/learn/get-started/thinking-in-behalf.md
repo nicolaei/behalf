@@ -29,6 +29,10 @@ This is a fragment, not the whole file: threading, the wait point, and error han
 come, added incrementally over the rest of this page.
 
 <table>
+<colgroup>
+<col width="60%">
+<col width="40%">
+</colgroup>
 <tr>
 <td>
 

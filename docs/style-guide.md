@@ -379,10 +379,10 @@ file rather than a region:
 
 ### Graph diagrams: generated, side by side
 
-A page showing a graph's _shape_ (`wiring-a-graph.md`, `fan-out-and-joining.md`,
-`thinking-in-behalf.md`'s "sketch the shape" step) never hand-draws that diagram.
-`tools/graph-to-mermaid.ts` generates it from the real `Graph` object the code above it builds, so
-the picture can't drift from the wiring the moment someone changes it.
+A page showing a graph's _shape_ (`wiring-a-graph.md`, `thinking-in-behalf.md`'s "sketch the shape"
+step) never hand-draws that diagram. `tools/graph-to-mermaid.ts` generates it from the real `Graph`
+object the code beside it builds, so the picture can't drift from the wiring the moment someone
+changes it.
 Hand-drawn Mermaid (the "Diagrams" section above) is still right for a _sequence_ or _state_
 diagram, where there's no real object to generate from.
 Generated diagrams are only for a graph's node/edge shape.
@@ -392,10 +392,21 @@ code-next-to-result rhythm, the closest plain-Markdown equivalent to a Sandpack 
 GitHub has no native two-column Markdown, so this uses an HTML `<table>`; the blank line right after
 every `<td>` and right before every `</td>` is required.
 Without it, GitHub treats the fence as raw HTML text instead of a Markdown code block and renders it
-unstyled:
+unstyled.
+
+GitHub's table renderer doesn't hold two columns to equal widths on its own: left unconstrained, a
+wide code block forces its `<td>` to expand and squeezes the diagram's column down to an unreadable
+sliver.
+A `<colgroup>` with explicit `<col width="NN%">` percentages fixes it; GitHub's sanitizer keeps the
+legacy `width` attribute (unlike a `style` attribute, which it strips), so a 60/40 split (code gets
+the wider column, a diagram needs less horizontal room) survives and renders:
 
 ````markdown
 <table>
+<colgroup>
+<col width="60%">
+<col width="40%">
+</colgroup>
 <tr>
 <td>
 
