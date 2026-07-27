@@ -5,7 +5,7 @@ thing a step actually calls.
 
 ## You will learn
 
-- What a `Model` descriptor captures: identity, context window, reasoning levels, price
+- How to read a `Model` descriptor: identity, context window, reasoning levels, price
 - How to build a `Profile`: model, system prompt, tools, reasoning
 - How a persona's `reasoning` is checked against its model's supported levels
 - How cost is derived from price and usage

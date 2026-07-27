@@ -145,6 +145,10 @@ This diagram is generated from the real `audit` `Graph` object, not hand-drawn, 
 from the wiring above it: `tools/graph-to-mermaid.ts` renders it, and a test asserts the two stay
 byte-identical.
 
+This audit is deliberately small, just enough to show the wiring.
+[Fan-out and joining](../agents-in-practice/fan-out-and-joining.md) builds its own, larger version
+of the same shape later, to explain why each piece works the way it does.
+
 ## Loops
 
 Edges may form cycles: an edge back to an earlier node re-enables it as a new run, and that run's

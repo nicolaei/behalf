@@ -11,7 +11,7 @@ ever touches.
   everything back with `events()`/`changes()`
 - How to tail the log to rebuild state, ignoring deltas and in-progress snapshots
 - How a client reconnects: replay the committed log, then in-progress snapshots, then live deltas
-- What `Gateway.connect`/`submit` do, and why many clients can share one session
+- How `Gateway.connect`/`submit` work, and why many clients can share one session
 
 ## Event and Envelope
 

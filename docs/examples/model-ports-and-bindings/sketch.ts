@@ -37,7 +37,6 @@ export function createEchoPort(model: Model): ModelPort {
       stream.delta({ correlationId: "echo-reply", text: reply });
       stream.delta({ correlationId: "echo-reply", close: true });
 
-      // #region thinking
       return Promise.resolve({
         role: "assistant",
         provider: "echo",
@@ -48,7 +47,6 @@ export function createEchoPort(model: Model): ModelPort {
         content: [...priorThinking(messages), { type: "text", text: reply }],
         usage: { input: messages.length, output: 1 },
       });
-      // #endregion thinking
     },
   };
 }

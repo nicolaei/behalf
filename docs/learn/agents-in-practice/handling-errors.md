@@ -5,12 +5,12 @@ The runner, not the graph, decides what happens next.
 
 ## You will learn
 
-- The difference between a logical failure (route with `when`) and a broken step (an `error`, never
+- How to tell a logical failure (route with `when`) apart from a broken step (an `error`, never
   routed by an edge)
-- What `ErrorContext` gives a handler to decide with
+- How `ErrorContext` gives a handler what it needs to decide with
 - How to write a handler that returns `retry` or `fail`
-- Why `retryable` is only ever a hint, not a rule the handler must follow
-- What the default backoff handler does when you supply none
+- How `retryable` is only ever a hint, not a rule the handler must follow
+- How the default backoff handler behaves when you supply none
 
 ## Logical failure vs. broken step
 
@@ -31,18 +31,20 @@ Instead, the runner appends an error event and hands the decision to the runtime
 An `ErrorHandler` is a plain function: the error plus an `ErrorContext`, in; a decision or
 `undefined`, out.
 
-```ts source=packages/core/src/engine/errors.ts#error-context
-/** Context passed to an error handler: the step, thread, attempt count, and session log. @public */
-export interface ErrorContext {
+```ts
+interface ErrorContext {
   step: { id: string; name?: string };
   thread: ThreadId;
   attempts: number; // times this step has already errored
   log: Envelope[]; // the session so far, to inspect
 }
 
-/** What an error handler returns: retry (optionally after a delay) or give up. @public */
-export type ErrorDecision = { action: "retry"; after?: number } | { action: "fail" };
+type ErrorDecision = { action: "retry"; after?: number } | { action: "fail" };
 ```
+
+Both are exported from `@behalf-js/core` (reference.md § Errors carries the same definitions);
+nothing here is specific to this page's examples, so the block above isn't sourced from a
+`docs/examples/` file the way the rest of this page's code is.
 
 `runtime()`'s `errorHandlers` list is consulted in order; the first one to return a decision wins.
 Returning `undefined` defers to the next handler in line, not "do nothing" — there's always at least
@@ -96,13 +98,8 @@ up, and confirms `runFlow` rejects, once the two-retry budget is spent.
 `runtime()` always appends one more handler after any you supply: it retries `retryable` errors with
 exponential backoff up to a small cap, and fails everything else.
 
-```ts source=packages/core/src/engine/errors.ts#default-handler
-/**
- * The built-in handler runtime() appends after any user-supplied handlers.
- * Retries retryable errors with exponential backoff up to a small cap, otherwise fails.
- * See docs/reference.md’s Errors section.
- */
-export const defaultErrorHandler: ErrorHandler = (error, context) => {
+```ts
+const defaultErrorHandler: ErrorHandler = (error, context) => {
   if (!error.retryable || context.attempts >= DEFAULT_RETRY_CAP) {
     return { action: "fail" };
   }
@@ -110,6 +107,12 @@ export const defaultErrorHandler: ErrorHandler = (error, context) => {
   return { action: "retry", after };
 };
 ```
+
+This is the runtime's own internal default, not something you import: `defaultErrorHandler` isn't
+part of `@behalf-js/core`'s public exports, only its behavior is (reference.md § Errors describes
+the same shape). `DEFAULT_RETRY_CAP` and `DEFAULT_RETRY_BASE_DELAY_MS` are small, fixed constants;
+the exact numbers aren't the point, the shape (`retryable` gates it, backoff grows with `attempts`)
+is.
 
 Supplying no `errorHandlers` at all doesn't mean no error handling: it means every error goes
 straight to this one.

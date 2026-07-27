@@ -85,7 +85,7 @@ to `userInput`.
   first wins, the loser keeps waiting
 - `userInput(kind)` is the one built-in `Waitable`; `kind` is a label you invent, not an API name
 - Next: describe the messages, personas, and tools these steps actually call, in
-  [Describing a flow](../describing-a-flow/README.md)
+  [Messages and content](../describing-a-flow/messages-and-content.md)
 
 ---
 

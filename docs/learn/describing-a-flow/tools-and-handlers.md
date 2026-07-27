@@ -5,7 +5,7 @@ capability, a `ToolHandler` is the real code behind it, and `provide`/`expand` c
 
 ## You will learn
 
-- Tell a `tool` apart from a `toolset`
+- How to tell a `tool` apart from a `toolset`
 - How to write a `ToolHandler` and what its `ToolContext` gives it
 - How `provide` binds a `tool` and `expand` binds a `toolset`
 - How a handler streams progress

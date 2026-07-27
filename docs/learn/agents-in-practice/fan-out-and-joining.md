@@ -7,10 +7,15 @@ reply.
 
 - How `then([a, b, c])` fans a step's output out to several branches, each on its own forked thread
 - How each branch reaches the merge point by an ordinary `.then()` edge, no special return value
-- Why the convergence node must be built with `join()`, and what the engine rejects if it isn't
+- How the convergence node must be built with `join()`, and what the engine rejects if it isn't
 - How the join step reads `context.inputs`, one entry per branch, in branch-declared order
 
 ## Fanning out
+
+You've already seen this shape once: [Wiring a graph](../building-the-graph/wiring-a-graph.md) used
+a three-reviewer audit to show what fan-out and `join()` look like wired together.
+This page builds its own version of the same idea, slower, to show why each piece works the way it
+does.
 
 An array is the whole trigger. `then(target)` continues to one step; `then([a, b, c])` continues to
 several, each getting the same output, each running on its own forked thread.

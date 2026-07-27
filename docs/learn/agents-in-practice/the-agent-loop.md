@@ -7,8 +7,8 @@ for, and either finishes or loops back — the same shape, however many times it
 ## You will learn
 
 - How `agentTurn` loops a step that calls the model, until a response uses no tools
-- Why a round of tool calls folds into the thread with a `compact`, and what that starts
-- What `Response` and `Turn` mean precisely, reusing reference.md's own definitions
+- How a round of tool calls folds into the thread with a `compact`, and what that starts
+- How to tell `Response` and `Turn` apart precisely, reusing reference.md's own definitions
 - How to end a turn early on a specific tool call with `finishOn`
 - How an interactive chat is just one turn, looped, waiting for the next prompt in between
 
@@ -39,10 +39,11 @@ of `finishOn` — you're adding an extra way out, not replacing the default one.
 
 ## Turn vs. response, precisely
 
-- **Response** — one model call and the tools it invokes: the model replies, its tools run, and that
-  produces one `AssistantMessage` (plus its tool results) on the log — one `modelCall`.
-  There is no separate `Reply` type — a response _is_ an `AssistantMessage`.
-- **Turn** — one user message (or a finished compaction) through the responses that follow, looping
+- **Response:** one model call and the tools it invokes.
+  The model replies, its tools run, and that produces one `AssistantMessage` (plus its tool results)
+  on the log, one `modelCall`.
+  There is no separate `Reply` type: a response _is_ an `AssistantMessage`.
+- **Turn:** one user message (or a finished compaction), through the responses that follow, looping
   until a response needs no tools.
   A turn is one thread, one persona, one provider. `waitFor` parks between turns; steering folds
   into the current turn; finishing a compaction begins a new turn.

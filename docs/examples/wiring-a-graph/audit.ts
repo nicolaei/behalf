@@ -11,8 +11,8 @@ import { defineGraph, join, outputs } from "@behalf-js/core";
 import type { Graph, Profile, Model, StepContext } from "@behalf-js/core";
 
 const reviewModel: Model = {
-  identifier: "claude-sonnet-5",
-  provider: "anthropic",
+  identifier: "scripted",
+  provider: "test",
   contextWindow: 1_000_000,
   reasoning: ["off"],
 };

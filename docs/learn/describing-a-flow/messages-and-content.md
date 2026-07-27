@@ -5,10 +5,10 @@ This page is the vocabulary the rest of the docs assume you already have.
 
 ## You will learn
 
-- Tell the four message roles apart and what each carries
-- Recognize the five content block kinds, especially `thinking` and `toolCall`/`toolResult`
-- Why a `thinking` block's `signature` must round-trip unmodified
-- What `intent` means: `standard`, `steering`, `abort`
+- How to tell the four message roles apart and what each carries
+- How to recognize the five content block kinds, especially `thinking` and `toolCall`/`toolResult`
+- How to keep a `thinking` block's `signature` intact, so it round-trips unmodified
+- How to read `intent`: `standard`, `steering`, `abort`
 - How `kind` routes `waitFor`/`interrupt`
 
 ## Roles and content blocks

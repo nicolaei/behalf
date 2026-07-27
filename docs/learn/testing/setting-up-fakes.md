@@ -120,6 +120,11 @@ instead of a real side effect. `provide(tool, handler)` binds a handler exactly 
 `runtime()`'s own `bindings` array; the handler here just returns a fixed value instead of doing
 real work.
 
+`tool` is the same function [Tools and handlers](../describing-a-flow/tools-and-handlers.md)
+introduced; that page left its third argument, a Zod schema, at its default (a permissive record).
+Passing one explicitly, as `getWeather` does below, gets real runtime input validation instead of
+just compile-time typing.
+
 ```ts source=docs/examples/setting-up-fakes/fake-chat.test.ts#fake-tool
 const getWeather = tool(
   "get_weather",

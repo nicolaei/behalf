@@ -5,10 +5,10 @@ supplies real `ToolHandler`s for the tools your personas declare.
 
 ## You will learn
 
-- What a `ModelPort` must implement, and what "it only responds" means (compaction is a normal
-  response with a summary prompt)
-- Why a port passes `thinking` blocks back unmodified
-- What it converts when a thread crosses providers
+- How to implement a `ModelPort`, and what "it only responds" means (compaction is a normal response
+  with a summary prompt)
+- How a port passes `thinking` blocks back unmodified
+- How content converts when a thread crosses providers
 - How to assemble tool bindings from `standardBindings` plus your own
 - How this connects to `fakePort` for tests (forward ref to Setting up fakes)
 
@@ -70,21 +70,10 @@ Some providers keep the full reasoning only as long as an opaque token on the bl
 unchanged; edit that token, even just the visible summary text next to it, and the provider rejects
 it or silently drops the reasoning it was protecting.
 A port that reshapes a block to "clean it up" breaks exactly the thing it's trying to preserve.
-Here's the same `respond` implementation again, this time forwarding whatever `thinking` block
-already sits on the thread untouched:
-
-```ts source=docs/examples/model-ports-and-bindings/sketch.ts#thinking
-      return Promise.resolve({
-        role: "assistant",
-        provider: "echo",
-        model: model.identifier,
-        // Any thinking block already on the thread is forwarded exactly as it
-        // arrived: mutating one, even just its text, breaks the token a
-        // provider needs to accept it back on a later turn.
-        content: [...priorThinking(messages), { type: "text", text: reply }],
-        usage: { input: messages.length, output: 1 },
-      });
-```
+Look back at `createEchoPort`'s `respond` above: the whole return statement, including that comment,
+is the part doing the work here.
+Nothing about it treats a `thinking` block specially; it just spreads `priorThinking(messages)` into
+`content` alongside the reply, unchanged.
 
 Cross-provider conversion is the one reshaping a port is still expected to do: if a thread's prior
 `thinking` block came from a different model than the one now handling the turn, the new port

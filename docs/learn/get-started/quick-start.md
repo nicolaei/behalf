@@ -55,7 +55,7 @@ A graph is nodes and edges, built once inside `defineGraph`'s callback.
 The smallest one worth having is a single turn: enter, run the persona, finish.
 
 ```ts source=docs/examples/quick-start/basic.ts#graph
-export const workflow = defineGraph("quick-start", (flow) => {
+export const quickStart = defineGraph("quick-start", (flow) => {
   const turn = flow.use(agentTurn(assistant));
   flow.entry(turn);
   turn.then(flow.finish);
@@ -81,7 +81,7 @@ const ready = await runtime({
   store: memoryStore(),
 });
 
-const result = await runFlow(workflow, userText("Say hello world in one sentence."), ready);
+const result = await runFlow(quickStart, userText("Say hello world in one sentence."), ready);
 console.log(result);
 ```
 
