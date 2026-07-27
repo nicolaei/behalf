@@ -15,7 +15,7 @@ export type { ThreadId, ThreadAction } from "./thread.js";
 export type { Tool, Toolset, ToolContext, ToolHandler, Binding } from "./tool.js";
 export { tool, toolset, provide, expand } from "./tool.js";
 export type { Profile } from "./profile.js";
-export type { NodeId, Graph, EdgeOptions, Handle, Flow } from "./graph.js";
+export type { NodeId, Graph, EdgeOptions, NodeOptions, Handle, Flow } from "./graph.js";
 export { defineGraph } from "./graph.js";
 export type { Waitable } from "./waitable.js";
 export { userInput, toolCall } from "./waitable.js";

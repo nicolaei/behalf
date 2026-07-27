@@ -15,9 +15,15 @@ export interface EdgeOptions {
   label?: string; // e.g. "no tools used" — shown instead of the generic when/otherwise/then name
 }
 
-/** One node's declaration, as captured by the `Flow` builder. */
-export type NodeKind =
-  | { kind: "step"; run: Step; label?: string }
+/** Options shared by every node factory. `label` is a debug name for this node (a trace or log line). `state` is an application-level phase this node represents — several nodes may share one `state`; the engine emits a `stateChange` event only when it differs from the last one seen on the thread. @public */
+export interface NodeOptions {
+  label?: string;
+  state?: string;
+}
+
+/** One node's declaration, as captured by the `Flow` builder. `label` and `state` are shared by every kind, not just `step`. */
+export type NodeKind = { label?: string; state?: string } & (
+  | { kind: "step"; run: Step }
   | { kind: "use"; subgraph: Graph }
   | { kind: "waitFor"; waitable: Waitable<unknown> }
   | { kind: "interrupt"; waitable: Waitable<unknown>; run: Step }
@@ -26,7 +32,8 @@ export type NodeKind =
       items: (output: unknown) => readonly unknown[];
       branch: (item: unknown) => Graph;
     }
-  | { kind: "finish" };
+  | { kind: "finish" }
+);
 
 /** One edge's declaration, as captured by `Handle.when`/`.otherwise`/`.then`. */
 export interface EdgeDefinition {
@@ -55,11 +62,15 @@ export interface Handle {
 
 /** The DSL object passed to `defineGraph`’s build callback. @public */
 export interface Flow {
-  step<Result>(run: Step<Result>, options?: { label?: string }): Handle;
-  use(subgraph: Graph): Handle; // compose a graph as a node; runs on the reaching edge's thread
-  waitFor<T>(waitable: Waitable<T>): Handle; // park until `waitable`'s condition is met
-  interrupt<T>(waitable: Waitable<T>, run: Step): Handle; // always armed
-  forEach<Item>(items: (output: unknown) => readonly Item[], branch: (item: Item) => Graph): Handle; // dynamic, runtime-sized fan-out
+  step<Result>(run: Step<Result>, options?: NodeOptions): Handle;
+  use(subgraph: Graph, options?: NodeOptions): Handle; // compose a graph as a node; runs on the reaching edge's thread
+  waitFor<T>(waitable: Waitable<T>, options?: NodeOptions): Handle; // park until `waitable`'s condition is met
+  interrupt<T>(waitable: Waitable<T>, run: Step, options?: NodeOptions): Handle; // always armed
+  forEach<Item>(
+    items: (output: unknown) => readonly Item[],
+    branch: (item: Item) => Graph,
+    options?: NodeOptions,
+  ): Handle; // dynamic, runtime-sized fan-out
   entry(node: Handle): void;
   readonly finish: Handle; // route a value in to end the flow; that value is the result
 }
@@ -91,6 +102,14 @@ const nodeIdSequence = (() => {
 })();
 function freshNodeId(): NodeId {
   return nodeIdSequence.fresh();
+}
+
+/** Picks `label`/`state` out of a node factory's options, omitting either key entirely when absent rather than writing `undefined` — shared by every factory in `Flow` so each writes its own kind-specific fields plus this one call. */
+function nodeOptionFields(options?: NodeOptions): { label?: string; state?: string } {
+  return {
+    ...(options?.label ? { label: options.label } : {}),
+    ...(options?.state ? { state: options.state } : {}),
+  };
 }
 
 /** Defines a named, runnable flow graph from a declarative build callback. @public */
@@ -139,31 +158,32 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
       nodes.set(id, {
         kind: "step",
         run,
-        ...(options?.label ? { label: options.label } : {}),
+        ...nodeOptionFields(options),
       });
       return makeHandle(id);
     },
-    use(subgraph) {
+    use(subgraph, options) {
       const id = freshNodeId();
-      nodes.set(id, { kind: "use", subgraph });
+      nodes.set(id, { kind: "use", subgraph, ...nodeOptionFields(options) });
       return makeHandle(id);
     },
-    waitFor(waitable) {
+    waitFor(waitable, options) {
       const id = freshNodeId();
-      nodes.set(id, { kind: "waitFor", waitable });
+      nodes.set(id, { kind: "waitFor", waitable, ...nodeOptionFields(options) });
       return makeHandle(id);
     },
-    interrupt(waitable, run) {
+    interrupt(waitable, run, options) {
       const id = freshNodeId();
-      nodes.set(id, { kind: "interrupt", waitable, run });
+      nodes.set(id, { kind: "interrupt", waitable, run, ...nodeOptionFields(options) });
       return makeHandle(id);
     },
-    forEach(items, branch) {
+    forEach(items, branch, options) {
       const id = freshNodeId();
       nodes.set(id, {
         kind: "forEach",
         items,
         branch: branch as (item: unknown) => Graph,
+        ...nodeOptionFields(options),
       });
       return makeHandle(id);
     },

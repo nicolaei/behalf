@@ -9,6 +9,7 @@ import type {
   AssistantMessage,
   Envelope,
   EventType,
+  Event,
   SessionStore,
 } from "../../index.js";
 
@@ -117,6 +118,13 @@ export function loggedEventAt(store: SessionStore, index: number): CommittedEnve
 /** Every committed envelope in the store, in order — for assertions that need more than `.type`. */
 export function loggedEnvelopes(store: SessionStore): CommittedEnvelope[] {
   return store.events().filter(isCommitted);
+}
+
+/** Every `stateChange` event in the store, in order — the assertion surface every stateChange test reads. */
+export function stateChanges(store: SessionStore): Event["stateChange"][] {
+  return loggedEnvelopes(store)
+    .filter((envelope) => envelope.type === "stateChange")
+    .map((envelope) => envelope.event as Event["stateChange"]);
 }
 
 /**

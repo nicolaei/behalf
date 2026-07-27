@@ -18,6 +18,11 @@ export interface Event {
   // Waitables are user-extensible and the library can't enumerate every
   // possible external fact an app might define.
   signal: { name: string; payload?: unknown };
+  // An application-level phase change, distinct from `stepId`/`stepName`:
+  // many nodes may declare the same `state` (see `NodeOptions`), and this
+  // fires only when the value actually differs from the last one seen on
+  // the thread — never once per node, only once per real transition.
+  stateChange: { from?: string; to: string };
 }
 
 /** Union of all event type keys. @public */

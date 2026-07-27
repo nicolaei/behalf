@@ -430,11 +430,18 @@ thread; there is no separate `Group` return type).
 ```ts
 function defineGraph(name: string, build: (flow: Flow) => void): Graph;
 
+interface NodeOptions {
+  label?: string; // debug name for this node; shown in traces and generated diagrams
+  state?: string; // application-level phase this node represents; several nodes may share one
+                  // value; the engine emits `stateChange` only when it differs from the last
+                  // value seen on the thread (see § Event)
+}
+
 interface Flow {
-  step<Result>(run: Step<Result>, options?: { label?: string }): Handle;
-  use(subgraph: Graph): Handle; // compose a graph as a node; runs on the reaching edge's thread (default same)
-  waitFor<T>(waitable: Waitable<T>): Handle; // park until `waitable`'s condition is met
-  interrupt<T>(waitable: Waitable<T>, run: Step): Handle; // always armed
+  step<Result>(run: Step<Result>, options?: NodeOptions): Handle;
+  use(subgraph: Graph, options?: NodeOptions): Handle; // compose a graph as a node; runs on the reaching edge's thread (default same)
+  waitFor<T>(waitable: Waitable<T>, options?: NodeOptions): Handle; // park until `waitable`'s condition is met
+  interrupt<T>(waitable: Waitable<T>, run: Step, options?: NodeOptions): Handle; // always armed
   entry(node: Handle): void;
   readonly finish: Handle; // route a value in to end the flow; that value is the result
 }
