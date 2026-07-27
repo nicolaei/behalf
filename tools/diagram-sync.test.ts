@@ -118,7 +118,10 @@ describe("the real docs tree", () => {
     return files;
   }
 
-  it("has no drifted diagrams (vacuously true until docs use this convention)", async () => {
+  // Walks the whole docs tree and dynamically imports every unique file a mermaid source=
+  // block names, legitimately slower than the vitest default as more pages adopt the
+  // convention, not a hang.
+  it("has no drifted diagrams", async () => {
     const docsDir = path.join(repoRoot, "docs");
     const files = await findMarkdownFiles(docsDir);
 
@@ -133,5 +136,5 @@ describe("the real docs tree", () => {
     }
 
     expect(failures).toEqual([]);
-  });
+  }, 60_000);
 });
