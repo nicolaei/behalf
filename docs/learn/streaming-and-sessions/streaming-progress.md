@@ -6,7 +6,7 @@ to the log: the same mechanism a model call uses internally for its own streamed
 ## You will learn
 
 - How `openStream(type)` opens a fresh, logged stream scoped to the current thread
-- The `delta`/`commit`/`abort` lifecycle of a `Stream`
+- How to move a `Stream` through its `delta`/`commit`/`abort` lifecycle
 - How a slow tool (`search_files`) reports progress this way
 - How this relates to a model call's own internal stream
 

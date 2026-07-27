@@ -123,10 +123,31 @@ describe("Gateway", () => {
     const gateway = createGateway(new Map([[sessionId, store]]));
 
     const sent: string[] = [];
-    gateway.connect(sessionId, { send: (data: string) => sent.push(data) });
+    let resolveLive: (() => void) | undefined;
+    const liveDone = new Promise<void>((resolve) => {
+      resolveLive = resolve;
+    });
+    gateway.connect(sessionId, {
+      send: (data: string) => {
+        sent.push(data);
+        if (sent.length === 7) resolveLive?.();
+      },
+    });
 
     expect(sent).toHaveLength(2);
     expect((JSON.parse(sent[0] ?? "{}") as { type?: string }).type).toBe("message");
+
+    // A second turn on the same session: connect's live tail delivers these
+    // without a fresh connect() call.
+    await Promise.all([liveDone, runFlow(announce, userText("go"), ready)]);
+    const live = sent.slice(2).map((data) => JSON.parse(data) as { form: string });
+    expect(live.map((envelope) => envelope.form)).toEqual([
+      "committed",
+      "in-progress",
+      "delta",
+      "committed",
+      "committed",
+    ]);
 
     gateway.submit(sessionId, {
       role: "user",

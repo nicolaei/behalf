@@ -6,8 +6,9 @@ ever touches.
 
 ## You will learn
 
-- The `Event`/`Envelope` shapes and the three envelope `form`s (`committed`, `in-progress`, `delta`)
-- The core `SessionStore` operations: `receive`/`consume`/`append`/`open`/`changes`
+- How to tell an `Event` from the `Envelope` that wraps it, and what its three `form`s mean
+- How to work a `SessionStore`'s queue and log: `receive`/`consume`, `append`/`open`, and reading
+  everything back with `events()`/`changes()`
 - How to tail the log to rebuild state, ignoring deltas and in-progress snapshots
 - How a client reconnects: replay the committed log, then in-progress snapshots, then live deltas
 - What `Gateway.connect`/`submit` do, and why many clients can share one session
@@ -131,7 +132,8 @@ lands in the one shared inbox regardless of which client sent it.
 - An `Event` carries no `type` of its own; `Envelope` names it, and has three `form`s: `committed`,
   `in-progress`, and `delta`
 - `SessionStore` holds the committed log, the pending queue, and the live delta stream:
-  `receive`/`consume` work the queue, `append`/`open` commit, `changes()` tails everything live
+  `receive`/`consume` work the queue, `append`/`open` commit, `events()` replays the log, and
+  `changes()` tails everything live
 - Tailing the log means filtering `changes()` down to `"committed"` and ignoring the rest
 - Reconnecting replays `store.events()` first, then lets `changes()` take over: in-progress, deltas,
   and new commits
