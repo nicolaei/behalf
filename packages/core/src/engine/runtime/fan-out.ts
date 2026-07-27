@@ -17,7 +17,7 @@ import {
   applyThreadAction,
   withMessage,
   route,
-  StateTracker,
+  // StateTracker no longer referenced directly here — ExecutionScope owns it.
 } from "./routing.js";
 import {
   runStep,
@@ -25,6 +25,7 @@ import {
   commitCompaction,
   handleStepError,
   type ExecutionContext,
+  ExecutionScope,
 } from "./step-runner.js";
 import {
   runModelCall,
@@ -131,7 +132,8 @@ export async function runBranchNode(
   | { kind: "routed"; thread: Thread; to: NodeId; input: unknown }
   | { kind: "parked"; waitingFor: MessageKind[]; thread: Thread }
 > {
-  const { flow, runtime, stateTracker } = ctx;
+  const { flow, runtime, scope } = ctx;
+  const { stateTracker } = scope;
   let thread = ctx.thread;
   const nodeDef = flow.nodes.get(nodeId);
   if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${nodeId}"`);
@@ -520,7 +522,7 @@ export async function advanceFanOutGroup(
   group: FanOutGroup,
   flow: Graph,
   runtime: Runtime,
-  attemptsByNode: Map<NodeId, number>,
+  scope: ExecutionScope,
 ): Promise<TickOutcome> {
   const notDone = group.branches.filter((candidate) => !candidate.done);
   if (notDone.length === 0)
@@ -538,12 +540,13 @@ export async function advanceFanOutGroup(
       flow,
       runtime,
       thread: branchThread,
-      attemptsByNode,
       // Fresh per branch is correct here, not a stopgap: a fan-out branch
       // forks its own thread id (see advanceFanOutGroup's own forking
       // above), so its state tracking is independent of any sibling's,
-      // same as driveStepEmit's fan-out handling in drive.ts.
-      stateTracker: new StateTracker(),
+      // same as driveStepEmit's fan-out handling in drive.ts. attemptsByNode
+      // stays shared — fork() never forks it (see ExecutionScope's own doc
+      // comment).
+      scope: scope.fork(),
     });
     branch.thread = result.thread;
     if (result.kind === "invalidate") notImplemented("tick: fan-out branch invalidate");

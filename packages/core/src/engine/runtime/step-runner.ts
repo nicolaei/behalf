@@ -13,15 +13,62 @@ import type { Event, EventType } from "../../session/event.js";
 import type { Runtime } from "../runtime.js";
 import { type ErrorContext, type ErrorDecision, unreachable } from "../errors.js";
 import { RetryableError } from "../errors.js";
-import type { Thread, StateTracker } from "./routing.js";
+import { type Thread, StateTracker } from "./routing.js";
 
-/** Everything a step or branch needs to run against: the runtime it calls into, the graph it's routing through, the thread it's advancing, the shared per-node attempt counter that survives retries, and the shared `stateChange` tracker (last state seen per thread) for this drive scope. The one bundle every drive-loop and fan-out-branch function threads through instead of separate positional parameters. */
+/**
+ * Bundles the two pieces of per-branching-construct bookkeeping that used to
+ * travel as separate `ExecutionContext` fields — the per-node retry counter
+ * (`attemptsByNode`) and the `stateChange` dedup tracker (`stateTracker`) —
+ * and names the two lifecycle rules a branching construct picks between,
+ * replacing the "sometimes pass `ctx.stateTracker`, sometimes construct
+ * `new StateTracker()`" pattern that used to live only in comments at each
+ * construction site (driveStepEmit's fan-out, fan-out.ts's `runBranch`/
+ * `advanceFanOutGroup`, foreach.ts's `advanceForEachGroup`).
+ *
+ * `fork()` — a branch that gets its OWN new thread (a static fan-out
+ * branch, forked off the parent's thread): fresh `stateTracker`, since a
+ * `state` declared inside it must not dedupe against the parent thread's
+ * already-tracked state — it's genuinely a different thread now. Does NOT
+ * fork `attemptsByNode`: a retry budget has never had a forking distinction
+ * anywhere in this engine (every branching construct shares one counter per
+ * node id), and this refactor preserves that rather than changing it as a
+ * side effect.
+ *
+ * `descend()` — a branch that continues on the SAME (unforked) thread, just
+ * a new call/frame scope (a `use` node's subgraph, a `forEach` branch):
+ * shares the parent's `stateTracker`, since two such branches (or a branch
+ * and the thread it shares) declaring the same `state` must dedupe into one
+ * `stateChange` — they're really the same thread's own history.
+ */
+export class ExecutionScope {
+  readonly attemptsByNode: Map<NodeId, number>;
+  readonly stateTracker: StateTracker;
+
+  constructor(attemptsByNode: Map<NodeId, number>, stateTracker: StateTracker) {
+    this.attemptsByNode = attemptsByNode;
+    this.stateTracker = stateTracker;
+  }
+
+  /** A fresh root scope — no attempts recorded yet, no state seen yet. */
+  static create(): ExecutionScope {
+    return new ExecutionScope(new Map(), new StateTracker());
+  }
+
+  fork(): ExecutionScope {
+    return new ExecutionScope(this.attemptsByNode, new StateTracker());
+  }
+
+  descend(): ExecutionScope {
+    return new ExecutionScope(this.attemptsByNode, this.stateTracker);
+  }
+}
+
+/** Everything a step or branch needs to run against: the runtime it calls into, the graph it's routing through, the thread it's advancing, and the `ExecutionScope` (attempts + stateTracker) for this drive scope. The one bundle every drive-loop and fan-out-branch function threads through instead of separate positional parameters. */
 export interface ExecutionContext {
   runtime: Runtime;
   flow: Graph;
   thread: Thread;
-  attemptsByNode: Map<NodeId, number>;
-  stateTracker: StateTracker;
+  scope: ExecutionScope;
 }
 
 /**
@@ -84,7 +131,8 @@ export async function handleStepError(
   nodeId: NodeId,
   ctx: ExecutionContext,
 ): Promise<{ kind: "retry" }> {
-  const { runtime, thread, attemptsByNode } = ctx;
+  const { runtime, thread, scope } = ctx;
+  const { attemptsByNode } = scope;
   const threadId = thread.id;
   runtime.store.append(
     {

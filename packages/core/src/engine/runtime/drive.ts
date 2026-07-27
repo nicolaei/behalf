@@ -3,13 +3,13 @@
 // fan-out along the way. This is the whole engine loop — shared by the
 // top-level runFlow drive and any `use` node's inline subgraph drive — and
 // tick()'s own live execution reuses several of its pieces (buildDriveContext,
-// findInterruptNodes, driveStepEmit, seedUseNode) to drive one node at a
-// time instead of to completion.
+// findInterruptNodes, driveStepEmit, seedUseNode, runWaitForNode) to drive one
+// node at a time instead of to completion.
 
 import { type Graph, type NodeId, type NodeKind, nodeOptionFields } from "../../flow/graph.js";
-import type { Message, UserMessage } from "../../flow/message.js";
+import type { Message, MessageKind, UserMessage } from "../../flow/message.js";
 import type { Waitable } from "../../flow/waitable.js";
-import { tryMessageKindOf } from "../../flow/waitable.js";
+import { tryMessageKindOf, messageKindOf } from "../../flow/waitable.js";
 import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../../flow/step.js";
 import type { Tool } from "../../flow/tool.js";
 import type { Runtime } from "../runtime.js";
@@ -19,6 +19,7 @@ import {
   type Thread,
   type StepIdentity,
   type RouteResult,
+  type StateTracker,
   stepIdentity,
   appendOutput,
   route,
@@ -26,7 +27,6 @@ import {
   applyThreadAction,
   withMessage,
   thenEdges,
-  StateTracker,
 } from "./routing.js";
 import {
   runStep,
@@ -35,9 +35,18 @@ import {
   assertJoinTagging,
   commitCompaction,
   handleStepError,
+  ExecutionScope,
   type ExecutionContext,
 } from "./step-runner.js";
-import { runModelCall, callTool, waitForSignal, waitForRace } from "./execution.js";
+import {
+  runModelCall,
+  callTool,
+  waitForSignal,
+  waitForRace,
+  peekMessageFromInbox,
+  peekSignalMatch,
+  type RaceWinner,
+} from "./execution.js";
 import { findJoinNode, runBranch, type BranchResult } from "./fan-out.js";
 
 export interface InterruptNode {
@@ -113,7 +122,7 @@ export function seedUseNode(
   return { seed: fallback, thread };
 }
 
-/** Runs a `use` node: seeds its subgraph, drives it inline to its own `finish`, and follows the reaching edge with its result. The subgraph inherits `ctx.stateTracker` rather than getting a fresh one: a `use` node's subgraph runs on the reaching edge's own (unforked) thread by default, so a state declared inside it must dedupe against the outer thread's already-tracked state, the same reasoning `driveForEachNode` applies to its branches. */
+/** Runs a `use` node: seeds its subgraph, drives it inline to its own `finish`, and follows the reaching edge with its result. The subgraph descends into `ctx.scope` (shares its `stateTracker`) rather than forking: a `use` node's subgraph runs on the reaching edge's own (unforked) thread by default, so a state declared inside it must dedupe against the outer thread's already-tracked state, the same reasoning `driveForEachNode` applies to its branches. */
 async function driveUseNode(
   node: Extract<NodeKind, { kind: "use" }>,
   nodeId: NodeId,
@@ -121,10 +130,10 @@ async function driveUseNode(
   currentInput: unknown,
   ctx: ExecutionContext,
 ): Promise<RouteResult> {
-  const { flow, runtime, stateTracker } = ctx;
+  const { flow, runtime, scope } = ctx;
   const { seed, thread } = seedUseNode(reason, currentInput, ctx.thread, runtime);
 
-  const result = await driveGraph(node.subgraph, runtime, thread, seed, stateTracker);
+  const result = await driveGraph(node.subgraph, runtime, thread, seed, scope.descend());
 
   return commitRoute(
     runtime,
@@ -145,12 +154,13 @@ async function driveUseNode(
  * as a first-class subgraph on the PARENT's own unforked thread — not a
  * forked one, unlike a static fan-out branch — and folds every branch's own
  * result back into an array as this node's single output. Because branches
- * share one real thread id, `ctx.stateTracker` is passed through unchanged
- * rather than given a fresh map per branch: two branches declaring the same
- * `state` must dedupe into one `stateChange`, the same as any other repeat
- * entry on one thread. Branches run concurrently (`Promise.all`), same as a
- * static fan-out's `driveStepEmit` runs its branches (which DO fork, and so
- * DO get an independent tracker each).
+ * share one real thread id, each branch descends into `ctx.scope` (sharing
+ * its `stateTracker`) rather than being given a fresh one per branch: two
+ * branches declaring the same `state` must dedupe into one `stateChange`,
+ * the same as any other repeat entry on one thread. Branches run
+ * concurrently (`Promise.all`), same as a static fan-out's `driveStepEmit`
+ * runs its branches (which DO fork, and so DO get an independent tracker
+ * each).
  */
 async function driveForEachNode(
   node: Extract<NodeKind, { kind: "forEach" }>,
@@ -158,10 +168,10 @@ async function driveForEachNode(
   currentInput: unknown,
   ctx: ExecutionContext,
 ): Promise<RouteResult> {
-  const { flow, runtime, thread, stateTracker } = ctx;
+  const { flow, runtime, thread, scope } = ctx;
   const items = node.items(currentInput);
   const results = await Promise.all(
-    items.map((item) => driveGraph(node.branch(item), runtime, thread, item, stateTracker)),
+    items.map((item) => driveGraph(node.branch(item), runtime, thread, item, scope.descend())),
   );
   const outputs = results.map((result) => result.output);
 
@@ -174,7 +184,7 @@ async function driveForEachNode(
  * `flow`/`runtime` via closure, but is threaded separately here since
  * `driveWaitForMessage` needs `flow`/`runtime` directly, not just through
  * `context`), the thread setter, and the shared state tracker. Bundled so
- * `driveWaitForMessage`/`driveWaitForNode` take one argument instead of five
+ * `driveWaitForMessage`/`runWaitForNode` take one argument instead of five
  * positional ones that always travel together.
  */
 export interface WaitContext {
@@ -192,14 +202,16 @@ export interface WaitContext {
  * that step runs and takes over routing — reading `context.thread` live
  * rather than a local snapshot, so a reply the interrupt's own
  * `context.modelCall()` folds in is never dropped — otherwise this node's
- * own edge is followed. Shared by `driveWaitForNode` (runFlow, which blocks
- * until a message arrives via `waitForMessage`) and tick()'s own waitFor
- * handling (which consumes non-blockingly and parks if none is ready yet):
- * the two differ only in how the message is obtained, never in what
- * happens once it's in hand — this is the single implementation the old
- * TODO(R2) asked for. `ranInterruptStep` reports whether this call actually
- * ran a step (the interrupt) or just consumed a message for free, so
- * tick() can decide whether this counts toward its one-step-per-call budget.
+ * own edge is followed. Shared by `runWaitForNode` (the one waitFor
+ * implementation both `driveGraph` and `tick()` drive through, parameterized
+ * by which `MessageSource` obtained the message — blocking, for `driveGraph`;
+ * peeking, for `tick()`) and fan-out.ts's `runBranchNode`, which resolves a
+ * branch's own waitFor message itself (block or peek, by its own `waitMode`)
+ * and folds it through this same function. All three differ only in how the
+ * message is obtained, never in what happens once it's in hand.
+ * `ranInterruptStep` reports whether this call actually ran a step (the
+ * interrupt) or just consumed a message for free, so tick() can decide
+ * whether this counts toward its one-step-per-call budget.
  */
 export async function driveWaitForMessage(
   message: UserMessage,
@@ -260,52 +272,137 @@ export async function driveWaitForMessage(
 }
 
 /**
- * Runs a `waitFor` node: blocks until its `Waitable` is satisfied, then
- * routes off the result. A `userInput`-shaped `Waitable` (today's only
- * message-backed provider) races `waitForRace` against every armed
- * `interrupt` — message-based or signal-based alike — and folds in
- * whichever wins via `driveWaitForMessage` (a message win, whether this
- * node's own or a message-based interrupt's — both are folded through one
- * call now, since a race winner's `UserMessage` is computed once regardless
- * of which of the two it was) or the signal-interrupt path below (a
- * signal-based interrupt's own `match()` won instead). Any other provider
- * for this node's own Waitable (e.g. a signal-based one) has no message to
- * fold and no interrupt-arming yet (out of scope for this slice, see
- * waitable.ts); it blocks on `waitForSignal` instead and routes directly on
- * the `Waitable`'s own `match()` result.
+ * How a waitFor node's own Waitable (and any armed interrupt racing it) gets
+ * satisfied — the ONE real behavioral difference between `driveGraph` (which
+ * blocks until satisfied) and `tick()` (which peeks once, non-blockingly, and
+ * reports "parked" if nothing's ready yet, returning control to its caller
+ * instead of waiting). Everything else about handling a waitFor node —
+ * folding the winning message in, deciding whether it belongs to this node or
+ * an armed interrupt, running the interrupt's own step — is identical
+ * regardless of which `MessageSource` is in play; see `runWaitForNode`, the
+ * one shared implementation both `driveGraph` and `tick()` drive through now,
+ * replacing what used to be two separately-written waitFor handlers.
  */
-async function driveWaitForNode(
+export interface MessageSource {
+  /**
+   * Resolves a message-based waitFor node's own race against its armed
+   * interrupts. The blocking variant awaits `waitForRace` (which also races
+   * every signal-based interrupt, alongside the message-based ones). The
+   * peeking variant only checks the pending inbox for a message of
+   * `waitKind` or a message-based interrupt's own kind — mirroring tick()'s
+   * pre-existing contract exactly, asymmetry included: it never considers a
+   * signal-based interrupt a candidate winner on this path, so (like tick()
+   * always has) it throws via `messageKindOf` if any armed interrupt isn't
+   * message-based. Resolves to `undefined` only from the peeking variant,
+   * when nothing is ready yet.
+   */
+  race(
+    waitKind: MessageKind,
+    interrupts: readonly InterruptNode[],
+  ): Promise<RaceWinner | undefined>;
+
+  /**
+   * Resolves a non-message Waitable (e.g. a signal-based one) directly — no
+   * interrupt racing on this path either way, matching both existing
+   * implementations. The blocking variant awaits `waitForSignal`; the
+   * peeking variant checks `match()` once (draining at most one pending
+   * signal first) and resolves to `undefined` if still unmatched.
+   */
+  signal<T>(waitable: Waitable<T>): Promise<T | undefined>;
+}
+
+/** The `MessageSource` `driveGraph` drives every `waitFor` node through: blocks until its Waitable (or an armed interrupt's) is satisfied, via `waitForRace`/`waitForSignal`. */
+export function blockingMessageSource(runtime: Runtime): MessageSource {
+  return {
+    race: (waitKind, interrupts) =>
+      waitForRace(
+        runtime.store,
+        waitKind,
+        interrupts.map((interrupt) => ({
+          id: interrupt.id,
+          waitable: interrupt.waitable,
+          messageKind: tryMessageKindOf(interrupt.waitable),
+        })),
+      ),
+    signal: (waitable) => waitForSignal(runtime.store, waitable),
+  };
+}
+
+/** The `MessageSource` `tick()` drives every `waitFor` node through: takes one non-blocking look via `peekMessageFromInbox`/`peekSignalMatch`, never parking this call — the caller reports "parked" itself when this resolves to `undefined`. */
+export function peekingMessageSource(runtime: Runtime): MessageSource {
+  return {
+    race: (waitKind, interrupts) => {
+      const kinds = [waitKind, ...interrupts.map((interrupt) => messageKindOf(interrupt.waitable))];
+      const message = peekMessageFromInbox(runtime.store, kinds);
+      if (!message) return Promise.resolve(undefined);
+      const interrupt = interrupts.find(
+        (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,
+      );
+      const winner: RaceWinner = interrupt
+        ? {
+            kind: "interrupt",
+            interrupt: { id: interrupt.id, waitable: interrupt.waitable },
+            value: message,
+          }
+        : { kind: "self", message };
+      return Promise.resolve(winner);
+    },
+    signal: (waitable) => Promise.resolve(peekSignalMatch(runtime.store, waitable)),
+  };
+}
+
+/** What driving a `waitFor` node through a `MessageSource` settled with: routed (with `ranInterruptStep` reporting whether an interrupt's own step ran), or — the peeking variant only — parked, with what it's still waiting for. */
+export type WaitForOutcome =
+  | ({ kind: "routed" } & RouteResult & { ranInterruptStep: boolean })
+  | { kind: "parked"; waitingFor: MessageKind[] };
+
+/**
+ * Runs a `waitFor` node against whichever `MessageSource` the caller gives
+ * it — the one shared implementation `driveGraph` and `tick()` both drive
+ * every `waitFor` node through now. A message-based Waitable races `source`
+ * against every armed `interrupt` — message-based or signal-based alike —
+ * and folds in whichever wins via `driveWaitForMessage` (a message win,
+ * whether this node's own or a message-based interrupt's) or the
+ * signal-interrupt path below (a signal-based interrupt's own `match()` won
+ * instead — reachable only through a blocking `source`, since the peeking
+ * one never classifies a winner that way, matching tick()'s pre-existing
+ * scope). Any other provider for this node's own Waitable (e.g. a
+ * signal-based one) has no message to fold and no interrupt-arming yet (out
+ * of scope for this slice, see waitable.ts); `source.signal` resolves it
+ * directly, and its result routes off the `Waitable`'s own `match()` value.
+ */
+export async function runWaitForNode(
   node: Extract<NodeKind, { kind: "waitFor" }>,
   nodeId: NodeId,
   wait: WaitContext,
-): Promise<RouteResult> {
+  source: MessageSource,
+): Promise<WaitForOutcome> {
   const { interrupts, context, flow, runtime, stateTracker } = wait;
   const waitKind = tryMessageKindOf(node.waitable);
+
   if (waitKind === undefined) {
-    const result = await waitForSignal(runtime.store, node.waitable);
-    return route(
+    const matched = await source.signal(node.waitable);
+    if (matched === undefined) return { kind: "parked", waitingFor: [node.waitable.label] };
+    const routed = route(
       flow.edges,
       nodeId,
-      { ok: true, result } satisfies WaitForResult,
+      { ok: true, result: matched } satisfies WaitForResult,
       context.thread,
       runtime,
     );
+    return { kind: "routed", ...routed, ranInterruptStep: false };
   }
 
-  const winner = await waitForRace(
-    runtime.store,
-    waitKind,
-    interrupts.map((interrupt) => ({
-      id: interrupt.id,
-      waitable: interrupt.waitable,
-      messageKind: tryMessageKindOf(interrupt.waitable),
-    })),
-  );
+  const winner = await source.race(waitKind, interrupts);
+  if (winner === undefined) {
+    const kinds = [waitKind, ...interrupts.map((interrupt) => messageKindOf(interrupt.waitable))];
+    return { kind: "parked", waitingFor: kinds };
+  }
 
   // A message win, whether the waitFor node's own or a message-based
-  // interrupt's: both fold through `driveWaitForMessage` identically, so
-  // the `UserMessage` to fold is computed once regardless of which of the
-  // two actually won the race.
+  // interrupt's: both fold through `driveWaitForMessage` identically, so the
+  // `UserMessage` to fold is computed once regardless of which of the two
+  // actually won the race.
   const wonMessage: UserMessage | undefined =
     winner.kind === "self"
       ? winner.message
@@ -315,15 +412,22 @@ async function driveWaitForNode(
 
   if (wonMessage !== undefined) {
     const routed = await driveWaitForMessage(wonMessage, nodeId, wait);
-    return { thread: routed.thread, input: routed.input, reason: routed.reason, to: routed.to };
+    return {
+      kind: "routed",
+      thread: routed.thread,
+      input: routed.input,
+      reason: routed.reason,
+      to: routed.to,
+      ranInterruptStep: routed.ranInterruptStep,
+    };
   }
 
   // A signal-based interrupt won: there's no message to fold into the
-  // thread — same as `waitForSignal`'s own path — so its step runs with the
+  // thread — same as `source.signal`'s own path — so its step runs with the
   // Waitable's `match()` result as its only input, and its output routes
   // exactly like a message-based interrupt's does in `driveWaitForMessage`.
   if (winner.kind !== "interrupt")
-    unreachable("driveWaitForNode: a non-message race winner must be an interrupt");
+    unreachable("runWaitForNode: a non-message race winner must be an interrupt");
   const interrupt = interrupts.find((candidate) => candidate.id === winner.interrupt.id);
   if (!interrupt) unreachable(`waitForRace resolved to unknown interrupt "${winner.interrupt.id}"`);
   stateTracker.maybeEmit(
@@ -336,7 +440,7 @@ async function driveWaitForNode(
   const emit = await runStep(interrupt.run, stepContext);
   if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
   const liveThread = context.thread;
-  return commitRoute(
+  const routed = commitRoute(
     runtime,
     liveThread.id,
     flow.edges,
@@ -345,6 +449,7 @@ async function driveWaitForNode(
     stepIdentity(interrupt.id, interrupt.label),
     liveThread,
   );
+  return { kind: "routed", ...routed, ranInterruptStep: true };
 }
 
 /** What handling a step's `Emit` decided: retry the same node, or advance to the next one. */
@@ -425,7 +530,7 @@ export async function driveStepEmit(
           thread: applyThreadAction(thread, "fork", undefined, runtime),
           // Each fan-out branch forks its own thread, so it gets its own
           // fresh stateChange tracker rather than sharing the parent's.
-          stateTracker: new StateTracker(),
+          scope: ctx.scope.fork(),
         }),
       ),
     );
@@ -469,7 +574,7 @@ export async function driveStepEmit(
   };
 }
 
-/** What driving a graph to its `finish` node settles with — the final thread and the terminal value. */
+/** What driving a graph to its `finish` node settled with — the final thread and the terminal value. */
 interface DriveResult {
   thread: Thread;
   output: unknown;
@@ -554,13 +659,22 @@ export function buildDriveContext(
  * `input` is the value the entry node sees, exactly like `initialPrompt` at
  * the top level: usually a `Message` (the flow's or the subgraph's seed), but
  * any node reachable as an entry may read it via `context.inputs[0]`.
+ *
+ * `scope` bundles the caller's `stateTracker` (see `ExecutionScope`) — a
+ * `use` node's subgraph and a `forEach` branch both `descend()` into their
+ * caller's own scope so their state dedupes against it. `attemptsByNode`,
+ * however, is always fresh here regardless of what `scope` carries: it's
+ * scoped to this one call's own `while` loop and discarded when it returns —
+ * a "retry" outcome always re-enters this SAME loop via `continue`, never
+ * needing to survive past it, so a recursive `driveGraph` call (a `use`
+ * subgraph, a `forEach` branch) never needs its caller's own attempt counts.
  */
 export async function driveGraph(
   flow: Graph,
   runtime: Runtime,
   thread: Thread,
   input: unknown,
-  stateTracker: StateTracker = new StateTracker(),
+  scope: ExecutionScope = ExecutionScope.create(),
 ): Promise<DriveResult> {
   // The live current thread — reassigned (not mutated) by `invalidate`, a
   // `use` node, or a threadAction when it forks or resets. `context.thread`
@@ -591,10 +705,11 @@ export async function driveGraph(
   // branch, in declared order — so the next step's `inputs` isn't wrapped a
   // second time around a single `input`.
   let pendingInputs: unknown[] | undefined;
-  // Times each node has already errored — bumped only on a "retry" decision,
-  // so the node's first error sees attempts: 0. Keyed by node id since a
-  // retry re-runs the same node without ever changing `current`.
-  const attemptsByNode = new Map<NodeId, number>();
+  // See this function's own doc comment: always fresh, never inherited from
+  // `scope`, regardless of caller.
+  const localScope = new ExecutionScope(new Map<NodeId, number>(), scope.stateTracker);
+  const messageSource = blockingMessageSource(runtime);
+
   while (current) {
     const node = flow.nodes.get(current);
     if (!node) throw new Error(`graph "${flow.name}" has no node "${current}"`);
@@ -604,7 +719,7 @@ export async function driveGraph(
     // dispatching to this node's own kind-specific handling below — so a
     // retried step (which re-enters this loop without changing `current`)
     // re-checks the same already-seen state and stays a no-op.
-    stateTracker.maybeEmit(
+    localScope.stateTracker.maybeEmit(
       runtime,
       currentThread.id,
       node.state,
@@ -622,8 +737,7 @@ export async function driveGraph(
         flow,
         runtime,
         thread: currentThread,
-        attemptsByNode,
-        stateTracker,
+        scope: localScope,
       });
       currentThread = routed.thread;
       currentInput = routed.input;
@@ -637,8 +751,7 @@ export async function driveGraph(
         flow,
         runtime,
         thread: currentThread,
-        attemptsByNode,
-        stateTracker,
+        scope: localScope,
       });
       currentThread = routed.thread;
       currentInput = routed.input;
@@ -648,25 +761,35 @@ export async function driveGraph(
     }
 
     if (node.kind === "waitFor") {
-      const routed = await driveWaitForNode(node, current, {
-        interrupts,
-        context,
-        flow,
-        runtime,
-        setThread: (next) => {
-          currentThread = next;
+      const outcome = await runWaitForNode(
+        node,
+        current,
+        {
+          interrupts,
+          context,
+          flow,
+          runtime,
+          setThread: (next) => {
+            currentThread = next;
+          },
+          stateTracker: localScope.stateTracker,
         },
-        stateTracker,
-      });
-      currentThread = routed.thread;
-      currentInput = routed.input;
-      reason = routed.reason;
-      current = routed.to;
+        messageSource,
+      );
+      // The blocking MessageSource (see `blockingMessageSource`) never
+      // resolves to "parked" — it awaits until satisfied — so this can only
+      // ever be reached by a genuine bug in that contract.
+      if (outcome.kind === "parked")
+        unreachable("driveGraph: blockingMessageSource reported parked");
+      currentThread = outcome.thread;
+      currentInput = outcome.input;
+      reason = outcome.reason;
+      current = outcome.to;
       continue;
     }
 
     // The only remaining declared kind is "interrupt", which is never a
-    // routing target — it's only ever entered via `driveWaitForNode` above.
+    // routing target — it's only ever entered via `runWaitForNode` above.
     if (node.kind !== "step") notImplemented(`node kind "${node.kind}"`);
 
     if (node.label) currentThread = { ...currentThread, label: node.label };
@@ -682,8 +805,7 @@ export async function driveGraph(
       flow,
       runtime,
       thread: currentThread,
-      attemptsByNode,
-      stateTracker,
+      scope: localScope,
     });
     if (outcome.kind === "retry") continue;
 

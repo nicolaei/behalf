@@ -29,9 +29,9 @@ import type { Event } from "../../session/event.js";
 import type { CommittedEnvelope } from "../../session/envelope.js";
 import type { Runtime } from "../runtime.js";
 import { notImplemented, unreachable } from "../errors.js";
-import { type Thread, StateTracker, withMessage, route } from "./routing.js";
+import { type Thread, withMessage, route } from "./routing.js";
 import { tryMessageKindOf } from "../../flow/waitable.js";
-import type { ExecutionContext } from "./step-runner.js";
+import { type ExecutionContext, ExecutionScope } from "./step-runner.js";
 import {
   runBranchNode,
   replayForkedThread,
@@ -211,20 +211,21 @@ export function forEachBranchCursorState(
 export async function advanceForEachGroup(
   group: ForEachGroup,
   runtime: Runtime,
-  attemptsByNode: Map<NodeId, number>,
+  scope: ExecutionScope,
 ): Promise<TickOutcome> {
   const notDone = group.branches.filter((branch) => !branch.done);
   if (notDone.length === 0)
     unreachable("advanceForEachGroup: no unfinished branch in a forEach group");
 
-  // Shared by every branch in this call, not one map per branch: forEach
-  // branches run on the group's own thread ids, but two branches declaring
-  // the same `state` must still dedupe into one `stateChange`, exactly as
-  // `driveForEachNode`'s own branches do on the non-tick drive path (see
-  // drive.ts's `driveForEachNode`, whose doc comment explains why). tick()
-  // still has no state-tracking of its own across separate calls — this
-  // only covers dedup among branches advanced within one call.
-  const stateTracker = new StateTracker();
+  // Every branch in this call descends into the caller's own scope (see
+  // ExecutionScope's own doc comment) rather than forking: forEach branches
+  // run on the group's own thread ids, but two branches declaring the same
+  // `state` -- or a branch and the enclosing thread itself -- must still
+  // dedupe into one `stateChange`, exactly as `driveForEachNode`'s own
+  // branches do on the non-tick drive path (see drive.ts's
+  // `driveForEachNode`, whose doc comment explains why). `descend()` always
+  // returns the SAME `stateTracker` instance, so this is one shared tracker
+  // across every branch this call touches, not one per branch.
 
   for (const branch of notDone) {
     const thread: Thread = branch.thread ?? replayForkedThread(group.mainThread, branch.threadId);
@@ -233,8 +234,7 @@ export async function advanceForEachGroup(
       flow: branch.graph,
       runtime,
       thread,
-      attemptsByNode,
-      stateTracker,
+      scope: scope.descend(),
     };
     const result = await runBranchNode(branch.current, branch.currentInput, ctx);
     branch.thread = result.thread;

@@ -5,7 +5,7 @@
 import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
 import type { ThreadId } from "../../flow/thread.js";
 import type { Message, MessageKind } from "../../flow/message.js";
-import { messageKindOf, tryMessageKindOf } from "../../flow/waitable.js";
+import { tryMessageKindOf } from "../../flow/waitable.js";
 import type { StepContext, WaitForResult } from "../../flow/step.js";
 import type { Event } from "../../session/event.js";
 import type { CommittedEnvelope, Envelope } from "../../session/envelope.js";
@@ -22,7 +22,7 @@ import {
   thenEdges,
   StateTracker,
 } from "./routing.js";
-import { runStep, assertJoinTagging, withInputs } from "./step-runner.js";
+import { runStep, assertJoinTagging, withInputs, ExecutionScope } from "./step-runner.js";
 import {
   type FanOutGroup,
   buildFanOutGroup,
@@ -36,12 +36,12 @@ import {
   type InterruptNode,
   buildDriveContext,
   driveStepEmit,
-  driveWaitForMessage,
+  runWaitForNode,
+  peekingMessageSource,
   fanOutTargets,
   findInterruptNodes,
   seedUseNode,
 } from "./drive.js";
-import { peekSignalMatch, peekMessageFromInbox } from "./execution.js";
 import { buildForEachGroup, replayForEachBranch, advanceForEachGroup } from "./foreach.js";
 
 /** One cursor's current state within a tick() outcome — node, status, and (for parked) what it's waiting for. */
@@ -583,7 +583,7 @@ async function advanceTickForEachNode(
   frame: LiveFrame,
   currentThread: Thread,
   runtime: Runtime,
-  attemptsByNode: Map<NodeId, number>,
+  scope: ExecutionScope,
 ): Promise<{ kind: "folded"; thread: Thread } | { kind: "outcome"; outcome: TickOutcome }> {
   const group = buildForEachGroup(node, frame.current, currentThread, frame.currentInput);
   for (const branch of group.branches) replayForEachBranch(branch, group, runtime);
@@ -605,7 +605,7 @@ async function advanceTickForEachNode(
     return { kind: "folded", thread: routed.thread };
   }
 
-  return { kind: "outcome", outcome: await advanceForEachGroup(group, runtime, attemptsByNode) };
+  return { kind: "outcome", outcome: await advanceForEachGroup(group, runtime, scope) };
 }
 
 /**
@@ -633,14 +633,15 @@ async function advanceTickForEachNode(
  */
 export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
   const attemptsByNode = new Map<NodeId, number>();
-  const position = replayPosition(flow, runtime);
   // No state may survive between separate tick() calls except what's in the
   // log itself — same reconstruct-from-the-log discipline `replayPosition`
   // applies to cursor position (see `replayStateTracker`'s own doc comment).
   const stateTracker = replayStateTracker(runtime.store.events());
+  const scope = new ExecutionScope(attemptsByNode, stateTracker);
+  const position = replayPosition(flow, runtime);
 
   if (position.kind === "fanout") {
-    return advanceFanOutGroup(position.group, flow, runtime, attemptsByNode);
+    return advanceFanOutGroup(position.group, flow, runtime, scope);
   }
 
   let currentThread: Thread = position.thread;
@@ -668,7 +669,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       // folded, parent-less "active" cursor needs tagging with this level's
       // own enclosing use node, matching how an ordinary step cursor at
       // this depth would be tagged (see `parentOf`).
-      const outcome = await advanceFanOutGroup(leaf.node.group, leaf.flow, runtime, attemptsByNode);
+      const outcome = await advanceFanOutGroup(leaf.node.group, leaf.flow, runtime, scope);
       const parentNode = parentOf(path);
       if (parentNode === undefined) return outcome;
       return outcome.map((cursor) =>
@@ -735,57 +736,37 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
 
     if (node.kind === "waitFor") {
       if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
-      const waitKind = tryMessageKindOf(node.waitable);
-
-      if (waitKind === undefined) {
-        // A non-message Waitable (e.g. signal-based): check its own match()
-        // against the committed log, same as waitForSignal's blocking check,
-        // but never poll — drain and commit at most one pending signal entry
-        // before re-checking, then park if it's still unmatched.
-        const matched = peekSignalMatch(runtime.store, node.waitable);
-        if (matched === undefined)
-          return [
-            { node: frame.current, status: "parked", waitingFor: [node.waitable.label], ...parent },
-          ];
-
-        const routed = route(
-          frame.flow.edges,
-          frame.current,
-          { ok: true, result: matched } satisfies WaitForResult,
-          currentThread,
+      // The one shared waitFor implementation (see drive.ts's `runWaitForNode`)
+      // parameterized by tick()'s own non-blocking `MessageSource`: a single
+      // peek, reporting "parked" instead of waiting when nothing's ready yet.
+      const outcome = await runWaitForNode(
+        node,
+        frame.current,
+        {
+          interrupts: frame.interrupts,
+          context: frame.context,
+          flow: frame.flow,
           runtime,
-        );
-        currentThread = routed.thread;
-        frame.current = routed.to;
-        frame.currentInput = routed.input;
-        frame.reason = routed.reason;
-        continue;
+          setThread,
+          stateTracker,
+        },
+        peekingMessageSource(runtime),
+      );
+
+      if (outcome.kind === "parked") {
+        return [
+          { node: frame.current, status: "parked", waitingFor: outcome.waitingFor, ...parent },
+        ];
       }
 
-      const kinds = [
-        waitKind,
-        ...frame.interrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
-      ];
-      const message = peekMessageFromInbox(runtime.store, kinds);
-      if (!message)
-        return [{ node: frame.current, status: "parked", waitingFor: kinds, ...parent }];
-
-      const routed = await driveWaitForMessage(message, frame.current, {
-        interrupts: frame.interrupts,
-        context: frame.context,
-        flow: frame.flow,
-        runtime,
-        setThread,
-        stateTracker,
-      });
-      currentThread = routed.thread;
-      frame.current = routed.to;
-      frame.currentInput = routed.input;
-      frame.reason = routed.reason;
+      currentThread = outcome.thread;
+      frame.current = outcome.to;
+      frame.currentInput = outcome.input;
+      frame.reason = outcome.reason;
       // A "free" waitFor (consumed a message but no interrupt fired) doesn't
       // count toward this tick's one-step budget — only an interrupt running
       // is billable work; see tick()'s own doc comment.
-      if (routed.ranInterruptStep) ranStep = true;
+      if (outcome.ranInterruptStep) ranStep = true;
       continue;
     }
 
@@ -807,13 +788,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
 
     if (node.kind === "forEach") {
       if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
-      const advanced = await advanceTickForEachNode(
-        node,
-        frame,
-        currentThread,
-        runtime,
-        attemptsByNode,
-      );
+      const advanced = await advanceTickForEachNode(node, frame, currentThread, runtime, scope);
       if (advanced.kind === "outcome") return advanced.outcome;
       currentThread = advanced.thread;
       ranStep = true;
@@ -867,13 +842,13 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       flow: frame.flow,
       runtime,
       thread: currentThread,
-      attemptsByNode,
       // tick()'s own top-of-loop check above already fired this node's
-      // state (or deduped it) before this step ran; this call's own tracker
-      // just needs to see the same instance so a later dedupe check inside
-      // driveStepEmit's fan-out branch handling (a fresh tracker per forked
-      // branch) still sees this thread's latest state as its starting point.
-      stateTracker,
+      // state (or deduped it) before this step ran; this call's own scope
+      // just needs to see the same stateTracker instance so a later dedupe
+      // check inside driveStepEmit's fan-out branch handling (a fresh
+      // tracker per forked branch, via `scope.fork()`) still sees this
+      // thread's latest state as its starting point.
+      scope,
     });
 
     if (outcome.kind === "retry") continue;
