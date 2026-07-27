@@ -5,8 +5,8 @@ This page is the vocabulary the rest of the docs assume you already have.
 
 ## You will learn
 
-- The four message roles and what each carries
-- The five content block kinds, especially `thinking` and `toolCall`/`toolResult`
+- Tell the four message roles apart and what each carries
+- Recognize the five content block kinds, especially `thinking` and `toolCall`/`toolResult`
 - Why a `thinking` block's `signature` must round-trip unmodified
 - What `intent` means: `standard`, `steering`, `abort`
 - How `kind` routes `waitFor`/`interrupt`
@@ -69,6 +69,7 @@ empty or just a short summary; others put a readable summary in `text` and use `
 own bookkeeping.
 Either way, a `ModelPort` never edits a thinking block it's replaying: mutating one invalidates its
 signature, and the next request to that provider fails.
+Here's an assistant message carrying a thinking block alongside its visible reply:
 
 ```ts source=docs/examples/messages-and-content/basic.ts#thinking-block
 export const assistantWithThinking: Message = {
@@ -104,6 +105,7 @@ into the step already in flight, instead of waiting for the turn to end. `abort`
 turn outright.
 
 `kind` is a separate, optional label: the routing tag `waitFor` and `interrupt` match on.
+Here's a steering message that sets both `intent` and a `kind` a `waitFor` node listens for:
 
 ```ts source=docs/examples/messages-and-content/basic.ts#user-message
 export const steeringMessage: UserMessage = {

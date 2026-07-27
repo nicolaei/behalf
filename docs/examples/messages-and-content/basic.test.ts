@@ -41,7 +41,10 @@ describe("messages and content", () => {
     expect(text?.type).toBe("text");
     if (thinking?.type === "thinking") {
       expect(thinking.signature).toBe("opaque-round-trip-token");
-      expect(thinking.text.length).toBeGreaterThan(0);
+      // text can be empty when a provider puts the full reasoning in signature instead;
+      // this example's text happens to carry a readable summary, but the field's type
+      // is what the doc actually promises, not a non-empty length.
+      expect(typeof thinking.text).toBe("string");
     }
   });
 });

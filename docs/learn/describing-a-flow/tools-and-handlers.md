@@ -1,11 +1,11 @@
 # Tools and handlers
 
-A `tool` declares one typed capability; a `ToolHandler` implements it; `provide`/`expand` bind the
-two together.
+A persona is only as useful as what it can do outside the conversation: a `tool` names one
+capability, a `ToolHandler` is the real code behind it, and `provide`/`expand` connect the two.
 
 ## You will learn
 
-- The difference between a `tool` and a `toolset`
+- Tell a `tool` apart from a `toolset`
 - How to write a `ToolHandler` and what its `ToolContext` gives it
 - How `provide` binds a `tool` and `expand` binds a `toolset`
 - How a handler streams progress
