@@ -60,9 +60,9 @@ describe("tailing the log", () => {
 
     await Promise.all([done, runFlow(greet, userText("hi"), ready)]);
 
-    expect(seen.map((envelope) => (envelope.form === "committed" ? envelope.type : undefined))).toEqual(
-      ["message", "output"],
-    );
+    expect(
+      seen.map((envelope) => (envelope.form === "committed" ? envelope.type : undefined)),
+    ).toEqual(["message", "output"]);
     expect(seen.every((envelope) => envelope.form === "committed")).toBe(true);
   });
 });
@@ -86,9 +86,9 @@ describe("reconnecting", () => {
     });
 
     // The replay is the settled history from the first turn: nothing live yet.
-    expect(replayed.map((envelope) => (envelope.form === "committed" ? envelope.type : undefined))).toEqual(
-      ["message", "output"],
-    );
+    expect(
+      replayed.map((envelope) => (envelope.form === "committed" ? envelope.type : undefined)),
+    ).toEqual(["message", "output"]);
 
     // Second turn, same store: this is what a reconnected client watches arrive live.
     await Promise.all([liveDone, runFlow(announce, userText("go"), ready)]);

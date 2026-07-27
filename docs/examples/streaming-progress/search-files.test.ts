@@ -5,7 +5,12 @@ import path from "node:path";
 import { defineGraph, runtime, runFlow, userText } from "@behalf-js/core";
 import type { Envelope, EventType } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
-import { searchFiles, searchFilesBinding, progressDemo, progressDemoBinding } from "./search-files.js";
+import {
+  searchFiles,
+  searchFilesBinding,
+  progressDemo,
+  progressDemoBinding,
+} from "./search-files.js";
 
 function neverCalled(): never {
   throw new Error("no model call expected in this test");
@@ -94,7 +99,10 @@ describe("the delta/commit/abort lifecycle", () => {
 
     await runFlow(graph, userText("go"), ready);
 
-    const streamed = store.events().filter(isCommitted).find((envelope) => envelope.type === "output");
+    const streamed = store
+      .events()
+      .filter(isCommitted)
+      .find((envelope) => envelope.type === "output");
     expect(streamed?.event).toEqual({ value: { done: true } });
     expect(streamed?.aborted).toBeUndefined();
   });
