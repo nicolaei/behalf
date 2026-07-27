@@ -28,13 +28,19 @@ reply, then answers using it.
 This is a fragment, not the whole file: threading, the wait point, and error handling are still to
 come, added incrementally over the rest of this page.
 
-<table>
-<colgroup>
-<col width="60%">
-<col width="40%">
-</colgroup>
-<tr>
-<td>
+```mermaid source=docs/examples/thinking-in-behalf/triage.ts#triage
+flowchart TB
+  node-1(("finish"))
+  node-2["triage"]
+  node-3["auto-resolve"]
+  node-4(["waitFor: human-reply"])
+  node-5["respond"]
+  node-2 -->|"when"| node-4
+  node-2 -->|"otherwise"| node-3
+  node-4 --> node-5
+  node-3 --> node-1
+  node-5 --> node-1
+```
 
 ```ts source=docs/examples/thinking-in-behalf/triage.ts#shape
 export const triage: Graph = defineGraph("triage", (flow) => {
@@ -74,27 +80,6 @@ export const triage: Graph = defineGraph("triage", (flow) => {
     .when((output) => (output as { decision: string }).decision === "escalate", waitForHuman)
     .otherwise(autoResolve);
 ```
-
-</td>
-<td>
-
-```mermaid source=docs/examples/thinking-in-behalf/triage.ts#triage
-flowchart TB
-  node-1(("finish"))
-  node-2["triage"]
-  node-3["auto-resolve"]
-  node-4(["waitFor: human-reply"])
-  node-5["respond"]
-  node-2 -->|"when"| node-4
-  node-2 -->|"otherwise"| node-3
-  node-4 --> node-5
-  node-3 --> node-1
-  node-5 --> node-1
-```
-
-</td>
-</tr>
-</table>
 
 Three steps, one branch, one wait point. `classify` decides which edge fires; `auto-resolve` and
 `respond` both end at the same `finish`, since the caller only cares about the final reply, not

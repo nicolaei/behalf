@@ -377,53 +377,37 @@ file rather than a region:
 ```
 ````
 
-### Graph diagrams: generated, side by side
+### Graph diagrams: generated, above the code
 
 A page showing a graph's _shape_ (`wiring-a-graph.md`, `thinking-in-behalf.md`'s "sketch the shape"
 step) never hand-draws that diagram. `tools/graph-to-mermaid.ts` generates it from the real `Graph`
-object the code beside it builds, so the picture can't drift from the wiring the moment someone
+object the code below it builds, so the picture can't drift from the wiring the moment someone
 changes it.
 Hand-drawn Mermaid (the "Diagrams" section above) is still right for a _sequence_ or _state_
 diagram, where there's no real object to generate from.
 Generated diagrams are only for a graph's node/edge shape.
 
-Laid out side by side, code on the left and its diagram on the right: react.dev's own
-code-next-to-result rhythm, the closest plain-Markdown equivalent to a Sandpack embed.
-GitHub has no native two-column Markdown, so this uses an HTML `<table>`; the blank line right after
-every `<td>` and right before every `</td>` is required.
-Without it, GitHub treats the fence as raw HTML text instead of a Markdown code block and renders it
-unstyled.
-
-GitHub's table renderer doesn't hold two columns to equal widths on its own: left unconstrained, a
-wide code block forces its `<td>` to expand and squeezes the diagram's column down to an unreadable
-sliver.
-A `<colgroup>` with explicit `<col width="NN%">` percentages fixes it; GitHub's sanitizer keeps the
-legacy `width` attribute (unlike a `style` attribute, which it strips), so a 60/40 split (code gets
-the wider column, a diagram needs less horizontal room) survives and renders:
+Put the diagram directly above the code, full width, one block after the other.
+A side-by-side `<table>` (code left, diagram right, matching react.dev's code-next-to-result rhythm)
+was tried twice and failed both times, for a structural reason neither fix could patch around:
+GitHub's table layout is `auto`, not `fixed`, and GitHub's sanitizer strips the `style` attribute
+that would force `fixed`.
+Under `auto` layout, a column's specified width is only a suggestion; once a `<pre>` block's longest
+unwrapped line is intrinsically wider than that suggestion, the browser expands the column to fit it
+anyway.
+A percentage split holds for a short example and silently breaks the moment a line is long (a
+template literal, a chained `.when(...)`), squeezing the diagram into an unreadable sliver, exactly
+what happened here.
+Stacking has no column to squeeze: each block gets the page's full width on its own line.
 
 ````markdown
-<table>
-<colgroup>
-<col width="60%">
-<col width="40%">
-</colgroup>
-<tr>
-<td>
-
-```ts source=docs/examples/wiring-a-graph/audit.ts#graph
-
-```
-
-</td>
-<td>
-
 ```mermaid source=docs/examples/wiring-a-graph/audit.ts#audit
 
 ```
 
-</td>
-</tr>
-</table>
+```ts source=docs/examples/wiring-a-graph/audit.ts#graph
+
+```
 ````
 
 The mermaid fence's `source=` works like the code fence's, but names an **exported binding**, not a

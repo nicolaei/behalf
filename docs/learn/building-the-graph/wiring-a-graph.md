@@ -94,34 +94,6 @@ just the one entry a single-input step gets.
 Put together, `intake`'s fan-out and the three reviewers converging on `merge` give the whole graph
 this shape:
 
-<table>
-<colgroup>
-<col width="60%">
-<col width="40%">
-</colgroup>
-<tr>
-<td>
-
-```ts source=docs/examples/wiring-a-graph/audit.ts#graph
-  flow.entry(intake);
-
-  intake.then([security, performance, style]);
-
-  const merge = flow.step(
-    join((context) => context.inputs),
-    { label: "merge" },
-  );
-  security.then(merge);
-  performance.then(merge);
-  style.then(merge);
-
-  merge.then(reply);
-  reply.then(flow.finish);
-```
-
-</td>
-<td>
-
 ```mermaid source=docs/examples/wiring-a-graph/audit.ts#audit
 flowchart TB
   node-1(("finish"))
@@ -141,12 +113,25 @@ flowchart TB
   node-6 --> node-1
 ```
 
-</td>
-</tr>
-</table>
+```ts source=docs/examples/wiring-a-graph/audit.ts#graph
+  flow.entry(intake);
+
+  intake.then([security, performance, style]);
+
+  const merge = flow.step(
+    join((context) => context.inputs),
+    { label: "merge" },
+  );
+  security.then(merge);
+  performance.then(merge);
+  style.then(merge);
+
+  merge.then(reply);
+  reply.then(flow.finish);
+```
 
 This diagram is generated from the real `audit` `Graph` object, not hand-drawn, so it can't drift
-from the code beside it: `tools/graph-to-mermaid.ts` renders it, and a test asserts the two stay
+from the wiring below it: `tools/graph-to-mermaid.ts` renders it, and a test asserts the two stay
 byte-identical.
 
 This audit is deliberately small, just enough to show the wiring.
