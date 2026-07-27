@@ -17,7 +17,7 @@ import {
   applyThreadAction,
   withMessage,
   route,
-  maybeEmitStateChange,
+  StateTracker,
 } from "./routing.js";
 import {
   runStep,
@@ -140,7 +140,7 @@ export async function runBranchNode(
   // exactly once per node visit here, mirroring driveGraph's own top-of-loop
   // check — so a branch's retried step re-checks the same already-seen
   // state and stays a no-op.
-  maybeEmitStateChange(runtime, thread.id, stateTracker, nodeDef.state);
+  stateTracker.maybeEmit(runtime, thread.id, nodeDef.state, stepIdentity(nodeId, nodeDef.label));
 
   const setThread = (next: Thread): void => {
     thread = next;
@@ -207,16 +207,14 @@ export async function runBranchNode(
         : peekMessageFromInbox(runtime.store, kinds);
     if (!message) return { kind: "parked", waitingFor: kinds, thread };
 
-    const routed = await driveWaitForMessage(
-      message,
-      nodeId,
+    const routed = await driveWaitForMessage(message, nodeId, {
       interrupts,
-      branchContext,
+      context: branchContext,
       flow,
       runtime,
       setThread,
       stateTracker,
-    );
+    });
     return { kind: "routed", thread: routed.thread, to: routed.to, input: routed.input };
   }
 
@@ -545,7 +543,7 @@ export async function advanceFanOutGroup(
       // forks its own thread id (see advanceFanOutGroup's own forking
       // above), so its state tracking is independent of any sibling's,
       // same as driveStepEmit's fan-out handling in drive.ts.
-      stateTracker: new Map(),
+      stateTracker: new StateTracker(),
     });
     branch.thread = result.thread;
     if (result.kind === "invalidate") notImplemented("tick: fan-out branch invalidate");

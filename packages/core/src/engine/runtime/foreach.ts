@@ -29,7 +29,7 @@ import type { Event } from "../../session/event.js";
 import type { CommittedEnvelope } from "../../session/envelope.js";
 import type { Runtime } from "../runtime.js";
 import { notImplemented, unreachable } from "../errors.js";
-import { type Thread, withMessage, route } from "./routing.js";
+import { type Thread, StateTracker, withMessage, route } from "./routing.js";
 import { tryMessageKindOf } from "../../flow/waitable.js";
 import type { ExecutionContext } from "./step-runner.js";
 import {
@@ -224,7 +224,7 @@ export async function advanceForEachGroup(
   // drive.ts's `driveForEachNode`, whose doc comment explains why). tick()
   // still has no state-tracking of its own across separate calls — this
   // only covers dedup among branches advanced within one call.
-  const stateTracker = new Map<ThreadId, string>();
+  const stateTracker = new StateTracker();
 
   for (const branch of notDone) {
     const thread: Thread = branch.thread ?? replayForkedThread(group.mainThread, branch.threadId);

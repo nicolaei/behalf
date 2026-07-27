@@ -176,29 +176,49 @@ export function applyThreadAction(
 }
 
 /**
- * Emits a `stateChange` event when `state` differs from the last one seen on
- * `threadId` by `stateTracker` — omits `from` on that thread's first entry,
- * updates the tracker either way. A no-op when `state` is `undefined`: a
- * node with no declared state is invisible to the state machine, not a
- * silent transition to some "undefined" phase. Shared by every node kind's
- * own check-and-emit — `driveGraph`'s main loop, `runBranchNode`'s fan-out/
+ * Owns "last state seen per thread" and emits a `stateChange` event when a
+ * node's declared `state` differs from it — omitting `from` on that thread's
+ * first entry. `maybeEmit` is a no-op when `state` is `undefined`: a node with
+ * no declared state is invisible to the state machine, not a silent
+ * transition to some "undefined" phase. Shared by every node kind's own
+ * check-and-emit — `driveGraph`'s main loop, `runBranchNode`'s fan-out/
  * forEach branches, and the two places an armed `interrupt` wins a race and
- * takes over routing.
+ * takes over routing. `maybeEmit`'s optional `step` identity is stamped onto
+ * the envelope the same way every other event type carries `stepId`/
+ * `stepName` (see `stepIdentity`) — every call site should pass one; it's
+ * optional only so a caller with no node identity in scope still compiles.
+ * Accepts a seed so a caller that reconstructed prior state from the log
+ * (e.g. `tick`'s `replayStateTracker`) can resume from it instead of
+ * starting empty.
  */
-export function maybeEmitStateChange(
-  runtime: Runtime,
-  threadId: ThreadId,
-  stateTracker: Map<ThreadId, string>,
-  state: string | undefined,
-): void {
-  if (state === undefined) return;
-  const previous = stateTracker.get(threadId);
-  if (previous === state) return;
-  runtime.store.append(
-    { ...(previous !== undefined ? { from: previous } : {}), to: state },
-    { type: "stateChange", threadId },
-  );
-  stateTracker.set(threadId, state);
+export class StateTracker {
+  private readonly lastState: Map<ThreadId, string>;
+
+  constructor(seed: Iterable<readonly [ThreadId, string]> = []) {
+    this.lastState = new Map(seed);
+  }
+
+  maybeEmit(
+    runtime: Runtime,
+    threadId: ThreadId,
+    state: string | undefined,
+    step?: StepIdentity,
+  ): void {
+    if (state === undefined) return;
+    const previous = this.lastState.get(threadId);
+    if (previous === state) return;
+    runtime.store.append(
+      { ...(previous !== undefined ? { from: previous } : {}), to: state },
+      {
+        type: "stateChange",
+        threadId,
+        ...(step
+          ? { stepId: step.stepId, ...(step.stepName ? { stepName: step.stepName } : {}) }
+          : {}),
+      },
+    );
+    this.lastState.set(threadId, state);
+  }
 }
 
 /** The `then` edges leaving a node, in declared order — more than one means a fan-out. */

@@ -3,11 +3,12 @@
 // helper that repeats until every cursor is parked or done.
 
 import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
+import type { ThreadId } from "../../flow/thread.js";
 import type { Message, MessageKind } from "../../flow/message.js";
 import { messageKindOf, tryMessageKindOf } from "../../flow/waitable.js";
 import type { StepContext, WaitForResult } from "../../flow/step.js";
 import type { Event } from "../../session/event.js";
-import type { CommittedEnvelope } from "../../session/envelope.js";
+import type { CommittedEnvelope, Envelope } from "../../session/envelope.js";
 import type { Runtime } from "../runtime.js";
 import { freshThreadId } from "./ids.js";
 import { notImplemented, unreachable } from "../errors.js";
@@ -19,6 +20,7 @@ import {
   commitRoute,
   withMessage,
   thenEdges,
+  StateTracker,
 } from "./routing.js";
 import { runStep, assertJoinTagging, withInputs } from "./step-runner.js";
 import {
@@ -374,6 +376,26 @@ function applySignalEvent(
   });
 }
 
+/**
+ * Reconstructs `tick`'s own `StateTracker` purely from the committed log —
+ * mirrors `replayPosition`'s own reconstruction of cursor position: no state
+ * may survive between separate `tick()` calls except what's already in the
+ * log. Walks every committed `stateChange` event in order, keeping only the
+ * latest `to` per thread — `from` never matters here, since a freshly
+ * rebuilt tracker only needs "what's the last state this thread saw", not
+ * how it got there.
+ */
+function replayStateTracker(events: readonly Envelope[]): StateTracker {
+  const lastState = new Map<ThreadId, string>();
+  for (const envelope of events) {
+    if (envelope.form !== "committed" || envelope.type !== "stateChange") continue;
+    if (!envelope.threadId) continue; // stateChange always carries one; guard satisfies the type
+    const { to } = envelope.event as Event["stateChange"];
+    lastState.set(envelope.threadId, to);
+  }
+  return new StateTracker(lastState);
+}
+
 function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
   const state: ReplayState = {
     thread: { id: freshThreadId(runtime), messages: [], history: [] },
@@ -612,6 +634,10 @@ async function advanceTickForEachNode(
 export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
   const attemptsByNode = new Map<NodeId, number>();
   const position = replayPosition(flow, runtime);
+  // No state may survive between separate tick() calls except what's in the
+  // log itself — same reconstruct-from-the-log discipline `replayPosition`
+  // applies to cursor position (see `replayStateTracker`'s own doc comment).
+  const stateTracker = replayStateTracker(runtime.store.events());
 
   if (position.kind === "fanout") {
     return advanceFanOutGroup(position.group, flow, runtime, attemptsByNode);
@@ -654,6 +680,18 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     const frame = leaf.node.frame;
     const node = frame.flow.nodes.get(frame.current);
     if (!node) throw new Error(`graph "${frame.flow.name}" has no node "${frame.current}"`);
+    // A state-less node is invisible to the state machine; a declared
+    // `state` fires (or not) exactly once per node visit here, before
+    // dispatching to this node's own kind-specific handling below — mirrors
+    // driveGraph's own top-of-loop check, so state fires on tick's very
+    // first call too, not just once cross-call persistence (via
+    // `replayStateTracker` above) has something to dedupe against.
+    stateTracker.maybeEmit(
+      runtime,
+      currentThread.id,
+      node.state,
+      stepIdentity(frame.current, node.label),
+    );
     const parentNode = parentOf(path);
     const parent = parentNode !== undefined ? { parent: parentNode } : {};
 
@@ -732,21 +770,14 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       if (!message)
         return [{ node: frame.current, status: "parked", waitingFor: kinds, ...parent }];
 
-      const routed = await driveWaitForMessage(
-        message,
-        frame.current,
-        frame.interrupts,
-        frame.context,
-        frame.flow,
+      const routed = await driveWaitForMessage(message, frame.current, {
+        interrupts: frame.interrupts,
+        context: frame.context,
+        flow: frame.flow,
         runtime,
         setThread,
-        // tick() drives one node per call and has no persistent
-        // state-tracking across calls yet (a separate, larger gap than
-        // this feature's scope) — a fresh map here only satisfies this
-        // call's own signature; an interrupt's `from` will be lost if a
-        // prior state was established on an earlier tick() call.
-        new Map(),
-      );
+        stateTracker,
+      });
       currentThread = routed.thread;
       frame.current = routed.to;
       frame.currentInput = routed.input;
@@ -837,10 +868,12 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       runtime,
       thread: currentThread,
       attemptsByNode,
-      // Same tick()-has-no-cross-call-tracking limitation as the
-      // driveWaitForMessage call site above — a fresh map only satisfies
-      // this call's own signature.
-      stateTracker: new Map(),
+      // tick()'s own top-of-loop check above already fired this node's
+      // state (or deduped it) before this step ran; this call's own tracker
+      // just needs to see the same instance so a later dedupe check inside
+      // driveStepEmit's fan-out branch handling (a fresh tracker per forked
+      // branch) still sees this thread's latest state as its starting point.
+      stateTracker,
     });
 
     if (outcome.kind === "retry") continue;

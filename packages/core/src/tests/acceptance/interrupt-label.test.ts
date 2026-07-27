@@ -8,9 +8,13 @@ describe("an interrupt node's own label is preserved on its output envelope", ()
     const graph = defineGraph("interrupt-label", (flow) => {
       const wait = flow.waitFor(userInput("resume"));
       const afterWait = flow.step(outputs(() => "resumed"));
-      const cancelled = flow.interrupt(userInput("cancel"), outputs(() => "cancelled"), {
-        label: "cancel-handler",
-      });
+      const cancelled = flow.interrupt(
+        userInput("cancel"),
+        outputs(() => "cancelled"),
+        {
+          label: "cancel-handler",
+        },
+      );
       flow.entry(wait);
       wait.then(afterWait);
       afterWait.then(flow.finish);

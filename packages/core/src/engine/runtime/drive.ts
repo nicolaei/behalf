@@ -6,9 +6,8 @@
 // findInterruptNodes, driveStepEmit, seedUseNode) to drive one node at a
 // time instead of to completion.
 
-import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
+import { type Graph, type NodeId, type NodeKind, nodeOptionFields } from "../../flow/graph.js";
 import type { Message, UserMessage } from "../../flow/message.js";
-import type { ThreadId } from "../../flow/thread.js";
 import type { Waitable } from "../../flow/waitable.js";
 import { tryMessageKindOf } from "../../flow/waitable.js";
 import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../../flow/step.js";
@@ -27,7 +26,7 @@ import {
   applyThreadAction,
   withMessage,
   thenEdges,
-  maybeEmitStateChange,
+  StateTracker,
 } from "./routing.js";
 import {
   runStep,
@@ -58,8 +57,7 @@ export function findInterruptNodes(flow: Graph): InterruptNode[] {
         id,
         waitable: node.waitable,
         run: node.run,
-        ...(node.label ? { label: node.label } : {}),
-        ...(node.state ? { state: node.state } : {}),
+        ...nodeOptionFields(node),
       });
   }
   return interrupts;
@@ -171,6 +169,24 @@ async function driveForEachNode(
 }
 
 /**
+ * The 5 things every `waitFor`/`interrupt` call site always carries
+ * together — the armed interrupts, the running `StepContext` (which carries
+ * `flow`/`runtime` via closure, but is threaded separately here since
+ * `driveWaitForMessage` needs `flow`/`runtime` directly, not just through
+ * `context`), the thread setter, and the shared state tracker. Bundled so
+ * `driveWaitForMessage`/`driveWaitForNode` take one argument instead of five
+ * positional ones that always travel together.
+ */
+export interface WaitContext {
+  interrupts: InterruptNode[];
+  context: StepContext;
+  flow: Graph;
+  runtime: Runtime;
+  setThread: (thread: Thread) => void;
+  stateTracker: StateTracker;
+}
+
+/**
  * Folds a waitFor node's already-obtained message into the thread and
  * routes it: if the message is what an armed `interrupt` was waiting for,
  * that step runs and takes over routing — reading `context.thread` live
@@ -188,13 +204,9 @@ async function driveForEachNode(
 export async function driveWaitForMessage(
   message: UserMessage,
   nodeId: NodeId,
-  interrupts: InterruptNode[],
-  context: StepContext,
-  flow: Graph,
-  runtime: Runtime,
-  setThread: (thread: Thread) => void,
-  stateTracker: Map<ThreadId, string>,
+  wait: WaitContext,
 ): Promise<RouteResult & { ranInterruptStep: boolean }> {
+  const { interrupts, context, flow, runtime, setThread, stateTracker } = wait;
   // Consuming the message is the same step regardless of who it's for: it
   // becomes a log event and joins the thread, then whichever node was
   // actually armed for its kind — the interrupt, or this waitFor itself —
@@ -207,7 +219,12 @@ export async function driveWaitForMessage(
     (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,
   );
   if (interrupt) {
-    maybeEmitStateChange(runtime, thread.id, stateTracker, interrupt.state);
+    stateTracker.maybeEmit(
+      runtime,
+      thread.id,
+      interrupt.state,
+      stepIdentity(interrupt.id, interrupt.label),
+    );
     const stepContext: StepContext = withInputs(context, [message]);
 
     const emit = await runStep(interrupt.run, stepContext);
@@ -226,7 +243,7 @@ export async function driveWaitForMessage(
         flow.edges,
         interrupt.id,
         emit.output,
-        { stepId: interrupt.id },
+        stepIdentity(interrupt.id, interrupt.label),
         liveThread,
       ),
       ranInterruptStep: true,
@@ -248,23 +265,21 @@ export async function driveWaitForMessage(
  * message-backed provider) races `waitForRace` against every armed
  * `interrupt` — message-based or signal-based alike — and folds in
  * whichever wins via `driveWaitForMessage` (a message win, whether this
- * node's own or a message-based interrupt's) or the signal-interrupt path
- * below (a signal-based interrupt's own `match()` won instead). Any other
- * provider for this node's own Waitable (e.g. a signal-based one) has no
- * message to fold and no interrupt-arming yet (out of scope for this slice,
- * see waitable.ts); it blocks on `waitForSignal` instead and routes
- * directly on the `Waitable`'s own `match()` result.
+ * node's own or a message-based interrupt's — both are folded through one
+ * call now, since a race winner's `UserMessage` is computed once regardless
+ * of which of the two it was) or the signal-interrupt path below (a
+ * signal-based interrupt's own `match()` won instead). Any other provider
+ * for this node's own Waitable (e.g. a signal-based one) has no message to
+ * fold and no interrupt-arming yet (out of scope for this slice, see
+ * waitable.ts); it blocks on `waitForSignal` instead and routes directly on
+ * the `Waitable`'s own `match()` result.
  */
 async function driveWaitForNode(
   node: Extract<NodeKind, { kind: "waitFor" }>,
   nodeId: NodeId,
-  interrupts: InterruptNode[],
-  context: StepContext,
-  flow: Graph,
-  runtime: Runtime,
-  setThread: (thread: Thread) => void,
-  stateTracker: Map<ThreadId, string>,
+  wait: WaitContext,
 ): Promise<RouteResult> {
+  const { interrupts, context, flow, runtime, stateTracker } = wait;
   const waitKind = tryMessageKindOf(node.waitable);
   if (waitKind === undefined) {
     const result = await waitForSignal(runtime.store, node.waitable);
@@ -287,35 +302,19 @@ async function driveWaitForNode(
     })),
   );
 
-  if (winner.kind === "self") {
-    const routed = await driveWaitForMessage(
-      winner.message,
-      nodeId,
-      interrupts,
-      context,
-      flow,
-      runtime,
-      setThread,
-      stateTracker,
-    );
-    return { thread: routed.thread, input: routed.input, reason: routed.reason, to: routed.to };
-  }
+  // A message win, whether the waitFor node's own or a message-based
+  // interrupt's: both fold through `driveWaitForMessage` identically, so
+  // the `UserMessage` to fold is computed once regardless of which of the
+  // two actually won the race.
+  const wonMessage: UserMessage | undefined =
+    winner.kind === "self"
+      ? winner.message
+      : tryMessageKindOf(winner.interrupt.waitable) !== undefined
+        ? (winner.value as UserMessage)
+        : undefined;
 
-  const wonMessageKind = tryMessageKindOf(winner.interrupt.waitable);
-  if (wonMessageKind !== undefined) {
-    // A message-based interrupt won the race: fold the message into the
-    // thread and run its step, exactly as `driveWaitForMessage` does when
-    // called from the plain (non-racing) path.
-    const routed = await driveWaitForMessage(
-      winner.value as UserMessage,
-      nodeId,
-      interrupts,
-      context,
-      flow,
-      runtime,
-      setThread,
-      stateTracker,
-    );
+  if (wonMessage !== undefined) {
+    const routed = await driveWaitForMessage(wonMessage, nodeId, wait);
     return { thread: routed.thread, input: routed.input, reason: routed.reason, to: routed.to };
   }
 
@@ -323,9 +322,16 @@ async function driveWaitForNode(
   // thread — same as `waitForSignal`'s own path — so its step runs with the
   // Waitable's `match()` result as its only input, and its output routes
   // exactly like a message-based interrupt's does in `driveWaitForMessage`.
+  if (winner.kind !== "interrupt")
+    unreachable("driveWaitForNode: a non-message race winner must be an interrupt");
   const interrupt = interrupts.find((candidate) => candidate.id === winner.interrupt.id);
   if (!interrupt) unreachable(`waitForRace resolved to unknown interrupt "${winner.interrupt.id}"`);
-  maybeEmitStateChange(runtime, context.thread.id, stateTracker, interrupt.state);
+  stateTracker.maybeEmit(
+    runtime,
+    context.thread.id,
+    interrupt.state,
+    stepIdentity(interrupt.id, interrupt.label),
+  );
   const stepContext: StepContext = withInputs(context, [winner.value]);
   const emit = await runStep(interrupt.run, stepContext);
   if (!("output" in emit)) notImplemented(`emit "${Object.keys(emit).join(", ")}"`);
@@ -336,7 +342,7 @@ async function driveWaitForNode(
     flow.edges,
     interrupt.id,
     emit.output,
-    { stepId: interrupt.id },
+    stepIdentity(interrupt.id, interrupt.label),
     liveThread,
   );
 }
@@ -419,7 +425,7 @@ export async function driveStepEmit(
           thread: applyThreadAction(thread, "fork", undefined, runtime),
           // Each fan-out branch forks its own thread, so it gets its own
           // fresh stateChange tracker rather than sharing the parent's.
-          stateTracker: new Map(),
+          stateTracker: new StateTracker(),
         }),
       ),
     );
@@ -554,7 +560,7 @@ export async function driveGraph(
   runtime: Runtime,
   thread: Thread,
   input: unknown,
-  stateTracker: Map<ThreadId, string> = new Map<ThreadId, string>(),
+  stateTracker: StateTracker = new StateTracker(),
 ): Promise<DriveResult> {
   // The live current thread — reassigned (not mutated) by `invalidate`, a
   // `use` node, or a threadAction when it forks or resets. `context.thread`
@@ -598,7 +604,12 @@ export async function driveGraph(
     // dispatching to this node's own kind-specific handling below — so a
     // retried step (which re-enters this loop without changing `current`)
     // re-checks the same already-seen state and stays a no-op.
-    maybeEmitStateChange(runtime, currentThread.id, stateTracker, node.state);
+    stateTracker.maybeEmit(
+      runtime,
+      currentThread.id,
+      node.state,
+      stepIdentity(current, node.label),
+    );
     // Consumed by whichever node runs next, regardless of its kind — a join's
     // pendingInputs must never survive past the node it was meant for.
     const inputs = pendingInputs ?? [currentInput];
@@ -637,18 +648,16 @@ export async function driveGraph(
     }
 
     if (node.kind === "waitFor") {
-      const routed = await driveWaitForNode(
-        node,
-        current,
+      const routed = await driveWaitForNode(node, current, {
         interrupts,
         context,
         flow,
         runtime,
-        (next) => {
+        setThread: (next) => {
           currentThread = next;
         },
         stateTracker,
-      );
+      });
       currentThread = routed.thread;
       currentInput = routed.input;
       reason = routed.reason;

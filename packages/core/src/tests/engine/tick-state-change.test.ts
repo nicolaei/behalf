@@ -33,9 +33,15 @@ describe("stateChange survives across separate tick() calls, not just within one
 
   it("does not re-emit a state already established on an earlier tick() call", async () => {
     const graph = defineGraph("tick-state-dedup", (flow) => {
-      const start = flow.step(outputs(() => "go"), { state: "red" });
+      const start = flow.step(
+        outputs(() => "go"),
+        { state: "red" },
+      );
       const gate = flow.waitFor(userInput("follow-up"));
-      const after = flow.step(outputs(() => "done"), { state: "red" });
+      const after = flow.step(
+        outputs(() => "done"),
+        { state: "red" },
+      );
       flow.entry(start);
       start.then(gate);
       gate.then(after);
@@ -52,9 +58,15 @@ describe("stateChange survives across separate tick() calls, not just within one
 
   it("carries the correct `from` across tick() calls on a real transition", async () => {
     const graph = defineGraph("tick-state-from", (flow) => {
-      const start = flow.step(outputs(() => "go"), { state: "red" });
+      const start = flow.step(
+        outputs(() => "go"),
+        { state: "red" },
+      );
       const gate = flow.waitFor(userInput("follow-up"));
-      const after = flow.step(outputs(() => "done"), { state: "green" });
+      const after = flow.step(
+        outputs(() => "done"),
+        { state: "green" },
+      );
       flow.entry(start);
       start.then(gate);
       gate.then(after);

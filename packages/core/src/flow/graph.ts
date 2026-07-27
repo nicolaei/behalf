@@ -104,8 +104,8 @@ function freshNodeId(): NodeId {
   return nodeIdSequence.fresh();
 }
 
-/** Picks `label`/`state` out of a node factory's options, omitting either key entirely when absent rather than writing `undefined` — shared by every factory in `Flow` so each writes its own kind-specific fields plus this one call. */
-function nodeOptionFields(options?: NodeOptions): { label?: string; state?: string } {
+/** Picks `label`/`state` out of a node factory's options, omitting either key entirely when absent rather than writing `undefined` — shared by every factory in `Flow` so each writes its own kind-specific fields plus this one call, and by `findInterruptNodes` (engine/runtime/drive.ts), which needs the same two-field projection off an already-built `InterruptNode`. @public */
+export function nodeOptionFields(options?: NodeOptions): { label?: string; state?: string } {
   return {
     ...(options?.label ? { label: options.label } : {}),
     ...(options?.state ? { state: options.state } : {}),
