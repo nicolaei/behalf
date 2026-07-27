@@ -15,14 +15,9 @@ supplies real `ToolHandler`s for the tools your personas declare.
 ## ModelPort
 
 `ModelPort` is the seam between the engine and one specific provider: a `Model`, and one method that
-turns a `Profile` plus a message history into the model's next `AssistantMessage`.
-
-```ts
-interface ModelPort {
-  readonly model: Model;
-  respond(profile: Profile, messages: Message[], stream: DeltaSink): Promise<AssistantMessage>;
-}
-```
+turns a `Profile` plus a message history into the model's next `AssistantMessage`. reference.md's
+[ModelPort](../../reference.md#modelport) entry has the exact interface; the shape that matters here
+is one field and one method, `model` and `respond(profile, messages, stream)`.
 
 "It only responds" means a port has no separate compaction, retry, or tool-loop logic of its own:
 those are the engine's job (`context.compact`, `runtime()`'s `errorHandlers`, `agentTurn`'s loop).
@@ -75,6 +70,8 @@ Some providers keep the full reasoning only as long as an opaque token on the bl
 unchanged; edit that token, even just the visible summary text next to it, and the provider rejects
 it or silently drops the reasoning it was protecting.
 A port that reshapes a block to "clean it up" breaks exactly the thing it's trying to preserve.
+Here's the same `respond` implementation again, this time forwarding whatever `thinking` block
+already sits on the thread untouched:
 
 ```ts source=docs/examples/model-ports-and-bindings/sketch.ts#thinking
       return Promise.resolve({
@@ -89,7 +86,7 @@ A port that reshapes a block to "clean it up" breaks exactly the thing it's tryi
       });
 ```
 
-The one reshaping a port is still expected to do is cross-provider conversion: if a thread's prior
+Cross-provider conversion is the one reshaping a port is still expected to do: if a thread's prior
 `thinking` block came from a different model than the one now handling the turn, the new port
 converts that block to plain `text` before sending it, since the new provider has no way to
 interpret another provider's retention token. `respond`'s own signature never distinguishes "same

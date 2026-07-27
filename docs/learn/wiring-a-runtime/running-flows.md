@@ -38,13 +38,19 @@ default retry handler after whatever you pass, so omitting it just means "use th
 
 You might expect a missing tool binding to surface the first time a flow actually calls that tool,
 mid-run.
-Instead, `satisfiesFlows` checks every persona a set of flows could reach before you run anything,
-by walking each flow's graph structure: every `step`, `interrupt`, and `use` node, recursing into a
-subgraph the same way.
-For each persona it finds, it checks three things: does the model resolver return a port for it, is
-every declared tool bound, and does the model actually support the persona's requested reasoning
-level.
+Instead, `satisfiesFlows` checks everything a set of flows could reach before you run anything, by
+walking each flow's graph structure: every `step`, `interrupt`, `waitFor`, and `use` node, recursing
+into a subgraph the same way.
+For each persona it finds this way, it checks three things: does the model resolver return a port
+for it, is every declared tool bound, and does the model actually support the persona's requested
+reasoning level.
+It also collects every `waitFor` provider and checks each against a `waitableSources` resolver, an
+optional fourth argument: `"userInput"` is always satisfied, since it needs no registered source,
+but any other provider missing one is reported too.
 An empty result means the flow is ready to run.
+
+Here's a coverage check against `chat` (clean) and a deliberately broken flow whose persona declares
+a tool with no matching binding, so you can see a real `Missing` entry instead of a described one:
 
 ```ts source=docs/examples/running-flows/basic.ts#coverage
 export const missing = satisfiesFlows([chat], () => fakePort, []);
@@ -112,8 +118,9 @@ spawn with its result, live in [Tools and handlers](../describing-a-flow/tools-a
 
 - `runtime()` holds a model resolver, tool bindings, and a store; `bindings` covers only the tools
   your personas actually declare
-- `satisfiesFlows` walks a flow's structure statically (`step`/`interrupt`/`use`, recursing into
-  subgraphs) and reports every `Missing` model, tool, or reasoning level; empty means ready
+- `satisfiesFlows` walks a flow's structure statically (`step`/`interrupt`/`waitFor`/`use`,
+  recursing into subgraphs) and reports every `Missing` model, tool, reasoning level, or
+  unregistered `waitFor` provider; empty means ready
 - `runFlow` seeds a new thread with a message, drives the graph to `flow.finish`, and resolves with
   its output
 - A tool spawns a child flow through `ToolContext.runFlow`, with `parentThreadId` marking the
