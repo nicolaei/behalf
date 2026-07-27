@@ -186,6 +186,11 @@ async function driveForEachNode(
  * `context`), the thread setter, and the shared state tracker. Bundled so
  * `driveWaitForMessage`/`runWaitForNode` take one argument instead of five
  * positional ones that always travel together.
+ *
+ * Carries a bare `StateTracker`, not a full `ExecutionScope`: an interrupt's
+ * own step can't retry yet (see `driveWaitForMessage`'s "emitting anything
+ * but `output` isn't supported yet" guard), so `attemptsByNode` has no
+ * meaning here — bundling one would just be a dead field on every call site.
  */
 export interface WaitContext {
   interrupts: InterruptNode[];
