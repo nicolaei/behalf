@@ -73,6 +73,6 @@ const brokenChat: Graph = defineGraph("broken-chat", (flow) => {
 export const missingTool = satisfiesFlows([brokenChat], () => fakePort, []);
 // #endregion coverage
 
-// #region run
+// #region run-flow
 export const result = await runFlow(chat, userText("Say hello."), ready);
-// #endregion run
+// #endregion run-flow

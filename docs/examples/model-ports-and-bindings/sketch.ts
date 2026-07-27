@@ -4,7 +4,15 @@
 // exercised directly in sketch.test.ts, not just typechecked.
 
 import { tool, provide, defineGraph, agentTurn } from "@behalf-js/core";
-import type { Model, ModelPort, Message, ContentBlock, Binding, Profile, Graph } from "@behalf-js/core";
+import type {
+  Model,
+  ModelPort,
+  Message,
+  ContentBlock,
+  Binding,
+  Profile,
+  Graph,
+} from "@behalf-js/core";
 import { standardBindings } from "@behalf-js/tools";
 
 /** Any `thinking` block already on the last assistant message, unfiltered by content. */
@@ -20,7 +28,7 @@ function priorThinking(messages: Message[]): Extract<ContentBlock, { type: "thin
 export function createEchoPort(model: Model): ModelPort {
   return {
     model,
-    async respond(_profile, messages, stream) {
+    respond(_profile, messages, stream) {
       const lastUser = [...messages].reverse().find((m) => m.role === "user");
       const text = lastUser?.content.find((block) => block.type === "text");
       const reply = text?.type === "text" ? `You said: ${text.text}` : "I didn't catch that.";
@@ -29,7 +37,8 @@ export function createEchoPort(model: Model): ModelPort {
       stream.delta({ correlationId: "echo-reply", text: reply });
       stream.delta({ correlationId: "echo-reply", close: true });
 
-      return {
+      // #region thinking
+      return Promise.resolve({
         role: "assistant",
         provider: "echo",
         model: model.identifier,
@@ -38,7 +47,8 @@ export function createEchoPort(model: Model): ModelPort {
         // provider needs to accept it back on a later turn.
         content: [...priorThinking(messages), { type: "text", text: reply }],
         usage: { input: messages.length, output: 1 },
-      };
+      });
+      // #endregion thinking
     },
   };
 }
@@ -50,9 +60,9 @@ const lookupOrder = tool<{ orderId: string }, { status: string }>(
   "Looks up an order's shipping status by id",
 );
 
-const lookupOrderBinding: Binding = provide(lookupOrder, async ({ orderId }) => ({
-  status: `order ${orderId} is in transit`,
-}));
+const lookupOrderBinding: Binding = provide(lookupOrder, ({ orderId }) =>
+  Promise.resolve({ status: `order ${orderId} is in transit` }),
+);
 
 export const bindings: Binding[] = [...standardBindings, lookupOrderBinding];
 // #endregion bindings
