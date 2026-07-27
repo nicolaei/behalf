@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText } from "@behalf-js/core";
+import type { ThreadId } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { noRetryOnValidation, retryFlakyFetchTwice } from "./backoff.js";
 
@@ -27,6 +28,12 @@ describe("noRetryOnValidation", () => {
 
     await expect(runFlow(graph, userText("go"), ready)).rejects.toThrow(/bad reply/);
     expect(attempts).toBe(1); // failed on the first attempt, never retried
+  });
+
+  it("defers to the next handler once attempts is past its first validation error", () => {
+    const context = { step: { id: "s" }, thread: "t" as ThreadId, attempts: 1, log: [] };
+    const decision = noRetryOnValidation({ type: "validation", message: "still bad" }, context);
+    expect(decision).toBeUndefined(); // only fails fast on the very first attempt
   });
 });
 

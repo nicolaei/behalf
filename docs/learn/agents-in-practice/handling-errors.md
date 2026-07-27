@@ -31,15 +31,17 @@ Instead, the runner appends an error event and hands the decision to the runtime
 An `ErrorHandler` is a plain function: the error plus an `ErrorContext`, in; a decision or
 `undefined`, out.
 
-```ts
-type ErrorContext = {
+```ts source=packages/core/src/engine/errors.ts#error-context
+/** Context passed to an error handler: the step, thread, attempt count, and session log. @public */
+export interface ErrorContext {
   step: { id: string; name?: string };
   thread: ThreadId;
   attempts: number; // times this step has already errored
   log: Envelope[]; // the session so far, to inspect
-};
+}
 
-type ErrorDecision = { action: "retry"; after?: number } | { action: "fail" };
+/** What an error handler returns: retry (optionally after a delay) or give up. @public */
+export type ErrorDecision = { action: "retry"; after?: number } | { action: "fail" };
 ```
 
 `runtime()`'s `errorHandlers` list is consulted in order; the first one to return a decision wins.
@@ -94,10 +96,18 @@ up, and confirms `runFlow` rejects, once the two-retry budget is spent.
 `runtime()` always appends one more handler after any you supply: it retries `retryable` errors with
 exponential backoff up to a small cap, and fails everything else.
 
-```ts
-const defaultErrorHandler: ErrorHandler = (error, context) => {
-  if (!error.retryable || context.attempts >= DEFAULT_RETRY_CAP) return { action: "fail" };
-  return { action: "retry", after: DEFAULT_RETRY_BASE_DELAY_MS * 2 ** context.attempts };
+```ts source=packages/core/src/engine/errors.ts#default-handler
+/**
+ * The built-in handler runtime() appends after any user-supplied handlers.
+ * Retries retryable errors with exponential backoff up to a small cap, otherwise fails.
+ * See docs/reference.md’s Errors section.
+ */
+export const defaultErrorHandler: ErrorHandler = (error, context) => {
+  if (!error.retryable || context.attempts >= DEFAULT_RETRY_CAP) {
+    return { action: "fail" };
+  }
+  const after = DEFAULT_RETRY_BASE_DELAY_MS * 2 ** context.attempts;
+  return { action: "retry", after };
 };
 ```
 
