@@ -3,22 +3,18 @@
 // passing vitest test here: there's no separate companion file.
 
 import { describe, it, expect } from "vitest";
-import {
-  defineGraph,
-  agentTurn,
-  userText,
-  runtime,
-  runFlow,
-  provide,
-  tool,
-} from "@behalf-js/core";
+import { defineGraph, agentTurn, userText, runtime, runFlow, provide, tool } from "@behalf-js/core";
 import type { ModelPort, Profile, AssistantMessage } from "@behalf-js/core";
 import { fakePort } from "@behalf-js/testing";
 import { memoryStore } from "@behalf-js/stores";
 import { z } from "zod";
 
 // #region fake-port
-const assistant: Profile = { model: fakePort.model, system: "You are a helpful assistant.", tools: [] };
+const assistant: Profile = {
+  model: fakePort.model,
+  system: "You are a helpful assistant.",
+  tools: [],
+};
 
 const chat = defineGraph("fake-chat", (flow) => {
   const turn = flow.use(agentTurn(assistant));
@@ -27,7 +23,7 @@ const chat = defineGraph("fake-chat", (flow) => {
 });
 
 describe("fakePort", () => {
-  it("always replies \"ok\", with no tool calls", async () => {
+  it('always replies "ok", with no tool calls', async () => {
     const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
 
     const result = await runFlow(chat, userText("What's the weather?"), ready);
@@ -114,10 +110,10 @@ describe("faking a tool", () => {
     const ready = await runtime({
       models: () => port,
       bindings: [
-        provide(getWeather, async (input) => {
+        provide(getWeather, (input) => {
           handlerCalls += 1;
           expect(input).toEqual({ city: "Oslo" });
-          return { tempC: 14, condition: "sunny" };
+          return Promise.resolve({ tempC: 14, condition: "sunny" });
         }),
       ],
       store: memoryStore(),

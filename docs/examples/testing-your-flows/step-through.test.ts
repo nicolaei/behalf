@@ -16,9 +16,7 @@ describe("step-through", () => {
 
     expect(first).toHaveLength(2);
     expect(first.every((lane) => lane.status === "active")).toBe(true);
-    expect(first.map((lane) => lane.node).sort()).toEqual(
-      [fastNode.id, humanReplyNode.id].sort(),
-    );
+    expect(first.map((lane) => lane.node).sort()).toEqual([fastNode.id, humanReplyNode.id].sort());
   });
 
   it("stepUntilBlocked drives to both lanes parked: one folded, one waiting on a message", async () => {

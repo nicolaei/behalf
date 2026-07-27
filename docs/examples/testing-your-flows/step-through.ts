@@ -18,17 +18,27 @@ import { fakePort } from "@behalf-js/testing";
 import { memoryStore } from "@behalf-js/stores";
 import { stepOnce, stepUntilBlocked, stepUntil, atNode } from "@behalf-js/testing";
 
+// #region step-once
 export let mergeNode: Handle;
 export let fastNode: Handle;
 export let humanReplyNode: Handle;
 
 export const pipeline: Graph = defineGraph("step-through", (flow) => {
-  const start = flow.step(outputs(() => "go"), { label: "start" });
-  const fast = flow.step(outputs(() => "fast-done"), { label: "fast" });
+  const start = flow.step(
+    outputs(() => "go"),
+    { label: "start" },
+  );
+  const fast = flow.step(
+    outputs(() => "fast-done"),
+    { label: "fast" },
+  );
   fastNode = fast;
   const humanReply = flow.waitFor(userInput("resume"));
   humanReplyNode = humanReply;
-  const merge = flow.step(join((context) => context.inputs), { label: "merge" });
+  const merge = flow.step(
+    join((context) => context.inputs),
+    { label: "merge" },
+  );
   mergeNode = merge;
 
   flow.entry(start);
@@ -38,7 +48,6 @@ export const pipeline: Graph = defineGraph("step-through", (flow) => {
   merge.then(flow.finish);
 });
 
-// #region step-once
 export async function stepOnceDemo() {
   const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
   return stepOnce(pipeline, ready);
@@ -71,8 +80,14 @@ export async function stepUntilStalledDemo() {
 // throws StepUntilError("budget-exceeded") once maxSteps is spent, rather
 // than looping forever.
 export const infiniteLoop: Graph = defineGraph("infinite-loop", (flow) => {
-  const a = flow.step(outputs(() => "a"), { label: "a" });
-  const b = flow.step(outputs(() => "b"), { label: "b" });
+  const a = flow.step(
+    outputs(() => "a"),
+    { label: "a" },
+  );
+  const b = flow.step(
+    outputs(() => "b"),
+    { label: "b" },
+  );
   flow.entry(a);
   a.then(b);
   b.then(a);
