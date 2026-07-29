@@ -15,6 +15,8 @@ import type { ModelPort } from "./model-port.js";
 import type { SessionStore } from "./session-store.js";
 import { defaultErrorHandler, type ErrorHandler } from "./errors.js";
 import type { Thread } from "./runtime/routing.js";
+export type { Thread } from "./runtime/routing.js";
+export { withMessage, withCompaction, deriveCompactedMessages } from "./runtime/routing.js";
 import { driveGraph } from "./runtime/drive.js";
 import { resolvedTools, startToolExecutor } from "./runtime/execution.js";
 import { idFactories, freshThreadId } from "./runtime/ids.js";

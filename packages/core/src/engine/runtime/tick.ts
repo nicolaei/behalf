@@ -296,7 +296,7 @@ function applyOutputEvent(
   });
 }
 
-/** `replayPosition`'s handling of a committed `message` event: a `waitFor` node that consumed it routes off the message, same as `advance`; a `use` node being seeded descends a level into its subgraph; any other current node is skipped, since replay isn't tracking it. */
+/** `replayPosition`'s handling of a committed `message` event: a `waitFor` node that consumed it routes off the message, same as `advance`; a `use` node being seeded descends a level into its subgraph; any other current node folds the message's content onto `state.thread` (same as `applyCompactionEvent`/`applyInvalidationEvent` already do for their own event types) without moving any level's position — content-folding is orthogonal to position tracking, which is all the waitFor/use special-casing above ever protected. */
 function applyMessageEvent(
   envelope: CommittedEnvelope,
   path: PathLevel<ReplayFrame>[],
@@ -343,9 +343,13 @@ function applyMessageEvent(
     });
     return;
   }
-
-  // Belongs to a node this replay isn't tracking as any level's
-  // `current` — safe to skip; it never needs to move a level's position.
+  // Belongs to a node this replay isn't tracking as any level's `current` —
+  // never needs to move a level's position — but its CONTENT still belongs
+  // on the thread: an ordinary step logging a message directly (modelCall's
+  // own reply, `fold`'s combined tool-result message, `appendEvent` calls in
+  // general) is exactly this case, and skipping the fold here would silently
+  // drop it from `thread.messages` on every replay that lands past it.
+  state.thread = withMessage(state.thread, message);
 }
 
 /** `replayPosition`'s handling of a committed `signal` event: only ever moves the position when the innermost node is a non-message `waitFor` whose `Waitable` now matches the log up to and including this event — mirrors `applyMessageEvent`'s `waitFor` case, but the value routed downstream is `match()`'s own result rather than the raw event. */
