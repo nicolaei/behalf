@@ -13,7 +13,7 @@ import type { Event, EventType } from "../../session/event.js";
 import type { Runtime } from "../runtime.js";
 import { type ErrorContext, type ErrorDecision, unreachable } from "../errors.js";
 import { RetryableError } from "../errors.js";
-import { type Thread, StateTracker } from "./routing.js";
+import { type Thread, StateTracker, withCompaction } from "./routing.js";
 
 /**
  * Bundles the two pieces of per-branching-construct bookkeeping that used to
@@ -106,18 +106,14 @@ export function assertJoinTagging(nodeId: NodeId, run: Step, inputs: unknown[]):
   }
 }
 
-/** Appends a compaction event and returns a thread with its messages replaced and its history extended — never mutates the thread passed in. Shared by the main-loop and branch paths since both commit a `compact` emit the same way. */
+/** Appends a compaction event and returns a thread with `messages` derived from it (see `withCompaction`) — never mutates the thread passed in. Shared by the main-loop and branch paths, and by `StepContext.compact` itself, since every path commits a compaction the same way. */
 export function commitCompaction(
   runtime: Runtime,
   thread: Thread,
-  compact: Message[],
-  meta: unknown,
+  compaction: Event["compaction"],
 ): Thread {
-  runtime.store.append(
-    { messages: compact, ...(meta !== undefined ? { meta } : {}) },
-    { type: "compaction", threadId: thread.id },
-  );
-  return { ...thread, messages: compact, history: [...thread.history, ...compact] };
+  runtime.store.append(compaction, { type: "compaction", threadId: thread.id });
+  return withCompaction(thread, compaction);
 }
 
 /**
@@ -180,6 +176,7 @@ export interface StepContextConfig {
   appendEvent: <T extends EventType>(payload: Event[T], type: T) => void; // commits a standalone event to this scope's thread
   modelCall: (profile: Profile) => Promise<ModelCallResult>;
   callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
+  compact: (input: { task?: Message; summary: Message; keepLast: number }) => Promise<void>;
 }
 
 /**
@@ -201,10 +198,7 @@ export function makeStepContext(config: StepContextConfig): StepContext {
     output<Result>(value: Result): Emit<Result> {
       return { output: value };
     },
-    async compact(replace, meta): Promise<Emit<Message[]>> {
-      const messages = await replace(config.getThread().messages);
-      return { compact: messages, ...(meta !== undefined ? { meta } : {}) };
-    },
+    compact: config.compact,
     invalidate(target, options): Emit<never> {
       return {
         invalidate: target,
@@ -242,7 +236,7 @@ export function withInputs(context: StepContext, inputs: unknown[]): StepContext
     callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) =>
       context.callTool(tool, input),
     output: <Result>(value: Result) => context.output(value),
-    compact: (replace, meta) => context.compact(replace, meta),
+    compact: (input) => context.compact(input),
     invalidate: (target, options) => context.invalidate(target, options),
     fail: (error) => context.fail(error),
   };

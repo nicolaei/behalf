@@ -155,6 +155,10 @@ export async function runBranchNode(
     },
     modelCall: (profile) => runModelCall(profile, branchContext, runtime, setThread),
     callTool: (tool, toolInput) => callTool(tool, toolInput, thread.id, runtime, nodeIdentity),
+    compact: (input) => {
+      thread = commitCompaction(runtime, thread, input);
+      return Promise.resolve();
+    },
   });
 
   if (nodeDef.kind === "waitFor") {
@@ -183,12 +187,6 @@ export async function runBranchNode(
     const emit = await runStep(nodeDef.run, branchContext);
 
     if ("invalidate" in emit) return { kind: "invalidate", emit, thread };
-
-    if ("compact" in emit) {
-      thread = commitCompaction(runtime, thread, emit.compact, emit.meta);
-      break; // stepOutput stays undefined; advance to next node
-    }
-
     if ("error" in emit) {
       await handleStepError(emit, nodeId, ctx);
       continue;

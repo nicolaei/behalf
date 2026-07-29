@@ -84,11 +84,13 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
   it("can compact its thread's messages from inside a branch, logging a compaction event", async () => {
     const graph = defineGraph("branch-compacts", (flow) => {
       const start = flow.step(outputs(() => "go"));
-      const branch = flow.step((context) =>
-        context.compact(() =>
-          Promise.resolve([{ role: "system", content: [{ type: "text", text: "summary" }] }]),
-        ),
-      );
+      const branch = flow.step(async (context) => {
+        await context.compact({
+          summary: { role: "system", content: [{ type: "text", text: "summary" }] },
+          keepLast: 0,
+        });
+        return context.output("done");
+      });
       const other = flow.step(outputs(() => "other"));
       const joinStep = flow.step(join((context) => context.inputs.length));
 

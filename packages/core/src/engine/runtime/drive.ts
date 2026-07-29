@@ -494,7 +494,7 @@ export function fanOutTargets(flow: Graph, nodeId: NodeId): NodeId[] {
 }
 
 /**
- * Handles the `Emit` a `step` node produced: invalidate, compact, error, a
+ * Handles the `Emit` a `step` node produced: invalidate, error, a
  * fan-out (more than one `then` edge), or a plain routed output. Each case
  * decides the next node and, for fan-out, the per-branch inputs the join
  * node receives.
@@ -510,17 +510,12 @@ export async function driveStepEmit(
     return commitInvalidation(runtime, thread, emit);
   }
 
-  if ("compact" in emit) {
-    const nextThread = commitCompaction(runtime, thread, emit.compact, emit.meta);
-    return { kind: "advance", ...route(flow.edges, nodeId, undefined, nextThread, runtime) };
-  }
-
   if ("error" in emit) {
     return handleStepError(emit, nodeId, ctx);
   }
 
-  // Emit's variants are exactly invalidate/compact/error/output — having
-  // ruled out the first three, only "output" remains; anything else is a bug.
+  // Emit's variants are exactly invalidate/error/output — having ruled out
+  // the first two, only "output" remains; anything else is a bug.
   if (!("output" in emit)) unreachable(`emit "${Object.keys(emit).join(", ")}"`);
 
   const branchTargets: NodeId[] = fanOutTargets(flow, nodeId);
@@ -649,6 +644,11 @@ export function buildDriveContext(
         "callTool called outside a running node",
       );
       return callTool(tool, input, getThread().id, runtime, identity);
+    },
+    compact(input): Promise<void> {
+      const nextThread = commitCompaction(runtime, getThread(), input);
+      setThread(nextThread);
+      return Promise.resolve();
     },
   });
   return context;

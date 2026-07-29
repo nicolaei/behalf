@@ -39,7 +39,6 @@ export interface WaitForResult<T = unknown> {
 /** The one outcome a step returns. Only `output` is routed by edges. @public */
 export type Emit<Result = unknown> =
   | { output: Result }
-  | { compact: Message[]; meta?: unknown }
   | { invalidate: NodeId; threadAction: ThreadAction; reason?: Message }
   | { error: StepError };
 
@@ -61,10 +60,7 @@ export interface StepContext {
   callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output>;
 
   output<Result>(value: Result): Emit<Result>;
-  compact(
-    replace: (messages: Message[]) => Promise<Message[]>,
-    meta?: unknown,
-  ): Promise<Emit<Message[]>>;
+  compact(input: { task?: Message; summary: Message; keepLast: number }): Promise<void>;
   invalidate(
     target: NodeId,
     options?: { threadAction?: ThreadAction; reason?: Message },
@@ -113,17 +109,4 @@ export function join<Result>(compute: (context: StepContext) => Result): JoinSte
     Promise.resolve(context.output(compute(context)));
   (step as JoinStep<Result>).join = true;
   return step as JoinStep<Result>;
-}
-
-/**
- * A step that replaces the thread’s messages and nothing else — for
- * compaction steps with no async work of their own.
- * @public
- */
-export function compacts(
-  replace: (messages: Message[]) => Message[],
-  meta?: unknown,
-): Step<Message[]> {
-  return (context) =>
-    Promise.resolve(context.compact((messages) => Promise.resolve(replace(messages)), meta));
 }

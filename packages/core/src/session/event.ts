@@ -10,7 +10,7 @@ export interface Event {
   output: { value: unknown };
   toolCall: { correlationId: string; name: string; input: unknown };
   toolResult: { correlationId: string; output: unknown; isError?: boolean };
-  compaction: { messages: Message[]; meta?: unknown };
+  compaction: { task?: Message; summary: Message; keepLast: number };
   invalidation: { target: NodeId; threadAction: ThreadAction; reason?: Message };
   error: { type: string; message: string; retryable?: boolean; cause?: unknown };
   // A non-conversational fact a Waitable can match on — never folded into

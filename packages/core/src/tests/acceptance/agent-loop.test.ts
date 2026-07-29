@@ -66,17 +66,16 @@ describe("the agent loop", () => {
       const each = flow.forEach((output) => (output as ModelCallResult).toolCalls, toolBranch);
       const foldAndLoop = flow.step(async (context) => {
         const results = context.inputs[0] as { correlationId: string; output: unknown }[];
-        return context.compact((messages) =>
-          Promise.resolve([
-            ...messages,
-            ...results.map((result): Message => ({
-              role: "tool",
-              content: [
-                { type: "toolResult", correlationId: result.correlationId, output: result.output },
-              ],
-            })),
-          ]),
-        );
+        const toolMessage: Message = {
+          role: "tool",
+          content: results.map((result) => ({
+            type: "toolResult" as const,
+            correlationId: result.correlationId,
+            output: result.output,
+          })),
+        };
+        await context.compact({ summary: toolMessage, keepLast: 0 });
+        return context.output(true);
       });
       const finalize = flow.step(
         outputs((context) => {

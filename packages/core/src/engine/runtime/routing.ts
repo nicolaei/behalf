@@ -6,6 +6,7 @@ import type { NodeId, EdgeDefinition } from "../../flow/graph.js";
 import type { ThreadAction, ThreadId } from "../../flow/thread.js";
 import type { StepContext } from "../../flow/step.js";
 import type { Runtime } from "../runtime.js";
+import type { Event } from "../../session/event.js";
 import { freshThreadId } from "./ids.js";
 
 export type Thread = StepContext["thread"];
@@ -141,6 +142,35 @@ export function withMessage(thread: Thread, message: Message): Thread {
     messages: [...thread.messages, message],
     history: [...thread.history, message],
   };
+}
+
+/**
+ * Derives the `messages` a `"compaction"` event produces, given the thread's
+ * own `history` up to that point: an optional restated `task`, the
+ * synthesized `summary`, then the last `keepLast` messages pulled straight
+ * out of `history` — never duplicated content, just a pointer back into it.
+ * The one place this shape is computed, so the live drive (`withCompaction`,
+ * below) and any from-scratch replay that folds the whole event list derive
+ * identical `messages` for the same event sequence.
+ */
+export function deriveCompactedMessages(
+  history: readonly Message[],
+  compaction: Event["compaction"],
+): Message[] {
+  const { task, summary, keepLast } = compaction;
+  const tail = history.slice(Math.max(0, history.length - keepLast));
+  return [...(task ? [task] : []), summary, ...tail];
+}
+
+/**
+ * Returns a new thread with `messages` replaced per a compaction event —
+ * `history` untouched, since only `"message"` events ever extend it (see
+ * `deriveCompactedMessages`). Never mutates the thread passed in. Shared by
+ * every path that folds a `compact()` effect into the live thread the same
+ * way — the main drive loop and a fan-out branch alike.
+ */
+export function withCompaction(thread: Thread, compaction: Event["compaction"]): Thread {
+  return { ...thread, messages: deriveCompactedMessages(thread.history, compaction) };
 }
 
 /**
