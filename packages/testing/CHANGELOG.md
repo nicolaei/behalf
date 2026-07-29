@@ -1,5 +1,12 @@
 # @behalf-js/testing
 
+## 0.0.2
+
+### Patch Changes
+
+- Updated dependencies [e97ed59]
+  - @behalf-js/core@0.0.2
+
 ## 0.0.1
 
 ### Patch Changes
