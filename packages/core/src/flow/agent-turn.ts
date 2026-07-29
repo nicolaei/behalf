@@ -23,7 +23,7 @@ import { outputs } from "./step.js";
 import type { ModelCallResult, WaitForResult } from "./step.js";
 import { toolCall } from "./waitable.js";
 import type { Profile } from "./profile.js";
-import type { Message } from "./message.js";
+import type { Message, ContentBlock } from "./message.js";
 
 function toolBranch(item: unknown): Graph {
   const { correlationId } = item as { correlationId: string; name: string };
@@ -106,6 +106,65 @@ function firedToolCalls(messages: Message[]): FiredToolCall[] {
     });
 }
 
+// --- maybeCompact's policy: a rough estimate, a threshold, and a placeholder summary. ---
+// No tokenizer dependency exists in this repo today, and adding one is out of scope for
+// this step: chars/4 is the well-known ballpark approximation for English text used by
+// most "rough token count" heuristics, and it needs no model-specific vocabulary.
+const CHARS_PER_TOKEN_ESTIMATE = 4;
+// 8000 tokens is a conservative slice of even a small (e.g. 32k-context) model's window —
+// comfortably clear of the budget before the thread risks crowding out the model's own
+// reply, while still leaving many turns' worth of headroom before compaction ever fires.
+const TOKEN_BUDGET = 8000;
+// How many of the most recent messages survive a compaction verbatim. 10 is enough to keep
+// the immediately preceding exchange (a model reply plus the tool round-trip that produced
+// it) intact, so the model doesn't lose short-term continuity right when it compacts.
+const KEEP_LAST = 10;
+
+function blockLength(block: ContentBlock): number {
+  switch (block.type) {
+    case "text":
+    case "thinking":
+      return block.text.length;
+    case "image":
+      return block.data.length;
+    case "toolCall":
+      return block.name.length + JSON.stringify(block.input ?? "").length;
+    case "toolResult":
+      return JSON.stringify(block.output ?? "").length;
+  }
+}
+
+/** Rough token estimate over a thread's messages — no tokenizer, chars/4 ballpark. */
+function estimateTokens(messages: Message[]): number {
+  const chars = messages.reduce(
+    (total, message) => total + message.content.reduce((sum, block) => sum + blockLength(block), 0),
+    0,
+  );
+  return Math.ceil(chars / CHARS_PER_TOKEN_ESTIMATE);
+}
+
+function overBudget(estimate: number): boolean {
+  return estimate > TOKEN_BUDGET;
+}
+
+/**
+ * NAIVE PLACEHOLDER — not a real summarization. Real summarization (an actual model call
+ * that reads the thread and writes a faithful digest) is out of scope for this step; only
+ * the compaction mechanism (estimate -> threshold -> compact()) is. This just states how
+ * many messages got folded away, so downstream context loss is at least honest, not silent.
+ */
+function summarize(messages: Message[]): Message {
+  return {
+    role: "system",
+    content: [
+      {
+        type: "text",
+        text: `[naive summary, not model-generated] Compacted ${String(messages.length)} earlier messages.`,
+      },
+    ],
+  };
+}
+
 /**
  * A reusable graph: run the model, wait for its tool calls, fold results, loop until a
  * finish condition matches. One agent's turn — the loop that keeps it going until it stops.
@@ -124,7 +183,7 @@ export function agentTurn(profile: Profile, options?: AgentTurnOptions): Graph {
   return defineGraph("agent-turn", (flow) => {
     const respond = flow.step(async (context) => context.output(await context.modelCall(profile)));
     const each = flow.forEach((output) => (output as ModelCallResult).toolCalls, toolBranch);
-    const fold = flow.step(async (context) => {
+    const fold = flow.step((context) => {
       const results = context.inputs[0] as { correlationId: string; output: unknown }[];
       const toolMessage: Message = {
         role: "tool",
@@ -135,11 +194,22 @@ export function agentTurn(profile: Profile, options?: AgentTurnOptions): Graph {
         })),
       };
       // One combined event so downstream consumers (and this primitive test's own log
-      // assertions) see a single "message"-typed record per turn — separate from the
-      // "compaction" event `compact()` itself logs, which folds it into the thread so
-      // the next modelCall actually sees it.
+      // assertions) see a single "message"-typed record per turn. fold only combines
+      // and logs — it never decides whether to compact; that's maybeCompact's job below.
       context.appendEvent({ message: toolMessage }, "message");
-      return context.compact((messages) => Promise.resolve([...messages, toolMessage]));
+      return Promise.resolve(context.output(true));
+    });
+    // Estimate-based compaction check, run every time fold merges tool results into the
+    // thread — computed over context.thread.messages directly, with no model call involved,
+    // so it can decide before the loop ever asks the model to respond again. Most turns the
+    // thread is under budget and shouldCompact is false; nothing happens.
+    const maybeCompact = flow.step(async (context) => {
+      const estimate = estimateTokens(context.thread.messages);
+      const shouldCompact = overBudget(estimate);
+      if (shouldCompact) {
+        await context.compact({ summary: summarize(context.thread.messages), keepLast: KEEP_LAST });
+      }
+      return context.output(shouldCompact);
     });
     const checkFinish = flow.step(
       outputs((context) => {
@@ -177,7 +247,8 @@ export function agentTurn(profile: Profile, options?: AgentTurnOptions): Graph {
     flow.entry(respond);
     respond.then(each);
     each.when((results) => (results as unknown[]).length > 0, fold).otherwise(finalize);
-    fold.then(checkFinish);
+    fold.then(maybeCompact);
+    maybeCompact.then(checkFinish);
     checkFinish
       .when((output) => (output as { winner?: FiredToolCall }).winner !== undefined, finishByTool)
       .otherwise(respond);

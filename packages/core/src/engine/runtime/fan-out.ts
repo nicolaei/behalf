@@ -152,6 +152,11 @@ export async function runBranchNode(
       }),
     appendEvent: (payload, type) => {
       runtime.store.append(payload, { type, threadId: thread.id });
+      // Same fold as the main loop's own appendEvent (drive.ts/buildDriveContext): a
+      // "message" event also lands on this branch's own live thread.
+      if (type === "message") {
+        thread = withMessage(thread, (payload as { message: Message }).message);
+      }
     },
     modelCall: (profile) => runModelCall(profile, branchContext, runtime, setThread),
     callTool: (tool, toolInput) => callTool(tool, toolInput, thread.id, runtime, nodeIdentity),

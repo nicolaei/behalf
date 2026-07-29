@@ -627,6 +627,12 @@ export function buildDriveContext(
     },
     appendEvent: (payload, type) => {
       runtime.store.append(payload, { type, threadId: getThread().id });
+      // A "message" event is the one standalone event kind that also lands on the live
+      // thread — same fold `withMessage` applies to a `waitFor`-consumed message, just
+      // without the routing that comes with it. Every other event type stays log-only.
+      if (type === "message") {
+        setThread(withMessage(getThread(), (payload as { message: Message }).message));
+      }
     },
     modelCall(profile): Promise<ModelCallResult> {
       // modelCall only ever runs while a node is being processed by the
