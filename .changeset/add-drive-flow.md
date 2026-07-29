@@ -1,5 +1,5 @@
 ---
-"@behalf-js/core": minor
+"@behalf-js/core": patch
 ---
 
 Add `driveFlow` — a wrapper around `tickUntilSuspended` that genuinely waits (via
