@@ -18,6 +18,7 @@ import type { Thread } from "./runtime/routing.js";
 import { driveGraph } from "./runtime/drive.js";
 import { resolvedTools, startToolExecutor } from "./runtime/execution.js";
 import { idFactories, freshThreadId } from "./runtime/ids.js";
+import { tickUntilSuspended } from "./runtime/tick.js";
 
 export type { CursorState, TickOutcome } from "./runtime/tick.js";
 export { tick, tickUntilSuspended } from "./runtime/tick.js";
@@ -96,4 +97,44 @@ export async function runFlow(
 
   const result = await driveGraph(flow, runtime, thread, initialPrompt);
   return result.output;
+}
+
+/**
+ * Drives a flow to completion the same way `tickUntilSuspended` does, except it
+ * keeps going: whenever every cursor is parked (nothing left to advance right now),
+ * it waits for the store's next `receive()`/`append()` — via `runtime.store.awaitReceive()`
+ * — then tries again, instead of returning while work is merely in flight. This is what
+ * makes an async tool call (resolved independently by `startToolExecutor`, decoupled from
+ * whatever step requested it) actually get noticed once it lands: `tickUntilSuspended` alone
+ * stops the moment a `waitFor(toolCall(id))` peeks and finds nothing yet, and nothing ever
+ * calls it again on its own.
+ *
+ * Subscribes to `awaitReceive()` *before* calling `tickUntilSuspended`, not after — closes a
+ * lost-wakeup window that would otherwise exist: `awaitReceive()` is edge-triggered (a fresh
+ * promise, no memory of past wakes; see session-store.ts), so a `receive()`/`append()` that
+ * fires while `tickUntilSuspended` itself is still running would be missed by a listener only
+ * registered after that call returns — leaving `driveFlow` awaiting a later promise that only
+ * resolves on some future, unrelated event, or never. Awaiting the same already-registered
+ * promise afterward is always safe, even if it resolved before the check even started: a
+ * spurious/early wake just costs one extra loop iteration (store.awaitReceive()'s own contract:
+ * a wake makes no promise about what changed, and a caller just re-checks and, if nothing new,
+ * goes back to sleep).
+ *
+ * Deliberately a thin wrapper around `tick()`'s own one-step primitive — not a
+ * reimplementation of `driveGraph`'s separate per-node dispatch loop, which already owns this
+ * logic correctly for the seed-and-drive-once shape `runFlow` needs. `driveFlow` instead suits
+ * a long-lived session: no initial prompt required (a fresh flow parks at its own entry
+ * `waitFor` until a message arrives), and it keeps resuming across as many turns as the caller
+ * needs, in one call, until the flow's root cursor reports `done`.
+ * @public
+ */
+export async function driveFlow(flow: Graph, runtime: Runtime): Promise<unknown> {
+  for (;;) {
+    const woken = runtime.store.awaitReceive();
+    const outcome = await tickUntilSuspended(flow, runtime);
+    if (outcome.every((cursor) => cursor.status === "done")) {
+      return outcome.find((cursor) => cursor.parent === undefined)?.result;
+    }
+    await woken;
+  }
 }
