@@ -21,6 +21,8 @@ import {
   withMessage,
   thenEdges,
   StateTracker,
+  withCompaction,
+  applyThreadAction,
 } from "./routing.js";
 import { runStep, assertJoinTagging, withInputs, ExecutionScope } from "./step-runner.js";
 import {
@@ -380,6 +382,28 @@ function applySignalEvent(
   });
 }
 
+/** `replayPosition`'s handling of a committed `compaction` event: folds it into `state.thread` via `withCompaction`, the same derivation the live drive applies when `compact()` actually runs (see `commitCompaction`). Never moves the position tree — a compaction is always logged alongside its step's own `output` event, which is what advances the position; this only has to keep `thread.messages` correct for whatever runs next. */
+function applyCompactionEvent(envelope: CommittedEnvelope, state: ReplayState): void {
+  const compaction = envelope.event as Event["compaction"];
+  state.thread = withCompaction(state.thread, compaction);
+}
+
+/** `replayPosition`'s handling of a committed `invalidation` event: the same structural gap `compaction` had before Phase 1 — `commitInvalidation` never logs an `output` event for the step that invalidated, so replay has nothing else to recognize that step as already-completed. Routes straight to the event's own recorded target, applying its `threadAction`/`reason` the same way `commitInvalidation` did live, instead of falling through and leaving the position sitting on the invalidating step (which would re-run it, re-invalidating on every subsequent replay). An invalidation only ever targets a node in its own step's graph, so this reuses the leaf's own flow — no depth search needed, unlike `applyOutputEvent`. */
+function applyInvalidationEvent(
+  envelope: CommittedEnvelope,
+  path: PathLevel<ReplayFrame>[],
+  leaf: PathLevel<ReplayFrame>,
+  runtime: Runtime,
+  state: ReplayState,
+): void {
+  const { target, threadAction, reason } = envelope.event as Event["invalidation"];
+  state.thread = applyThreadAction(state.thread, threadAction, reason, runtime);
+  state.tree = rebuildFromPath(path, path.length - 1, {
+    kind: "step",
+    frame: { flow: leaf.flow, current: target, currentInput: undefined },
+  });
+}
+
 /**
  * Reconstructs `tick`'s own `StateTracker` purely from the committed log —
  * mirrors `replayPosition`'s own reconstruction of cursor position: no state
@@ -449,8 +473,18 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
       applySignalEvent(path, leaf, runtime, state);
       continue;
     }
-    // toolCall/toolResult/compaction/invalidation/error don't move the main
-    // position on their own — out of scope for this slice's replay.
+
+    if (envelope.type === "compaction") {
+      applyCompactionEvent(envelope, state);
+      continue;
+    }
+
+    if (envelope.type === "invalidation") {
+      applyInvalidationEvent(envelope, path, leaf, runtime, state);
+      continue;
+    }
+    // toolCall/toolResult/error don't move the main position on their own
+    // — out of scope for this slice's replay.
   }
 
   const finalPath = cursorPath(flow, state.tree);
