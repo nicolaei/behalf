@@ -15,6 +15,23 @@ export interface ModelCallResult {
   toolCalls: { correlationId: string; name: string }[]; // requested this turn, in reply order
 }
 
+/**
+ * Thrown by `context.modelCall` when a user message with `intent: "abort"`
+ * preempts the in-flight call. What streamed so far is already committed to
+ * the log, marked aborted (see `Stream.abort()`) — this is purely the signal
+ * that the step itself didn't get a reply. Named so a flow author (e.g.
+ * `agentTurn`'s own `respond` step) can catch it specifically and end the
+ * turn gracefully, instead of it falling through runStep's generic
+ * catch-all and failing the whole run as an ordinary, non-retryable error.
+ * @public
+ */
+export class ModelCallAbortedError extends Error {
+  constructor() {
+    super("model call aborted");
+    this.name = "ModelCallAbortedError";
+  }
+}
+
 /** A structured error a step can return instead of throwing. @public */
 export interface StepError {
   type: string; // category: "provider" | "tool" | "timeout" | "validation" | …

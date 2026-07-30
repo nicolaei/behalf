@@ -30,5 +30,6 @@ export type {
   WaitForResult,
 } from "./step.js";
 export { outputs, join } from "./step.js";
+export { ModelCallAbortedError } from "./step.js";
 export { agentTurn } from "./agent-turn.js";
 export type { FinishOn, AgentTurnOptions, AgentTurnCompactOptions, AgentTurnResult } from "./agent-turn.js";

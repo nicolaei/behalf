@@ -13,6 +13,7 @@ import type { NodeId } from "../../flow/graph.js";
 import type { ThreadId } from "../../flow/thread.js";
 import type { Profile } from "../../flow/profile.js";
 import type { StepContext, ModelCallResult } from "../../flow/step.js";
+import { ModelCallAbortedError } from "../../flow/step.js";
 import type { Tool, ToolContext, ToolHandler } from "../../flow/tool.js";
 import type { SessionStore } from "../session-store.js";
 import type { Runtime } from "../runtime.js";
@@ -458,7 +459,7 @@ export async function runModelCall(
 
   if (!outcome || outcome.kind === "abort") {
     stream.abort();
-    throw new Error("model call aborted");
+    throw new ModelCallAbortedError();
   }
 
   const { message: reply } = outcome;

@@ -50,6 +50,12 @@ export interface Graph {
   readonly nodes: ReadonlyMap<NodeId, NodeKind>;
   readonly edges: readonly EdgeDefinition[];
   readonly entry: NodeId;
+  /** This graph's declared abort target, if any (see `Flow.onAbort`). Absent means an
+   * abort while something inside this graph is running has nowhere local to route —
+   * the engine looks to the nearest enclosing `use()`-embedding graph's own `onAbort`
+   * next, falling all the way back to today's behavior (fail the run) if nobody in
+   * the chain declared one. @public */
+  readonly onAbort?: NodeId;
 }
 
 /** Fluent builder handle returned by every `Flow` node factory. @public */
@@ -72,6 +78,12 @@ export interface Flow {
     options?: NodeOptions,
   ): Handle; // dynamic, runtime-sized fan-out
   entry(node: Handle): void;
+  /** Declares where this graph goes if something inside it is aborted (a user message
+   * with `intent: "abort"` preempting an in-flight `context.modelCall`). Optional —
+   * a graph that never calls this keeps today's behavior (an abort fails the whole
+   * run). Not per-node: what abort means is a property of the graph as a whole, the
+   * same way `entry` is. @public */
+  onAbort(target: Handle): void;
   readonly finish: Handle; // route a value in to end the flow; that value is the result
 }
 
@@ -117,6 +129,7 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
   const nodes = new Map<NodeId, NodeKind>();
   const edges: EdgeDefinition[] = [];
   let entry: NodeId | undefined;
+  let onAbort: NodeId | undefined;
 
   function makeHandle(id: NodeId): Handle {
     const handle = {
@@ -190,6 +203,9 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
     entry(node) {
       entry = node.id;
     },
+    onAbort(target) {
+      onAbort = target.id;
+    },
     finish: finishHandle,
   };
 
@@ -197,5 +213,5 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
 
   if (!entry) throw new Error(`graph "${name}" has no entry node — call flow.entry(...)`);
 
-  return { name, nodes, edges, entry };
+  return { name, nodes, edges, entry, ...(onAbort ? { onAbort } : {}) };
 }
