@@ -11,7 +11,7 @@ import type { Distribution, RegressionPolicy, BaselineStore } from "../regressio
 import { checkRegression } from "../regression.js";
 import { scoreRuns } from "./score-runs.js";
 import { gate } from "./gate.js";
-import { runRow } from "./run-row.js";
+import { runRows } from "./run-row.js";
 
 // Not barrel-exported from eval/index.ts — internal to the harness. A test
 // author gets these shapes through scenario()'s return/argument inference,
@@ -67,11 +67,7 @@ export async function runScenario<World, Output = unknown>(
   const globalMinimumPassRate =
     typeof spec.runs === "object" ? spec.runs.minimumPassRate : undefined;
 
-  const runs = await Promise.all(
-    rows.flatMap((row) =>
-      Array.from({ length: count }, () => runRow<World, Output>(spec.of.profile, row, "scenario")),
-    ),
-  );
+  const runs = await runRows<World, Output>(spec.of.profile, rows, count, "scenario");
 
   const priorScorers = spec.baseline?.store.read(spec.baseline.test);
 

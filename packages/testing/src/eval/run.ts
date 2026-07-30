@@ -4,9 +4,6 @@
 // status snapshots, not a folded execution). Built fresh here, using the
 // unmerged `testing-framework` branch's `src/testing/graph/run.ts` as a
 // design reference only.
-//
-// Phase 0: type surface only. Every function body throws "not implemented".
-
 import type { Envelope, AssistantMessage, Message, ThreadId, NodeId, Usage } from "@behalf-js/core";
 
 /** One tool call+result pair, matched by correlationId during folding (the id itself is discarded once paired — nothing downstream needs it). @public */

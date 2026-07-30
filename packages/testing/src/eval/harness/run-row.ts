@@ -1,5 +1,7 @@
-// Internal helper shared by scenario.ts and explore.ts — runs one Example
-// row once against a resolved Profile, folding the result into a Run.
+// Internal helpers shared by scenario.ts and explore.ts — runRow() runs one
+// Example row once against a resolved Profile, folding the result into a
+// Run; runRows() repeats that `count` times across every row in `rows`, the
+// "rows x runs" shape both harnesses drive before scoring diverges.
 // Not exported from eval/index.ts — an implementation detail.
 
 import { runtime, runFlow } from "@behalf-js/core";
@@ -33,4 +35,18 @@ export async function runRow<World, Output>(
   await runFlow(agentGraph(profile), row.input, ready);
   const latency = Date.now() - started;
   return foldRun<World, Output>(ready.store.events(), world, latency);
+}
+
+/** Runs every row in `rows` `count` times against `profile`, in parallel. */
+export function runRows<World, Output>(
+  profile: Profile,
+  rows: Example<World>[],
+  count: number,
+  callerName: string,
+): Promise<Run<World, Output>[]> {
+  return Promise.all(
+    rows.flatMap((row) =>
+      Array.from({ length: count }, () => runRow<World, Output>(profile, row, callerName)),
+    ),
+  );
 }

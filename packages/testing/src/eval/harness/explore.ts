@@ -14,7 +14,7 @@ import { mean } from "./aggregate.js";
 import { scoreRuns } from "./score-runs.js";
 import type { Metrics, Rank } from "./rank.js";
 import { byScore } from "./rank.js";
-import { runRow } from "./run-row.js";
+import { runRows } from "./run-row.js";
 
 // Not barrel-exported from eval/index.ts — internal to the harness. A test
 // author gets these shapes through explore()'s return/argument inference,
@@ -60,13 +60,7 @@ export async function runExplore<World, Output>(
   const variants: ExploreVariantResult[] = await Promise.all(
     spec.variants.map(async (variant) => {
       const subject = spec.of.with(variant);
-      const runs = await Promise.all(
-        spec.given.flatMap((row) =>
-          Array.from({ length: count }, () =>
-            runRow<World, Output>(subject.profile, row, "explore"),
-          ),
-        ),
-      );
+      const runs = await runRows<World, Output>(subject.profile, spec.given, count, "explore");
 
       const scorers = await Promise.all(
         spec.scorers.map(async (scorer) => {
