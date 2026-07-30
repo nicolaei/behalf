@@ -189,7 +189,7 @@ entries, one per turn.
   a canned result
 - A tool call always costs a second script entry: `agentTurn` loops back to the model once the
   result folds in
-- Next: run a persona's fake-backed flow across a whole table of cases, in
+- Next: score and compare a persona's outputs with the real eval API, in
   [Evaluating personas](./evaluating-personas.md)
 
 ---

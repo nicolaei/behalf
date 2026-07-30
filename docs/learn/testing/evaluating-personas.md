@@ -1,145 +1,195 @@
 # Evaluating personas
 
-There's no built-in eval framework: this page is a **pattern**, not an API: scoring a persona's
-outputs across a table of cases using ordinary vitest plus the testing tools from the previous two
-pages.
+`@behalf-js/testing/eval` scores a persona's outputs across a table of cases: `example()` builds the
+table, a scorer grades each run, and `scenario`/`explore` are the two ways to act on the result.
 
 ## You will learn
 
-- How to define a table of cases (input, expected property, not necessarily exact output)
-- How to run a persona over each case with `runFlow` or `stepUntilBlocked`
-- How to score an output: exact match, a rubric function, or a grading model call
-- How to recognize when this pattern's lack of built-in aggregation calls for your own reporting
+- How to build a case table with `example()`
+- How to score a run with a built-in scorer, including `llmJudge` with an injected `Judge`
+- How to gate CI on a persona's behaviour with `scenario()`
+- How to compare variants of a persona with `explore()` and `grid()`, ranked several ways from one
+  execution pass
+- What this library still leaves for you to build
 
 ## Defining a case table
 
-A case is a plain object: an input to send the persona, and a check for what a correct reply looks
-like.
-There's no `Case` type exported from any `@behalf-js/*` package: an array and an object literal are
-already enough.
+`example(name, { world, fixtures, input })` builds one row of a dataset. `world()` returns fresh
+mutable state for that row; `fixtures(world, profile)` returns the fakes (a `ModelPort`, tool
+bindings) that row runs against, the same [scripted port](./setting-up-fakes.md#scripting-responses)
+and `provide` bindings the previous two pages already use; `input` is the message that starts the
+run. `triage` below is the persona under test: a one-step agent whose system prompt asks for exactly
+`"RESOLVE"` or `"ESCALATE"`.
+
+```ts source=docs/examples/evaluating-personas/matrix.test.ts#agent
+const basicProfile: Profile = {
+  model: { identifier: "claude-haiku", provider: "test", contextWindow: 100_000, reasoning: [] },
+  system:
+    'Read this support ticket and reply with exactly one word: "RESOLVE" if you can answer it ' +
+    'directly, "ESCALATE" if it needs a person.',
+  tools: [],
+};
+
+const triage = agent<World>("support-triage", basicProfile);
+```
 
 ```ts source=docs/examples/evaluating-personas/matrix.test.ts#cases
-interface Case {
-  input: string;
-  modelReply: string; // what the persona's underlying model says this turn
-  check: (result: unknown) => boolean;
-}
-
-const cases: Case[] = [
-  {
-    input: "How do I reset my password?",
-    modelReply: "RESOLVE",
-    check: (result) => (result as { text: string }).text === "RESOLVE",
-  },
-  {
-    input: "My account was hacked and I need this fixed now.",
-    modelReply: "ESCALATE",
-    check: (result) => (result as { text: string }).text === "ESCALATE",
-  },
-  {
-    input: "What are your business hours?",
-    modelReply: "RESOLVE",
-    check: (result) => (result as { text: string }).text === "RESOLVE",
-  },
+const cases = [
+  example<World>("password-reset", {
+    world: () => ({ ticket: "How do I reset my password?" }),
+    fixtures: () => ({ models: scriptedPort([[{ type: "text", text: "RESOLVE" }]]), bindings: [] }),
+    input: userText("How do I reset my password?"),
+  }),
+  example<World>("account-hacked", {
+    world: () => ({ ticket: "My account was hacked and I need this fixed now." }),
+    fixtures: () => ({ models: scriptedPort([[{ type: "text", text: "ESCALATE" }]]), bindings: [] }),
+    input: userText("My account was hacked and I need this fixed now."),
+  }),
+  example<World>("business-hours", {
+    world: () => ({ ticket: "What are your business hours?" }),
+    fixtures: () => ({ models: scriptedPort([[{ type: "text", text: "RESOLVE" }]]), bindings: [] }),
+    input: userText("What are your business hours?"),
+  }),
 ];
 ```
 
-`modelReply` here stands in for whatever a real model would say for that ticket: this table drives a
-[scripted port](./setting-up-fakes.md#scripting-responses), one queued reply per case, so the table
-stays deterministic without needing a live model for every case.
+`agent(name, profile)` wraps a `Profile` as the thing under eval: `scenario` runs it as-is, and
+`explore` re-profiles it per variant with `.with(partial)`, covered below. `fixtures` receives the
+resolved `Profile`, not just `world`, so a row can pick its fake model by
+`profile.model.identifier` when the same case runs against several variants.
 
-## Running a persona over each case
+## Scoring a run
 
-`it.each(cases)` turns the table into one vitest test per case, each with its own runtime and its
-own scripted reply, so a failure names exactly which case broke. `triage` below is the persona under
-test: a one-step flow whose system prompt asks for exactly `"RESOLVE"` or `"ESCALATE"`.
+Every scorer reads a `Run`, the folded record of one execution: its output, its world, every tool
+call, and its last reply per thread. A scorer maps a `Run` to a number in `[0, 1]` and carries its
+own pass bar (`minimumScore`, default `1`).
 
-```ts source=docs/examples/evaluating-personas/matrix.test.ts#run-each
-describe("triage persona", () => {
-  it.each(cases)("classifies: $input", async ({ input, modelReply, check }) => {
-    const ready = await runtime({
-      models: () => scriptedPort([[{ type: "text", text: modelReply }]]),
-      bindings: [],
-      store: memoryStore(),
-    });
+The built-in scorers cover the exact-match cases: `toolCalled(name)` and `toolCalledWith(name, ok)`
+check `run.tools`; `worldMatches(ok)` and `outputMatches(ok)` run a predicate against `run.world` or
+`run.output`; `saidOn(thread, pattern)` matches the last reply's text against a string or `RegExp`.
+All five return `0` or `1`, so grading them by eye ("did it happen, yes or no") is always honest.
 
-    const result = await runFlow(triage, userText(input), ready);
+```ts source=docs/examples/evaluating-personas/matrix.test.ts#scorers
+const scorers = [
+  outputMatches((output) => typeof output === "object" && output !== null),
+  llmJudge("polite and on-topic", { minimumScore: 0.7 }, fakeJudge),
+];
+```
 
-    expect(check(result)).toBe(true);
-  });
+`llmJudge(rubric, bars, judge?)` is the one scorer that isn't boolean: an injected `Judge` rates the
+last reply against `rubric`, 0 to 1. `bars` is mandatory here, with no default, because a judged
+score is continuous: there's no honest universal pass bar, so you always state your own
+`minimumScore`. Without a `judge` argument, `llmJudge` throws instead of silently calling a real
+model, which is what keeps a test deterministic and free to run in CI without a live key.
+
+```ts source=docs/examples/evaluating-personas/matrix.test.ts#judge
+const fakeJudge: Judge = {
+  rate: () => Promise.resolve(0.9),
+};
+```
+
+> [!TIP] `scoreBy(name, fn)` is the escape hatch when none of the built-ins fit: any
+> `(run) => number` becomes a scorer, still folded into the same `Distribution` as the others.
+
+## Gating CI with scenario
+
+`scenario(name, spec)` registers a vitest test that fails when a persona's behaviour doesn't hold:
+one `Subject`, a case table, a run count, and scorers with pass bars. Each row runs `spec.runs`
+times, every run folds into a `Run`, and each scorer's scores across all of them fold into a
+`Distribution` (mean, median, stddev, min, max, pass rate). `scenario` passes only when every scorer
+clears its own bar.
+
+```ts source=docs/examples/evaluating-personas/matrix.test.ts#scenario
+scenario("support-triage classifies every ticket", {
+  of: triage,
+  given: cases,
+  runs: 3,
+  scorers,
 });
 ```
 
-A flow with a wait point can use `stepUntilBlocked` here instead of `runFlow`, the same way
-[Testing your flows](./testing-your-flows.md) does, if a case needs to assert on a mid-flight state
-rather than the final result.
+A `scenario` can also check regression against a stored baseline (`regression: variance(k)` or
+`fixed(epsilon)`, `baseline: { store, test }`): today's distribution compares against the last time
+this scorer passed, and a scorer that regresses fails the gate even if it still clears its own bar.
+The baseline is ratcheted per scorer: one that fails or regresses keeps its old baseline, so a bad
+run never becomes the new floor. This is a deeper feature than a first eval needs; reach for it once
+a scenario's numbers matter enough that a silent decline would be worth catching.
 
-## Scoring
+## Comparing variants with explore and grid
 
-The cases above score by exact match: `check` compares the persona's output against one expected
-string, pass or fail.
-That's the simplest scoring a table like this can do, and the most honest one to actually run: it
-needs no extra infrastructure, and a failure is unambiguous.
+`scenario` answers "did this persona still behave." `explore(name, spec)` answers "which variant is
+best," and never fails CI: it always registers a passing `it("ranks", ...)`, because a comparison
+isn't a regression test.
 
-```ts source=docs/examples/evaluating-personas/matrix.test.ts#score
-describe("scoring the whole table", () => {
-  it("scores every case by exact match, one point each", async () => {
-    let passed = 0;
+`explore` takes the same case table and scorers as `scenario`, plus a list of `variants`: partial
+`Profile`s applied to the base agent with `.with()`. Writing that list by hand gets tedious past two
+axes, so `grid(axes)` builds the cross-product for you: `{ model: [a, b], system: [x, y] }` becomes
+four variants, not four lines you typed out.
 
-    for (const testCase of cases) {
-      const ready = await runtime({
-        models: () => scriptedPort([[{ type: "text", text: testCase.modelReply }]]),
-        bindings: [],
-        store: memoryStore(),
-      });
-      const result = await runFlow(triage, userText(testCase.input), ready);
-      if (testCase.check(result)) passed += 1;
-    }
-
-    expect(passed).toBe(cases.length);
-  });
+```ts source=docs/examples/evaluating-personas/matrix.test.ts#explore
+explore("support-triage: model and system prompt compared", {
+  of: triage,
+  variants: grid({
+    model: [
+      { identifier: "claude-haiku", provider: "test", contextWindow: 100_000, reasoning: [] },
+      { identifier: "claude-sonnet", provider: "test", contextWindow: 100_000, reasoning: [] },
+    ],
+    system: [basicProfile.system, "Reply with RESOLVE or ESCALATE, and nothing else."],
+  }), // 2 x 2 = 4 variants
+  given: cases, // 3 cases
+  runs: 3, // 3 runs per (variant x case)
+  scorers,
+  rankBy: {
+    quality: byScore,
+    speed: byTimeToComplete,
+    cost: byTokens,
+  },
 });
 ```
 
-Two other scoring approaches are worth knowing, even without a full example each here:
+This runs 4 variants × 3 cases × 3 runs, 36 executions total, once. `rankBy` takes either one `Rank`
+function or, as above, a named map of them: `byScore` (highest mean score first), `byTimeToComplete`
+(fastest first), `byTokens` (fewest tokens first), and `byCost` (free or local first, then cheaper,
+unknown price last) all ship as part of the library. A named map doesn't run anything twice: every
+variant's runs and metrics are computed exactly once, and each entry in `rankBy` just sorts that same
+computed array a different way. `result.rankings.quality[0]` is the best-scoring variant;
+`result.rankings.speed[0]` is the fastest; both come from the same 36 executions, not a second pass.
 
-- **A rubric function**: instead of one exact string, `check` scores a reply against several
-  weighted criteria (did it mention the account, was the tone right) and returns a number instead of
-  a boolean.
-  This earns its place once "correct" genuinely isn't one fixed answer, at the cost of a scoring
-  function that itself needs to be trusted and maintained.
-- **A grading model call**: a second model reads the persona's output and judges it.
-  This covers cases no rubric can express in code, free-form quality, but trades determinism for
-  coverage: the grader can disagree with itself between runs, and now needs its own scripted port in
-  a test that grades the grader.
+You might expect asking three questions ("best," "fastest," "cheapest") to cost three explore runs.
+It doesn't: `runExplore` folds every variant's runs into one `ExploreVariantResult` array before it
+ever looks at `rankBy`, then sorts that array once per name. Comparing variants five different ways
+is one execution pass regardless of how many rankers you ask for.
 
-## Limits of this pattern
+## What's still not provided
 
-This is a table and a loop, not a framework: nothing here aggregates results across cases into a
-score, or reports which categories of ticket are weakest.
-A table of ten cases is easy to eyeball from vitest's own pass/fail output; a table of a hundred
-needs its own summary, and this pattern doesn't provide one.
-A reader who needs that would add their own reporting on top: collecting each case's pass/fail into
-an array and computing a percentage, or writing results to a file for a separate dashboard to read.
-That's deliberately left to the reader, not something the library should grow, since the right shape
-for a report depends entirely on what's being tracked.
+`scenario` and `explore` are the real API: this page teaches it, not a workaround for its absence.
+What they don't do is report: `explore` returns a sorted array, and that's the whole output. Nothing
+here writes a persisted report, renders a dashboard, or tracks a history of runs beyond one
+`BaselineStore` per scorer. A reader of ten variants can read `result.rankings` directly; a reader
+who wants a chart, a spreadsheet, or a trend line across weeks of runs still builds that themselves
+on top of the arrays these functions return.
 
 ## Recap
 
-- A case is a plain `{ input, check }` object; an array of them is already a case table, no library
-  type required
-- `it.each(cases)` runs a persona over every case, one vitest test per case
-- Exact match is the simplest, most honest scoring; a rubric function or a grading model call cover
-  cases exact match can't, at the cost of determinism
-- This pattern has no built-in aggregation or reporting: add it yourself, shaped to what you're
-  actually tracking
+- `example(name, { world, fixtures, input })` builds one dataset row; an array of them is a case
+  table
+- `toolCalled`, `toolCalledWith`, `worldMatches`, `outputMatches`, and `saidOn` score by exact match;
+  `llmJudge(rubric, bars, judge)` scores continuously with an injected `Judge`, and `bars` has no
+  default
+- `scenario(name, spec)` gates CI: it fails when any scorer misses its bar across the case table,
+  and can optionally check regression against a stored baseline
+- `explore(name, spec)` never fails CI: it ranks `grid()`-built variants by one or several named
+  `Rank` functions, computed once and sorted per name
+- Neither function reports beyond the arrays they return: a dashboard or a persisted history is
+  still yours to build
 - Next: stream a flow's progress to a client while it runs, in
   [Streaming progress](../streaming-and-sessions/streaming-progress.md)
 
 ---
 
-**Reference:** none directly, this is a pattern built from § ModelPort, § runtime/runFlow, and
-behalf/testing, not a documented API surface. **Examples:**
-`docs/examples/evaluating-personas/matrix.test.ts`, regions: `cases`, `run-each`, `score`.
-**Section:** [Testing](./README.md) **Prev / Next:** [Setting up fakes](./setting-up-fakes.md) /
+**Reference:** none directly; see `@behalf-js/testing/eval`'s own exports (`agent`, `example`,
+scorers, `scenario`, `explore`, `grid`, `Rank` functions). **Examples:**
+`docs/examples/evaluating-personas/matrix.test.ts`, regions: `agent`, `cases`, `judge`, `scorers`,
+`scenario`, `explore`. **Section:** [Testing](./README.md) **Prev / Next:**
+[Setting up fakes](./setting-up-fakes.md) /
 [Streaming progress](../streaming-and-sessions/streaming-progress.md)

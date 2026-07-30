@@ -7,7 +7,8 @@ dependencies, and scoring a persona across cases.
   `stepUntil`, `atNode`.
 - [Setting up fakes](./setting-up-fakes.md) — `fakePort`, a fake `ModelPort`, and other test
   doubles.
-- [Evaluating personas](./evaluating-personas.md) — a vitest-matrix pattern for scoring a persona's
+- [Evaluating personas](./evaluating-personas.md) — `scenario`/`explore`: scoring, gating, and
+  comparing personas with `@behalf-js/testing/eval`.
   outputs across cases.
 
 **Up:** [Learn behalf](../README.md)

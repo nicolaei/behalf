@@ -53,7 +53,8 @@ For exact signatures, see [`../reference.md`](../reference.md).
   `stepUntilBlocked`, `stepUntil`, `atNode`.
 - [Setting up fakes](./testing/setting-up-fakes.md) — `fakePort`, a fake `ModelPort`, and other test
   doubles.
-- [Evaluating personas](./testing/evaluating-personas.md) — a vitest-matrix pattern for scoring a
+- [Evaluating personas](./testing/evaluating-personas.md) — `scenario`/`explore`: scoring, gating,
+  and comparing personas with `@behalf-js/testing/eval`.
   persona's outputs across cases.
 
 ## [Streaming and sessions](./streaming-and-sessions/README.md)
