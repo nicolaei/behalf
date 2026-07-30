@@ -427,7 +427,12 @@ function applyInvalidationEvent(
 ): void {
   const { target, threadAction, reason, cause } = envelope.event as Event["invalidation"];
   state.thread = applyThreadAction(state.thread, threadAction, reason, runtime);
-  if (cause === "abort") {
+
+  // Walks path innermost-first for the first frame declaring its own
+  // flow.onAbort, landing there — the same decision routeAbort made live.
+  // Returns whether one was found; doesn't throw, so a caller can fall
+  // back to a different strategy first.
+  function routeViaOnAbort(): boolean {
     for (let depth = path.length - 1; depth >= 0; depth -= 1) {
       const owner = path[depth];
       const onAbortTarget = owner?.flow.onAbort;
@@ -436,9 +441,16 @@ function applyInvalidationEvent(
         kind: "step",
         frame: { flow: owner.flow, current: onAbortTarget, currentInput: undefined },
       });
-      return;
+      return true;
     }
-    unreachable("replayPosition: aborted invalidation but no frame in path declares onAbort");
+    return false;
+  }
+
+  if (cause === "abort") {
+    if (!routeViaOnAbort()) {
+      unreachable("replayPosition: aborted invalidation but no frame in path declares onAbort");
+    }
+    return;
   }
 
   let depth = path.length - 1;
@@ -446,11 +458,25 @@ function applyInvalidationEvent(
     if (path[depth]?.flow.nodes.has(target)) break;
   }
   const owner = depth >= 0 ? path[depth] : undefined;
-  if (!owner) unreachable("replayPosition: invalidation target belongs to no frame");
-  state.tree = rebuildFromPath(path, depth, {
-    kind: "step",
-    frame: { flow: owner.flow, current: target, currentInput: undefined },
-  });
+  if (owner) {
+    state.tree = rebuildFromPath(path, depth, {
+      kind: "step",
+      frame: { flow: owner.flow, current: target, currentInput: undefined },
+    });
+    return;
+  }
+
+  // No frame owns the logged target at all — an ordinary invalidate's
+  // target always belongs to the invalidating step's own graph by
+  // construction, so a total miss here isn't really an ordinary invalidate
+  // gone wrong; it's almost certainly a graph-level abort logged before
+  // `cause` existed (or a store written by a version of this fix's own
+  // pre-release). Retry via the same onAbort walk before giving up, so
+  // sessions with old, untagged abort data already on disk resume too,
+  // not just ones aborted after this landed.
+  if (!routeViaOnAbort()) {
+    unreachable("replayPosition: invalidation target belongs to no frame");
+  }
 }
 
 /**

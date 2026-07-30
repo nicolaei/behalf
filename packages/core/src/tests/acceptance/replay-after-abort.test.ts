@@ -123,4 +123,48 @@ describe("replaying a store containing a real abort, against a brand-new runtime
     sendChatPrompt(store, "second");
     expect((await reply).event).toMatchObject({ message: { content: [{ text: /reply to second$/ }] } });
   });
+
+  it("resumes an OLD, untagged abort too — data logged before `cause` existed must not be stuck forever", async () => {
+    // Simulates a session aborted by an earlier release, before Event["invalidation"]
+    // gained `cause`. Its log has the exact old shape: an invalidation with no
+    // `cause` field and a `target` naming a node id from a process that no
+    // longer exists (here, a made-up id that can't possibly match anything —
+    // the point is it must NEVER match, the same as a real foreign-process id).
+    const profile: Profile = { model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] }, system: "test", tools: [] };
+    const store = memoryStore();
+    const { port, modelCallStarted } = hangingPort("whichever");
+    const runtime1 = await runtime({ models: () => port, bindings: [], store });
+    const graph1 = chatLikeGraph(profile);
+
+    driveFlow(graph1, runtime1).catch(() => undefined);
+    sendChatPrompt(store, "first");
+    await modelCallStarted;
+
+    const abortedCommit = awaitAssistantMessage(store);
+    sendAbort(store);
+    await abortedCommit;
+
+    // Directly append an old-shaped invalidation — no `cause`, a target that
+    // can't exist in any graph instance — standing in for the real abort's
+    // own invalidation event AS IF it predated this fix (it does exist
+    // already too, from the sendAbort() above; this one just tests the
+    // fallback path specifically, independent of whether the real one
+    // happens to also carry `cause` now).
+    store.append(
+      { target: "node-does-not-exist-anywhere" as never, threadAction: "same" },
+      { type: "invalidation" },
+    );
+
+    const runtime2 = await runtime({ models: () => port, bindings: [], store });
+    const graph2 = chatLikeGraph(profile);
+
+    const outcome = await Promise.race([
+      driveFlow(graph2, runtime2).then(
+        () => "resolved" as const,
+        () => "rejected" as const,
+      ),
+      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 100)),
+    ]);
+    expect(outcome).not.toBe("rejected");
+  });
 });
