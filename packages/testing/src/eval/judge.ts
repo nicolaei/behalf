@@ -6,10 +6,9 @@
 // boolean, so there's no honest universal pass bar. The caller always states
 // their own `minimumScore` (and optionally `minimumPassRate`) for their own
 // rubric.
-//
-// Phase 0: type surface only. Every function body throws "not implemented".
 
 import type { AssistantMessage } from "@behalf-js/core";
+import { scorer } from "./scorers.js";
 import type { Bars, Scorer } from "./scorers.js";
 
 /** The dependency llmJudge calls out to — injectable so tests never make a real model call. @public */
@@ -18,6 +17,11 @@ export interface Judge {
 }
 
 /** An LLM rates `run.lastReply()` against `rubric`, 0..1. `bars` is required — a judged score is continuous, so there's no honest default pass bar. No `judge` injected and none configured throws. @public */
-export function llmJudge(_rubric: string, _bars: Bars, _judge?: Judge): Scorer {
-  throw new Error("not implemented");
+export function llmJudge(rubric: string, bars: Bars, judge?: Judge): Scorer {
+  return scorer("llmJudge", bars, async (run) => {
+    if (!judge) {
+      throw new Error("llmJudge: no Judge configured — pass a judge argument or configure a default.");
+    }
+    return judge.rate(rubric, run.lastReply());
+  });
 }
