@@ -1,19 +1,36 @@
 // Internal helper shared by scenario.ts and explore.ts — runs one Example
 // row once against a resolved Profile, folding the result into a Run.
-//
 // Not exported from eval/index.ts — an implementation detail.
-//
-// Phase 0: type surface only. Every function body throws "not implemented".
 
+import { runtime, runFlow } from "@behalf-js/core";
 import type { Profile } from "@behalf-js/core";
+import { memoryStore } from "@behalf-js/stores";
 import type { Example } from "../fixtures.js";
+import { agentGraph } from "./agent-graph.js";
+import { foldRun } from "../run.js";
 import type { Run } from "../run.js";
 
 /** Runs `row` once against `profile`: fresh world, fresh fixtures, fresh runtime and store, so every call is fully independent of every other. */
 export async function runRow<World, Output>(
-  _profile: Profile,
-  _row: Example<World>,
-  _callerName: string,
+  profile: Profile,
+  row: Example<World>,
+  callerName: string,
 ): Promise<Run<World, Output>> {
-  throw new Error("not implemented");
+  const started = Date.now();
+  const world = row.world();
+  const fixtures = row.fixtures(world, profile);
+  if (fixtures.models === undefined) {
+    throw new Error(
+      `${callerName}: no model fixture configured — fixtures(world, profile) must return a \`models\` port for a graph test`,
+    );
+  }
+  const models = fixtures.models;
+  const ready = await runtime({
+    models: () => models,
+    bindings: fixtures.bindings,
+    store: memoryStore(),
+  });
+  await runFlow(agentGraph(profile), row.input, ready);
+  const latency = Date.now() - started;
+  return foldRun<World, Output>(ready.store.events(), world, latency);
 }
