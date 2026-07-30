@@ -1,6 +1,6 @@
 {
   "name": "@behalf-js/testing",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "Test-author vocabulary for behalf flows — stepOnce/stepUntilBlocked/stepUntil, and a fake ModelPort.",
   "type": "module",
   "main": "./dist/index.js",
@@ -27,7 +27,7 @@
     "directory": "packages/testing"
   },
   "dependencies": {
-    "@behalf-js/core": "^0.0.9",
-    "@behalf-js/stores": "^0.0.9"
+    "@behalf-js/core": "^0.0.10",
+    "@behalf-js/stores": "^0.0.10"
   }
 }
