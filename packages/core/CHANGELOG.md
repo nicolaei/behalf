@@ -1,5 +1,28 @@
 # @behalf-js/core
 
+## 0.0.4
+
+### Patch Changes
+
+- 0c2cb7c: `agentTurn`'s conditional compaction policy is now overridable via a new
+  `AgentTurnOptions.compact` (`AgentTurnCompactOptions`): `tokenBudget`, `keepLast`, and `summarize`
+  were previously hardcoded module-level constants with no way for a caller to override any of them.
+  `summarize` in particular was only ever meant to be a temporary stand-in default — a naive
+  placeholder that states how many messages were folded away, not a real digest — the intent is for
+  implementors to supply their own real summarizer (which can now be async, since a real one will
+  likely call a model).
+  All three fall back to their existing defaults when omitted, so existing callers see no behavior
+  change.
+- 84e6e6e: `executeToolCall` now always commits a `toolResult` event, even when the bound handler's
+  promise rejects (folded in as `{ output: { error }, isError: true }`).
+  Previously a rejecting handler's failure vanished with nowhere to surface: the only thing that
+  resolves a pending `waitFor(toolCall(id))` is a matching `toolResult` event, so a handler that
+  threw without producing one could stall an entire turn — and the whole session behind it —
+  forever.
+  A missing tool binding (no handler registered for that name in this runtime) is still left
+  uncaught on purpose; that models a call meant to be resolved by another process sharing the same
+  log, not a handler failure.
+
 ## 0.0.3
 
 ### Patch Changes
