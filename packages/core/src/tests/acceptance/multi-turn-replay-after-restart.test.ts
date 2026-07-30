@@ -38,8 +38,9 @@ function chatLikeGraph(profile: Profile) {
  * replay-after-abort.test.ts's hangingPort does — memoryStore()/driveFlow()
  * have no "stop" API, so an original process's own background loop is
  * still polling the same store throughout a test simulating its
- * replacement; without labels, a pass could just mean the stale loop
- * answered, not that the fresh one actually resumed correctly. */
+ * replacement. The labels make a wrong answerer visible in a failure
+ * message; they can't make the second test assert on one (see its own
+ * comment on the consume race). */
 function repliesNormallyPort(label: string): ModelPort {
   return {
     model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] },
@@ -113,8 +114,15 @@ describe("a multi-turn conversation, replayed fresh after a simulated restart", 
 
     const reply = awaitAssistantMessage(store);
     sendChatPrompt(store, "third");
-    // Specifically "fresh: reply to third" — proves graph2 (the reattached
-    // instance) is what answered, not graph1's still-running stale loop.
-    expect((await reply).event).toMatchObject({ message: { content: [{ text: "fresh: reply to third" }] } });
+    // Label-agnostic on purpose, same as replay-after-abort.test.ts's own
+    // second case: memoryStore's inbox consume() is destructive and the
+    // stale loop (subscribed first, re-registered first on every wake)
+    // deterministically wins the race to consume "third" — so this can't
+    // attribute the reply to graph2 specifically, only that reattaching
+    // doesn't leave the session stuck with nothing able to answer at all.
+    // Attributing correct resumption to the fresh instance is the first
+    // test's job: a phantom call is exactly what a stuck fresh loop
+    // produced before the fix, and it directly proves none fires.
+    expect((await reply).event).toMatchObject({ message: { content: [{ text: /reply to third$/ }] } });
   });
 });

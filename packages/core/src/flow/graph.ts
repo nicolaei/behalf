@@ -87,33 +87,85 @@ export interface Flow {
   readonly finish: Handle; // route a value in to end the flow; that value is the result
 }
 
-// Node ids stay unique across every graph in the process — not just within
-// one `defineGraph()` call — so this counter is NOT reset or re-scoped per
-// call, unlike runtime.ts's per-Runtime idFactory (see runtime.ts's
-// freshCorrelationId/freshThreadId). engine/runtime.ts's `replayPosition`
-// decides which frame owns a logged node id by testing id membership across
-// every frame's own graph — an invariant (see its own docstring) that only
-// holds if two independently defined graphs — commonly an outer flow and a
-// `use()`d subgraph, each built by its own separate `defineGraph()` call —
-// never hand out the same id. Scoping the counter per `defineGraph()`
-// call, as runtime.ts's ids are now scoped per `Runtime`, would silently
-// break that invariant instead of just changing the id format — a real
-// behavior change, not a pure restructuring, so it's out of scope here.
+// Node ids are deterministic across separate builds of the same graph shape,
+// AND unique across every nesting level within one composed graph tree. Both
+// properties matter, to different consumers:
 //
-// What *is* in scope: not leaving the counter as a bare, directly-mutable
-// module `let` — encapsulated behind `fresh()` instead, so every increment
-// goes through one defined operation.
+// - Determinism: a durable store outlives any one process, and node ids are
+//   what the log records. Calling the exact same graph-building function
+//   twice — once at session creation, again when a later process restarts and
+//   reattaches to the same store — must assign identical ids to structurally
+//   identical nodes, or every logged id is foreign garbage to the process
+//   replaying it (see tests/acceptance/node-id-determinism.test.ts). So the
+//   counter resets to 0 at the start of every OUTERMOST `defineGraph()` call.
+//
+// - Uniqueness within one tree: engine/runtime/tick.ts's `replayPosition`
+//   decides which nesting level owns a logged node id by testing id
+//   membership across every level of the current descent path — which only
+//   works if an outer flow and a `use()`d subgraph never hand out the same
+//   id. A `defineGraph()` call that happens while another one is already in
+//   progress on the call stack (e.g. `agentTurn(profile)` invoked
+//   synchronously from inside a builder callback, `flow.use(agentTurn(p))`)
+//   therefore does NOT reset — it keeps drawing from wherever the enclosing
+//   build's counter already is, so nested subgraph ids never collide with
+//   the enclosing graph's own. Graph-building is entirely synchronous (no
+//   `await` in a `Flow` builder callback), so a plain reentrant call-depth
+//   counter is sufficient — resets happen only on the 0→1 transition.
+//
+// A PRE-BUILT subgraph passed to `flow.use()` (built by its own earlier
+// outermost call, so its ids restarted from 0 too) would break the second
+// property — its ids would overlap the embedding graph's. `reserve()` closes
+// that hole: `Flow.use` advances the counter past every id the subgraph tree
+// already holds before allocating the `use` node's own id, so everything the
+// embedding build allocates from that point on (the `use` node id in
+// particular — the id `replayPosition` must recognize as the subgraph's own
+// completion) stays disjoint from the subgraph's. A subgraph built inline
+// during the current build already drew from the running counter, so
+// `reserve` is a no-op for it — no need to distinguish the two cases.
+//
+// `forEach` branch graphs (built at runtime by `node.branch(item)`, i.e. as
+// their own outermost calls) DO share ids with the main graph under this
+// scheme — deliberately tolerated: branch progress is recognized by each
+// branch's deterministic thread id, never by node id (see
+// engine/runtime/foreach.ts's own doc comment), and `replayPosition` excludes
+// branch-thread events from its id-membership search for the same reason
+// (see tick.ts's forEach handling in the replay loop).
 const nodeIdSequence = (() => {
   let next = 0;
+  let buildDepth = 0;
   return {
     fresh(): NodeId {
       next += 1;
       return `node-${String(next)}` as NodeId;
     },
+    /** Advances the counter past every id `graph` — or any subgraph reachable through its `use` nodes — already holds, so ids allocated afterwards never collide with it. Deterministic as long as the reserved graph itself was deterministically built. */
+    reserve(graph: Graph): void {
+      next = Math.max(next, maxNumericNodeId(graph, new Set()));
+    },
+    enterBuild(): void {
+      buildDepth += 1;
+      if (buildDepth === 1) next = 0;
+    },
+    exitBuild(): void {
+      buildDepth -= 1;
+    },
   };
 })();
 function freshNodeId(): NodeId {
   return nodeIdSequence.fresh();
+}
+
+/** The largest numeric suffix any node id carries anywhere in `graph`'s tree — its own nodes plus every `use` node's subgraph, recursively (`seen` guards against a graph reachable twice). Non-`node-N` ids (none exist today) are ignored rather than crashed on. */
+function maxNumericNodeId(graph: Graph, seen: Set<Graph>): number {
+  if (seen.has(graph)) return 0;
+  seen.add(graph);
+  let max = 0;
+  for (const [id, node] of graph.nodes) {
+    const match = /^node-(\d+)$/.exec(id);
+    if (match) max = Math.max(max, Number(match[1]));
+    if (node.kind === "use") max = Math.max(max, maxNumericNodeId(node.subgraph, seen));
+  }
+  return max;
 }
 
 /** Picks `label`/`state` out of a node factory's options, omitting either key entirely when absent rather than writing `undefined` — shared by every factory in `Flow` so each writes its own kind-specific fields plus this one call, and by `findInterruptNodes` (engine/runtime/drive.ts), which needs the same two-field projection off an already-built `InterruptNode`. @public */
@@ -126,6 +178,20 @@ export function nodeOptionFields(options?: NodeOptions): { label?: string; state
 
 /** Defines a named, runnable flow graph from a declarative build callback. @public */
 export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
+  // Depth-aware id determinism: only the outermost call resets the node id
+  // counter; a nested call (a subgraph built inline from within a builder
+  // callback) keeps drawing from the running count — see `nodeIdSequence`'s
+  // own doc comment. try/finally so a throwing build (e.g. "has no entry
+  // node") can't leave the depth counter permanently off.
+  nodeIdSequence.enterBuild();
+  try {
+    return buildGraph(name, build);
+  } finally {
+    nodeIdSequence.exitBuild();
+  }
+}
+
+function buildGraph(name: string, build: (flow: Flow) => void): Graph {
   const nodes = new Map<NodeId, NodeKind>();
   const edges: EdgeDefinition[] = [];
   let entry: NodeId | undefined;
@@ -176,6 +242,12 @@ export function defineGraph(name: string, build: (flow: Flow) => void): Graph {
       return makeHandle(id);
     },
     use(subgraph, options) {
+      // A pre-built subgraph (its own earlier outermost build, ids restarted
+      // from 0) would otherwise overlap this build's ids — advance past its
+      // whole tree first, so this `use` node's own id (the id `replayPosition`
+      // recognizes as the subgraph's completion) can never be claimed by a
+      // node inside it. No-op for a subgraph built inline during this build.
+      nodeIdSequence.reserve(subgraph);
       const id = freshNodeId();
       nodes.set(id, { kind: "use", subgraph, ...nodeOptionFields(options) });
       return makeHandle(id);

@@ -4,12 +4,13 @@
 // fan-out — whose branches are linear `.then()` chains living inside the
 // SAME flow, with stable node ids `replayPosition` can match directly
 // against the log — each forEach branch is its own freshly-built `Graph`
-// (`node.branch(item)`), and `defineGraph` hands out globally fresh node ids
-// on every call. Calling `node.branch(item)` again on a later `tick()` call
-// (a fresh Runtime, replaying from scratch) therefore produces a
-// *structurally* identical but *numerically* different graph — its node ids
-// never match what an earlier call logged. Matching branch progress by
-// stepId, the way `fan-out.ts` does, is thus unavailable here.
+// (`node.branch(item)`), a top-level `defineGraph` call of its own. Node ids
+// are deterministic per build these days (see flow/graph.ts's
+// `nodeIdSequence`), so a rebuilt branch actually reuses the same numbers —
+// but they're numbers from the branch graph's OWN restarted sequence, shared
+// by every structurally identical sibling branch and liable to coincide with
+// the main graph's own ids. Matching branch progress by stepId, the way
+// `fan-out.ts` does, is thus unavailable here — by design, not by accident.
 //
 // This is resolved by never needing stepId equality at all: each branch gets
 // a deterministic thread id (derived from the forEach node's own stable id,
@@ -20,8 +21,12 @@
 // commit order, only the events tagged with that thread id, folding each one
 // into a locally-tracked `current` — never comparing the event's own stepId
 // against anything. This works because a thread id, once minted, is a plain
-// string persisted in the log itself; unlike a fresh graph's node ids, it
-// doesn't depend on which process (or which call) reconstructs it.
+// string persisted in the log itself; it doesn't depend on which process (or
+// which call) reconstructs it. The same thread ids are what keep branch
+// events out of the main line's own replay: `replayPosition` skips any
+// output event committed on a non-main thread while parked at a forEach
+// node, precisely because a branch node's id can no longer be relied on to
+// miss the main graph's id set (see tick.ts's replay loop).
 
 import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
 import type { ThreadId } from "../../flow/thread.js";

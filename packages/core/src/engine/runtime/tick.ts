@@ -184,14 +184,21 @@ type ReplayResult = ({ kind: "single" } & ReplayPosition) | { kind: "fanout"; gr
  * A `use` node's subgraph shares its parent's thread (never forked), so
  * thread identity says nothing about whether a given event belongs to the
  * outer flow or a nested descent — only the event's own node id does. Every
- * node across every graph gets a globally unique id (see flow/graph.ts's
- * `freshNodeId`), so an output event's `stepId` belongs to exactly one
- * level; `cursorPath` mirrors the `use` descents a live tick() call would
+ * node in one composed graph tree gets an id unique across every nesting
+ * level of that tree (see flow/graph.ts's `nodeIdSequence` — nested builds
+ * draw from the enclosing build's running counter, and `Flow.use` reserves a
+ * pre-built subgraph's ids before allocating its own), so an output event's
+ * `stepId` belongs to exactly one level of the current descent path;
+ * `cursorPath` mirrors the `use` descents a live tick() call would
  * have made: a level is added the moment a `message` event seeds a `use`
  * node's subgraph, and levels below an enclosing owner are dropped the
  * moment an output event turns up whose id belongs to that enclosing level
  * instead — the completion event `commitOutput` tags with the `use` node's
- * own (outer) id once its subgraph reaches `finish`.
+ * own (outer) id once its subgraph reaches `finish`. A `forEach` branch
+ * graph is the one deliberate exception to tree-wide id uniqueness (built at
+ * runtime as its own outermost build, its ids CAN coincide with main-path
+ * ids) — its events are excluded from this id search by thread id instead;
+ * see the forEach handling in the replay loop below.
  */
 
 /** `replayPosition`'s own mutable working state — the thread and position tree it's rebuilding, threaded through each per-event-type handler by reference so every handler sees (and can advance) exactly where the previous one left off. */
@@ -255,7 +262,8 @@ function applyOutputEvent(
   const stepId = envelope.stepId as NodeId;
 
   // Find the level that actually owns this node id, from the innermost
-  // level outward. Node ids are globally unique per graph, so exactly
+  // level outward. Node ids are unique across every nesting level of one
+  // composed graph tree (see flow/graph.ts's nodeIdSequence), so exactly
   // one level ever recognizes a given id; landing on an ENCLOSING
   // level's own id (rather than the innermost one's) means every level
   // above it already reached its own `finish` — each logged its own
@@ -402,16 +410,18 @@ function applyCompactionEvent(envelope: CommittedEnvelope, state: ReplayState): 
  * `commitInvalidation` did live, instead of falling through and leaving the position sitting on
  * the invalidating step (which would re-run it, re-invalidating on every subsequent replay).
  *
- * `cause === "abort"` (set only by `routeAbort`) means the LOGGED `target` cannot be trusted:
- * it's a node id a PRIOR process's own graph object owned, and node ids are globally unique per
- * PROCESS (see `freshNodeId`), not stable across separate constructions of the "same" graph —
- * this process's `chatGraph(profile)` call (say) assigns entirely different numbers to
- * structurally identical nodes than the process that logged the abort did. Trusting the logged
- * number the way an ordinary invalidate's target can be trusted (see below) either finds nothing
- * in any frame (crashes) or, worse, matches an unrelated node by coincidence. So instead of
- * matching a number, this re-derives the target the exact way `routeAbort` decided it live: walk
- * `path` innermost-first for the first frame that declares its own `flow.onAbort`, and land on
- * THAT frame's OWN onAbort node — a real id in THIS process's own graph, never a foreign one.
+ * `cause === "abort"` (set only by `routeAbort`) marks a target logged by whatever process was
+ * running at abort time. When this mechanism shipped, node ids were only unique per PROCESS —
+ * never stable across separate constructions of the "same" graph — so a logged abort target
+ * crossing a process boundary was a foreign number: trusting it the way an ordinary
+ * invalidate's target can be trusted (see below) either found nothing in any frame (crashed)
+ * or, worse, matched an unrelated node by coincidence. Node ids ARE deterministic across
+ * builds now (see flow/graph.ts's `nodeIdSequence`), but stores already written under the old
+ * scheme still hold foreign ids, and re-deriving costs nothing when ids do match — so instead
+ * of matching a number, this re-derives the target the exact way `routeAbort` decided it live:
+ * walk `path` innermost-first for the first frame that declares its own `flow.onAbort`, and
+ * land on THAT frame's OWN onAbort node — a real id in THIS process's own graph, never a
+ * foreign one.
  *
  * An ordinary `context.invalidate(...)` has no such problem: its target always belongs to the
  * invalidating step's OWN graph (the leaf), logged and replayed within the SAME process's SAME
@@ -535,6 +545,17 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     if (!atForEach && envelope.threadId) state.thread = { ...state.thread, id: envelope.threadId };
 
     if (envelope.type === "output") {
+      // A branch's own step outputs (committed on its deterministic branch
+      // thread, never the main line's) are replayed per-branch by
+      // `replayForEachBranch` — never here. They used to fall out of
+      // `applyOutputEvent`'s id search by accident (branch graphs once drew
+      // globally unique ids, so no level ever owned one); now that a branch
+      // graph is rebuilt as its own outermost build (see flow/graph.ts's
+      // nodeIdSequence), a branch node's id CAN coincide with a main-path
+      // node's, so they must be excluded by thread id instead of by an
+      // id-membership miss.
+      if (atForEach && envelope.threadId !== undefined && envelope.threadId !== state.thread.id)
+        continue;
       applyOutputEvent(envelope, path, runtime, state);
       continue;
     }
@@ -735,7 +756,8 @@ async function advanceTickForEachNode(
  * `undefined` when nobody in the chain declared one — the caller then falls
  * back to the ordinary fail-the-run error path (driveStepEmit ->
  * handleStepError), byte-for-byte today's behavior for graphs that never opt
- * in. Node ids are globally unique per graph, so truncating the tree to the
+ * in. Node ids are unique across every level of one composed graph tree (see
+ * flow/graph.ts's nodeIdSequence), so truncating the tree to the
  * winning frame's depth (dropping any inner frames) lands the position
  * squarely in the graph that owns the target — the same reconstruction
  * `applyInvalidationEvent` performs on a fresh replay.
