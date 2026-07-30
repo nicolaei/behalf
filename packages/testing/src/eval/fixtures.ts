@@ -1,7 +1,6 @@
 // Eval dataset — Fixtures, Example, example(). A row is a world, the fixtures
 // that act on it, and the input that enters it.
 //
-// Phase 0: type surface only. Every function body throws "not implemented".
 
 import type { Message, Binding, ModelPort, Profile } from "@behalf-js/core";
 
@@ -21,12 +20,12 @@ export interface Example<World = unknown> {
 
 /** Builds one dataset row. @public */
 export function example<World>(
-  _name: string,
-  _row: {
+  name: string,
+  row: {
     world: () => World;
     fixtures: (world: World, profile: Profile) => Fixtures;
     input: Message;
   },
-): Example<World> {
-  throw new Error("not implemented");
+) : Example<World> {
+  return { name, ...row };
 }
