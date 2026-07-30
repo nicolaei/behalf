@@ -4,11 +4,19 @@
 // itself while it used tools, finish otherwise.
 //
 // Not exported from eval/index.ts — an implementation detail.
-//
-// Phase 0: type surface only. Every function body throws "not implemented".
 
-import type { Graph, Profile } from "@behalf-js/core";
+import { defineGraph } from "@behalf-js/core";
+import type { Graph, Profile, ModelCallResult } from "@behalf-js/core";
 
-export function agentGraph(_profile: Profile): Graph {
-  throw new Error("not implemented");
+export function agentGraph(profile: Profile): Graph {
+  return defineGraph("agent-graph", (flow) => {
+    const respond = flow.step(
+      async (context) => context.output(await context.modelCall(profile)),
+      { label: "respond" },
+    );
+    flow.entry(respond);
+    respond
+      .when((result) => !(result as ModelCallResult).usedTools, flow.finish)
+      .otherwise(respond);
+  });
 }
