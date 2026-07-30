@@ -12,14 +12,16 @@
 // stepId, the way `fan-out.ts` does, is thus unavailable here.
 //
 // This is resolved by never needing stepId equality at all: each branch gets
-// a deterministic thread id (derived from the forEach node's own stable id
-// plus its item index — both constant across every replay), and a branch's
-// position is reconstructed by replaying, in commit order, only the events
-// tagged with that thread id, folding each one into a locally-tracked
-// `current` — never comparing the event's own stepId against anything. This
-// works because a thread id, once minted, is a plain string persisted in the
-// log itself; unlike a fresh graph's node ids, it doesn't depend on which
-// process (or which call) reconstructs it.
+// a deterministic thread id (derived from the forEach node's own stable id,
+// its item index, and — critically — how many times this SAME node has
+// already fully completed on this thread before this invocation; see
+// `forEachBranchThreadId`'s own doc comment for why the invocation count is
+// required), and a branch's position is reconstructed by replaying, in
+// commit order, only the events tagged with that thread id, folding each one
+// into a locally-tracked `current` — never comparing the event's own stepId
+// against anything. This works because a thread id, once minted, is a plain
+// string persisted in the log itself; unlike a fresh graph's node ids, it
+// doesn't depend on which process (or which call) reconstructs it.
 
 import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
 import type { ThreadId } from "../../flow/thread.js";
@@ -61,25 +63,67 @@ export interface ForEachGroup {
   branches: ForEachBranchReplay[];
 }
 
-/** The deterministic thread id every reconstruction of branch `index` agrees on — derived from the forEach node's own stable id (constant across every replay) and the branch's position in `node.items`' own returned order (also assumed stable/deterministic — the same assumption `driveForEachNode` already makes for runFlow). */
-function forEachBranchThreadId(forEachNodeId: NodeId, index: number): ThreadId {
-  return `${forEachNodeId}::forEach-branch-${String(index)}` as ThreadId;
+/**
+ * How many times this forEach node has already fully completed (folded
+ * back to its join edge) on this thread, BEFORE this invocation —
+ * reconstructed purely from the log, the same discipline `replayStateTracker`
+ * applies elsewhere: every completed invocation logs exactly one "output"
+ * event tagged with the forEach node's own stepId and the thread it folded
+ * on (see `commitRoute`'s call in `advanceTickForEachNode`), so counting
+ * those gives an invocation number that agrees across every replay.
+ */
+function completedForEachInvocations(
+  runtime: Runtime,
+  forEachNodeId: NodeId,
+  threadId: ThreadId,
+): number {
+  let count = 0;
+  for (const envelope of runtime.store.events()) {
+    if (envelope.form !== "committed") continue;
+    if (envelope.type !== "output") continue;
+    if (envelope.stepId !== forEachNodeId) continue;
+    if (envelope.threadId !== threadId) continue;
+    count += 1;
+  }
+  return count;
 }
 
-/** Builds a forEach node's group from its own `items`/`branch` functions — recomputed identically on every call (live or replay) from the same `currentInput`, so this never needs to persist anything itself. */
+/**
+ * The deterministic thread id every reconstruction of branch `index` agrees
+ * on — derived from the forEach node's own stable id, the branch's position
+ * in `node.items`' own returned order (both assumed stable/deterministic —
+ * the same assumption `driveForEachNode` already makes for runFlow), AND
+ * which pass through this node this is (`invocation`, from
+ * `completedForEachInvocations`). The node id and item index alone are NOT
+ * enough: `agentTurn`-shaped graphs loop back through the very same static
+ * forEach node on a later turn, on the SAME thread — without the invocation
+ * number, that later pass's branch 0 would derive the identical thread id an
+ * earlier, already-completed pass's branch 0 used, and replay would walk
+ * straight into that earlier pass's stale committed output instead of
+ * running this pass's own tool wait. Folding `invocation` in keeps every
+ * pass's branch thread ids distinct, while still being plain, log-derivable
+ * strings — nothing here is per-process or per-call state.
+ */
+function forEachBranchThreadId(forEachNodeId: NodeId, invocation: number, index: number): ThreadId {
+  return `${forEachNodeId}::forEach-invocation-${String(invocation)}::forEach-branch-${String(index)}` as ThreadId;
+}
+
+/** Builds a forEach node's group from its own `items`/`branch` functions — recomputed identically on every call (live or replay) from the same `currentInput`, so this never needs to persist anything itself beyond what `completedForEachInvocations` reads back out of the log. */
 export function buildForEachGroup(
   node: Extract<NodeKind, { kind: "forEach" }>,
   forEachNodeId: NodeId,
   mainThread: Thread,
   currentInput: unknown,
+  runtime: Runtime,
 ): ForEachGroup {
+  const invocation = completedForEachInvocations(runtime, forEachNodeId, mainThread.id);
   const items = node.items(currentInput);
   const branches: ForEachBranchReplay[] = items.map((item, index) => {
     const graph = node.branch(item);
     return {
       item,
       index,
-      threadId: forEachBranchThreadId(forEachNodeId, index),
+      threadId: forEachBranchThreadId(forEachNodeId, invocation, index),
       graph,
       current: graph.entry,
       currentInput: item,

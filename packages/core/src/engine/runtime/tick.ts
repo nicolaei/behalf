@@ -627,7 +627,7 @@ async function advanceTickForEachNode(
   runtime: Runtime,
   scope: ExecutionScope,
 ): Promise<{ kind: "folded"; thread: Thread } | { kind: "outcome"; outcome: TickOutcome }> {
-  const group = buildForEachGroup(node, frame.current, currentThread, frame.currentInput);
+  const group = buildForEachGroup(node, frame.current, currentThread, frame.currentInput, runtime);
   for (const branch of group.branches) replayForEachBranch(branch, group, runtime);
 
   if (group.branches.every((branch) => branch.done)) {
