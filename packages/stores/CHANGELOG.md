@@ -1,5 +1,12 @@
 # @behalf-js/stores
 
+## 0.0.6
+
+### Patch Changes
+
+- Updated dependencies [dc58b7e]
+  - @behalf-js/core@0.0.6
+
 ## 0.0.5
 
 ### Patch Changes
