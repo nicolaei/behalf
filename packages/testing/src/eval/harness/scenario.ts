@@ -1,14 +1,17 @@
 // Harness — scenario(). One behaviour, many worlds, shared scorers. Drives
 // with runFlow (not the graph/ stepping primitives — evals never pause
 // mid-flow), N times per row, folds each into a Run, scores, gates.
-//
-// Phase 0: type surface only. Every function body throws "not implemented".
 
+import { describe, it, expect } from "vitest";
 import type { Message } from "@behalf-js/core";
 import type { Subject } from "../subject.js";
 import type { Example, Fixtures } from "../fixtures.js";
 import type { Scorer } from "../scorers.js";
 import type { Distribution, RegressionPolicy, BaselineStore } from "../regression.js";
+import { checkRegression } from "../regression.js";
+import { scoreRuns } from "./score-runs.js";
+import { gate } from "./gate.js";
+import { runRow } from "./run-row.js";
 
 // Not barrel-exported from eval/index.ts — internal to the harness. A test
 // author gets these shapes through scenario()'s return/argument inference,
@@ -49,15 +52,86 @@ export interface ScenarioSpec<World, Output = unknown> {
 
 /** Runs a scenario's rows x runs and returns its result — the directly-testable core, no test-runner registration. */
 export async function runScenario<World, Output = unknown>(
-  _spec: ScenarioSpec<World, Output>,
+  spec: ScenarioSpec<World, Output>,
 ): Promise<ScenarioResult> {
-  throw new Error("not implemented");
+  const rows: Example<World>[] = spec.given ?? [
+    {
+      name: "default",
+      world: requireField(spec.world, "world"),
+      fixtures: (world: World) => requireField(spec.fixtures, "fixtures")(world),
+      input: requireField(spec.input, "input"),
+    },
+  ];
+
+  const count = typeof spec.runs === "number" ? spec.runs : (spec.runs?.count ?? 1);
+  const globalMinimumPassRate =
+    typeof spec.runs === "object" ? spec.runs.minimumPassRate : undefined;
+
+  const runs = await Promise.all(
+    rows.flatMap((row) =>
+      Array.from({ length: count }, () => runRow<World, Output>(spec.of.profile, row, "scenario")),
+    ),
+  );
+
+  const priorScorers = spec.baseline?.store.read(spec.baseline.test);
+
+  const scorers: ScenarioScorerResult[] = await Promise.all(
+    spec.scorers.map(async (scorer) => {
+      const { scores, distribution } = await scoreRuns(scorer, runs);
+      const result = gate({
+        scores,
+        minimumScore: scorer.minimumScore,
+        minimumPassRate: scorer.minimumPassRate ?? globalMinimumPassRate ?? 1,
+      });
+      const priorDistribution = priorScorers?.[scorer.name];
+      const regressed =
+        spec.regression && priorDistribution !== undefined
+          ? checkRegression(spec.regression, priorDistribution, distribution) === "fail"
+          : undefined;
+      return {
+        name: scorer.name,
+        passed: result.passed,
+        distribution,
+        ...(regressed !== undefined ? { regressed } : {}),
+      };
+    }),
+  );
+
+  const passed = scorers.every((s) => s.passed) && scorers.every((s) => !s.regressed);
+
+  // Ratchet each scorer's own baseline forward independently — a scorer that
+  // regressed (or failed its own bar) keeps its old baseline so it isn't
+  // judged against its own bad run next time, but that shouldn't strand a
+  // sibling scorer that passed and didn't regress from advancing too.
+  if (spec.baseline) {
+    const merged: Record<string, Distribution> = { ...priorScorers };
+    for (const s of scorers) {
+      if (s.passed && !s.regressed) merged[s.name] = s.distribution;
+    }
+    spec.baseline.store.write(spec.baseline.test, merged);
+  }
+
+  return { passed, scorers };
+}
+
+function requireField<T>(value: T | undefined, name: string): T {
+  if (value === undefined) {
+    throw new Error(
+      `scenario: "${name}" is required when "given" is omitted (need world/fixtures/input for the implicit default row)`,
+    );
+  }
+  return value;
 }
 
 /** Registers a gating eval: passes when every scorer clears its bar on enough runs of every row. @public */
 export function scenario<World, Output = unknown>(
-  _name: string,
-  _spec: ScenarioSpec<World, Output>,
+  name: string,
+  spec: ScenarioSpec<World, Output>,
 ): void {
-  throw new Error("not implemented");
+  describe(name, () => {
+    it("gates", async () => {
+      const result = await runScenario(spec);
+      expect(result.passed).toBe(true);
+    });
+  });
 }
