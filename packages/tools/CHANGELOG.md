@@ -1,5 +1,12 @@
 # @behalf-js/tools
 
+## 0.0.7
+
+### Patch Changes
+
+- Updated dependencies [c4dda16]
+  - @behalf-js/core@0.0.7
+
 ## 0.0.6
 
 ### Patch Changes
