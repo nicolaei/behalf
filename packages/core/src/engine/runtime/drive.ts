@@ -463,11 +463,12 @@ export async function runWaitForNode(
 type StepOutcome =
   { kind: "retry" } | ({ kind: "advance" } & RouteResult & { pendingInputs?: unknown[] });
 
-/** Appends an invalidation event and returns the outcome that reruns the invalidated node — shared by the main-loop and branch paths since both commit an `invalidate` emit the same way, and by tick()'s own graph-level abort routing (see `routeAbort`), which synthesizes the same `{ invalidate, threadAction: "same" }` outcome an aborted step's own `context.invalidate(...)` would have produced. */
+/** Appends an invalidation event and returns the outcome that reruns the invalidated node — shared by the main-loop and branch paths since both commit an `invalidate` emit the same way, and by tick()'s own graph-level abort routing (see `routeAbort`), which synthesizes the same `{ invalidate, threadAction: "same" }` outcome an aborted step's own `context.invalidate(...)` would have produced. `cause: "abort"`, passed only by `routeAbort`, tags the logged event so replay knows to re-derive the target from its own `flow.onAbort` rather than trusting the logged node id — see the `Event["invalidation"]` and `applyInvalidationEvent` doc comments for why that distinction exists. */
 export function commitInvalidation(
   runtime: Runtime,
   thread: Thread,
   emit: Extract<Emit, { invalidate: NodeId }>,
+  cause?: "abort",
 ): StepOutcome {
   const invalidatedThreadId = thread.id;
   const nextThread = applyThreadAction(thread, emit.threadAction, emit.reason, runtime);
@@ -476,6 +477,7 @@ export function commitInvalidation(
       target: emit.invalidate,
       threadAction: emit.threadAction,
       ...(emit.reason ? { reason: emit.reason } : {}),
+      ...(cause ? { cause } : {}),
     },
     { type: "invalidation", threadId: invalidatedThreadId },
   );

@@ -394,15 +394,53 @@ function applyCompactionEvent(envelope: CommittedEnvelope, state: ReplayState): 
   state.thread = withCompaction(state.thread, compaction);
 }
 
-/** `replayPosition`'s handling of a committed `invalidation` event: the same structural gap `compaction` had before Phase 1 — `commitInvalidation` never logs an `output` event for the step that invalidated, so replay has nothing else to recognize that step as already-completed. Routes straight to the event's own recorded target, applying its `threadAction`/`reason` the same way `commitInvalidation` did live, instead of falling through and leaving the position sitting on the invalidating step (which would re-run it, re-invalidating on every subsequent replay). A `context.invalidate(...)` always targets a node in its own step's graph, but a graph-level abort routes to an ENCLOSING frame's `onAbort` target (see `routeAbort`), so — like `applyOutputEvent` — this finds the frame whose flow actually owns `target`, innermost-first (node ids are globally unique per graph, so exactly one frame does), and truncates the tree to that depth. For an ordinary invalidate the owner is the leaf itself, so this is identical to the old leaf-only reuse. */
+/**
+ * `replayPosition`'s handling of a committed `invalidation` event: the same structural gap
+ * `compaction` had before Phase 1 — `commitInvalidation` never logs an `output` event for the
+ * step that invalidated, so replay has nothing else to recognize that step as already-completed.
+ * Routes straight to a target, applying the event's own `threadAction`/`reason` the same way
+ * `commitInvalidation` did live, instead of falling through and leaving the position sitting on
+ * the invalidating step (which would re-run it, re-invalidating on every subsequent replay).
+ *
+ * `cause === "abort"` (set only by `routeAbort`) means the LOGGED `target` cannot be trusted:
+ * it's a node id a PRIOR process's own graph object owned, and node ids are globally unique per
+ * PROCESS (see `freshNodeId`), not stable across separate constructions of the "same" graph —
+ * this process's `chatGraph(profile)` call (say) assigns entirely different numbers to
+ * structurally identical nodes than the process that logged the abort did. Trusting the logged
+ * number the way an ordinary invalidate's target can be trusted (see below) either finds nothing
+ * in any frame (crashes) or, worse, matches an unrelated node by coincidence. So instead of
+ * matching a number, this re-derives the target the exact way `routeAbort` decided it live: walk
+ * `path` innermost-first for the first frame that declares its own `flow.onAbort`, and land on
+ * THAT frame's OWN onAbort node — a real id in THIS process's own graph, never a foreign one.
+ *
+ * An ordinary `context.invalidate(...)` has no such problem: its target always belongs to the
+ * invalidating step's OWN graph (the leaf), logged and replayed within the SAME process's SAME
+ * graph construction — unlike an abort, nothing about it ever crosses a process boundary, so the
+ * old leaf-only reuse (matching `target` against `path`, innermost-first, same as `applyOutputEvent`)
+ * still applies unchanged.
+ */
 function applyInvalidationEvent(
   envelope: CommittedEnvelope,
   path: PathLevel<ReplayFrame>[],
   runtime: Runtime,
   state: ReplayState,
 ): void {
-  const { target, threadAction, reason } = envelope.event as Event["invalidation"];
+  const { target, threadAction, reason, cause } = envelope.event as Event["invalidation"];
   state.thread = applyThreadAction(state.thread, threadAction, reason, runtime);
+  if (cause === "abort") {
+    for (let depth = path.length - 1; depth >= 0; depth -= 1) {
+      const owner = path[depth];
+      const onAbortTarget = owner?.flow.onAbort;
+      if (!owner || onAbortTarget === undefined) continue;
+      state.tree = rebuildFromPath(path, depth, {
+        kind: "step",
+        frame: { flow: owner.flow, current: onAbortTarget, currentInput: undefined },
+      });
+      return;
+    }
+    unreachable("replayPosition: aborted invalidation but no frame in path declares onAbort");
+  }
+
   let depth = path.length - 1;
   for (; depth >= 0; depth -= 1) {
     if (path[depth]?.flow.nodes.has(target)) break;
@@ -687,10 +725,12 @@ function routeAbort(
     const owner = path[depth];
     const target = owner?.flow.onAbort;
     if (!owner || target === undefined) continue;
-    const outcome = commitInvalidation(runtime, currentThread, {
-      invalidate: target,
-      threadAction: "same",
-    });
+    const outcome = commitInvalidation(
+      runtime,
+      currentThread,
+      { invalidate: target, threadAction: "same" },
+      "abort",
+    );
     if (outcome.kind !== "advance") unreachable("routeAbort: commitInvalidation must advance");
     const tree = rebuildFromPath(path, depth, {
       kind: "step",

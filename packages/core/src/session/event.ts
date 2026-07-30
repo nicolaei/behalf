@@ -11,7 +11,16 @@ export interface Event {
   toolCall: { correlationId: string; name: string; input: unknown };
   toolResult: { correlationId: string; output: unknown; isError?: boolean };
   compaction: { task?: Message; summary: Message; keepLast: number };
-  invalidation: { target: NodeId; threadAction: ThreadAction; reason?: Message };
+  // `cause: "abort"` marks an invalidation routeAbort (tick.ts) synthesized
+  // from a graph-level abort, as opposed to an ordinary context.invalidate()
+  // call — replay needs to tell them apart: an ordinary invalidate's target
+  // always belongs to the invalidating step's own graph, but an abort's
+  // target was captured by a PRIOR process's own graph object (node ids are
+  // globally unique per process, not stable across separate constructions
+  // of the "same" graph — see freshNodeId), so replay can't trust it and
+  // must re-derive the target from its OWN flow.onAbort instead (see
+  // applyInvalidationEvent).
+  invalidation: { target: NodeId; threadAction: ThreadAction; reason?: Message; cause?: "abort" };
   error: { type: string; message: string; retryable?: boolean; cause?: unknown };
   // A non-conversational fact a Waitable can match on — never folded into
   // Thread.messages, unlike `message`. `name` is open like MessageKind, since
