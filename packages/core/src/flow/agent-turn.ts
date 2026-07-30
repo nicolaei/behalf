@@ -50,14 +50,18 @@ function toolBranch(item: unknown): Graph {
  */
 export type FinishOn = { on: "finalMessage" } | { on: "toolCall"; name: string };
 
-/** Options for `agentTurn`. @public */
-export interface AgentTurnOptions {
+/**
+ * Options controlling `agentTurn`'s own conditional compaction (`maybeCompact`) —
+ * grouped together since they're all part of the same policy, and a caller who sets
+ * one will often want to set the others too. @public
+ */
+export interface AgentTurnCompactOptions {
   /**
-   * Conditions that end the turn; the turn ends the moment any one matches
-   * this turn's response. Default when omitted: `[{ on: "finalMessage" }]` —
-   * today's "no tool calls" behavior.
+   * The estimated-token budget `maybeCompact` checks the thread against
+   * before deciding to compact. Default: 8000 — a conservative slice of
+   * even a small model's context window.
    */
-  finishOn?: FinishOn[];
+  tokenBudget?: number;
   /**
    * How many of the most recent messages survive a compaction verbatim.
    * Default: 10 — enough to keep the immediately preceding exchange (a
@@ -65,12 +69,6 @@ export interface AgentTurnOptions {
    * model doesn't lose short-term continuity right when it compacts.
    */
   keepLast?: number;
-  /**
-   * The estimated-token budget `maybeCompact` checks the thread against
-   * before deciding to compact. Default: 8000 — a conservative slice of
-   * even a small model's context window.
-   */
-  tokenBudget?: number;
   /**
    * Builds the `summary` message for a compaction. This is the
    * implementor's to supply: `agentTurn` ships only a naive, non-model-
@@ -81,6 +79,20 @@ export interface AgentTurnOptions {
    * this library's.
    */
   summarize?: (messages: Message[]) => Message | Promise<Message>;
+}
+
+/** Options for `agentTurn`. @public */
+export interface AgentTurnOptions {
+  /**
+   * Conditions that end the turn; the turn ends the moment any one matches
+   * this turn's response. Default when omitted: `[{ on: "finalMessage" }]` —
+   * today's "no tool calls" behavior.
+   */
+  finishOn?: FinishOn[];
+  /** Overrides for agentTurn's own conditional compaction policy. Every field is
+   * optional and falls back to its own default independently — see
+   * `AgentTurnCompactOptions`. */
+  compact?: AgentTurnCompactOptions;
 }
 
 /** What `agentTurn` produces once its finish condition is met. @public */
@@ -132,8 +144,8 @@ function firedToolCalls(messages: Message[]): FiredToolCall[] {
 }
 
 // --- maybeCompact's DEFAULT policy: a rough estimate, a threshold, and a placeholder
-// summary. All three are overridable via AgentTurnOptions (tokenBudget/keepLast/summarize)
-// — these are only the fallbacks used when a caller doesn't supply their own. ---
+// summary. All three are overridable via AgentTurnOptions.compact (tokenBudget/keepLast/
+// summarize) — these are only the fallbacks used when a caller doesn't supply their own. ---
 // No tokenizer dependency exists in this repo today, and adding one is out of scope for
 // this step: chars/4 is the well-known ballpark approximation for English text used by
 // most "rough token count" heuristics, and it needs no model-specific vocabulary.
@@ -176,7 +188,7 @@ function overBudget(estimate: number, budget: number): boolean {
 
 /**
  * The DEFAULT `summarize` — NAIVE PLACEHOLDER, not a real summarization. This is what
- * runs when a caller doesn't supply their own `AgentTurnOptions.summarize`. Real
+ * runs when a caller doesn't supply their own `AgentTurnOptions.compact.summarize`. Real
  * summarization (an actual model call that reads the thread and writes a faithful digest)
  * is the implementor's job to supply there — this default just states how many messages
  * got folded away, so downstream context loss is at least honest, not silent, when no
@@ -234,12 +246,12 @@ export function agentTurn(profile: Profile, options?: AgentTurnOptions): Graph {
     // thread is under budget and shouldCompact is false; nothing happens.
     const maybeCompact = flow.step(async (context) => {
       const estimate = estimateTokens(context.thread.messages);
-      const budget = options?.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
+      const budget = options?.compact?.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
       const shouldCompact = overBudget(estimate, budget);
       if (shouldCompact) {
-        const summarize = options?.summarize ?? defaultSummarize;
+        const summarize = options?.compact?.summarize ?? defaultSummarize;
         const summary = await summarize(context.thread.messages);
-        await context.compact({ summary, keepLast: options?.keepLast ?? DEFAULT_KEEP_LAST });
+        await context.compact({ summary, keepLast: options?.compact?.keepLast ?? DEFAULT_KEEP_LAST });
       }
       return context.output(shouldCompact);
     });
