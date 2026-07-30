@@ -3,8 +3,8 @@
 // fan-out along the way. This is the whole engine loop — shared by the
 // top-level runFlow drive and any `use` node's inline subgraph drive — and
 // tick()'s own live execution reuses several of its pieces (buildDriveContext,
-// findInterruptNodes, driveStepEmit, seedUseNode, runWaitForNode) to drive one
-// node at a time instead of to completion.
+// findInterruptNodes, driveStepEmit, seedUseNode, runWaitForNode,
+// commitInvalidation) to drive one node at a time instead of to completion.
 
 import { type Graph, type NodeId, type NodeKind, nodeOptionFields } from "../../flow/graph.js";
 import type { Message, MessageKind, UserMessage } from "../../flow/message.js";
@@ -463,8 +463,8 @@ export async function runWaitForNode(
 type StepOutcome =
   { kind: "retry" } | ({ kind: "advance" } & RouteResult & { pendingInputs?: unknown[] });
 
-/** Appends an invalidation event and returns the outcome that reruns the invalidated node — shared by the main-loop and branch paths since both commit an `invalidate` emit the same way. */
-function commitInvalidation(
+/** Appends an invalidation event and returns the outcome that reruns the invalidated node — shared by the main-loop and branch paths since both commit an `invalidate` emit the same way, and by tick()'s own graph-level abort routing (see `routeAbort`), which synthesizes the same `{ invalidate, threadAction: "same" }` outcome an aborted step's own `context.invalidate(...)` would have produced. */
+export function commitInvalidation(
   runtime: Runtime,
   thread: Thread,
   emit: Extract<Emit, { invalidate: NodeId }>,

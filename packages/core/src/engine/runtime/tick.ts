@@ -7,6 +7,7 @@ import type { ThreadId } from "../../flow/thread.js";
 import type { Message, MessageKind } from "../../flow/message.js";
 import { tryMessageKindOf } from "../../flow/waitable.js";
 import type { StepContext, WaitForResult } from "../../flow/step.js";
+import { ModelCallAbortedError } from "../../flow/step.js";
 import type { Event } from "../../session/event.js";
 import type { CommittedEnvelope, Envelope } from "../../session/envelope.js";
 import type { Runtime } from "../runtime.js";
@@ -44,6 +45,7 @@ import {
   fanOutTargets,
   findInterruptNodes,
   seedUseNode,
+  commitInvalidation,
 } from "./drive.js";
 import { buildForEachGroup, replayForEachBranch, advanceForEachGroup } from "./foreach.js";
 
@@ -392,19 +394,24 @@ function applyCompactionEvent(envelope: CommittedEnvelope, state: ReplayState): 
   state.thread = withCompaction(state.thread, compaction);
 }
 
-/** `replayPosition`'s handling of a committed `invalidation` event: the same structural gap `compaction` had before Phase 1 — `commitInvalidation` never logs an `output` event for the step that invalidated, so replay has nothing else to recognize that step as already-completed. Routes straight to the event's own recorded target, applying its `threadAction`/`reason` the same way `commitInvalidation` did live, instead of falling through and leaving the position sitting on the invalidating step (which would re-run it, re-invalidating on every subsequent replay). An invalidation only ever targets a node in its own step's graph, so this reuses the leaf's own flow — no depth search needed, unlike `applyOutputEvent`. */
+/** `replayPosition`'s handling of a committed `invalidation` event: the same structural gap `compaction` had before Phase 1 — `commitInvalidation` never logs an `output` event for the step that invalidated, so replay has nothing else to recognize that step as already-completed. Routes straight to the event's own recorded target, applying its `threadAction`/`reason` the same way `commitInvalidation` did live, instead of falling through and leaving the position sitting on the invalidating step (which would re-run it, re-invalidating on every subsequent replay). A `context.invalidate(...)` always targets a node in its own step's graph, but a graph-level abort routes to an ENCLOSING frame's `onAbort` target (see `routeAbort`), so — like `applyOutputEvent` — this finds the frame whose flow actually owns `target`, innermost-first (node ids are globally unique per graph, so exactly one frame does), and truncates the tree to that depth. For an ordinary invalidate the owner is the leaf itself, so this is identical to the old leaf-only reuse. */
 function applyInvalidationEvent(
   envelope: CommittedEnvelope,
   path: PathLevel<ReplayFrame>[],
-  leaf: PathLevel<ReplayFrame>,
   runtime: Runtime,
   state: ReplayState,
 ): void {
   const { target, threadAction, reason } = envelope.event as Event["invalidation"];
   state.thread = applyThreadAction(state.thread, threadAction, reason, runtime);
-  state.tree = rebuildFromPath(path, path.length - 1, {
+  let depth = path.length - 1;
+  for (; depth >= 0; depth -= 1) {
+    if (path[depth]?.flow.nodes.has(target)) break;
+  }
+  const owner = depth >= 0 ? path[depth] : undefined;
+  if (!owner) unreachable("replayPosition: invalidation target belongs to no frame");
+  state.tree = rebuildFromPath(path, depth, {
     kind: "step",
-    frame: { flow: leaf.flow, current: target, currentInput: undefined },
+    frame: { flow: owner.flow, current: target, currentInput: undefined },
   });
 }
 
@@ -484,7 +491,7 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     }
 
     if (envelope.type === "invalidation") {
-      applyInvalidationEvent(envelope, path, leaf, runtime, state);
+      applyInvalidationEvent(envelope, path, runtime, state);
       continue;
     }
     // toolCall/toolResult/error don't move the main position on their own
@@ -648,6 +655,60 @@ async function advanceTickForEachNode(
   }
 
   return { kind: "outcome", outcome: await advanceForEachGroup(group, runtime, scope) };
+}
+
+/**
+ * Routes an aborted model call to the nearest declared `onAbort` target,
+ * bubbling outward through `use()`-embedding frames. Walks the live position
+ * `path` from the innermost frame (whose step just aborted) outward: the first
+ * frame whose graph declares `flow.onAbort` wins, and execution jumps to that
+ * target on the SAME thread — synthesizing the exact outcome a
+ * `context.invalidate(target, { threadAction: "same" })` call would have
+ * produced and committing it through the shared `commitInvalidation`, so an
+ * abort and an explicit invalidate reach `commitInvalidation` by one path. A
+ * `use()`-embedded subgraph (e.g. `agentTurn`) that declares no `onAbort` of
+ * its own therefore falls through to its enclosing graph's. Returns
+ * `undefined` when nobody in the chain declared one — the caller then falls
+ * back to the ordinary fail-the-run error path (driveStepEmit ->
+ * handleStepError), byte-for-byte today's behavior for graphs that never opt
+ * in. Node ids are globally unique per graph, so truncating the tree to the
+ * winning frame's depth (dropping any inner frames) lands the position
+ * squarely in the graph that owns the target — the same reconstruction
+ * `applyInvalidationEvent` performs on a fresh replay.
+ */
+function routeAbort(
+  path: PathLevel<LiveFrame>[],
+  currentThread: Thread,
+  runtime: Runtime,
+  getThread: () => Thread,
+  setThread: (thread: Thread) => void,
+): { thread: Thread; tree: CursorTree<LiveFrame> } | undefined {
+  for (let depth = path.length - 1; depth >= 0; depth -= 1) {
+    const owner = path[depth];
+    const target = owner?.flow.onAbort;
+    if (!owner || target === undefined) continue;
+    const outcome = commitInvalidation(runtime, currentThread, {
+      invalidate: target,
+      threadAction: "same",
+    });
+    if (outcome.kind !== "advance") unreachable("routeAbort: commitInvalidation must advance");
+    const tree = rebuildFromPath(path, depth, {
+      kind: "step",
+      frame: buildLiveFrame(
+        {
+          flow: owner.flow,
+          current: outcome.to,
+          currentInput: outcome.input,
+          ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
+        },
+        runtime,
+        getThread,
+        setThread,
+      ),
+    });
+    return { thread: outcome.thread, tree };
+  }
+  return undefined;
 }
 
 /**
@@ -852,6 +913,23 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
 
     const stepContext: StepContext = withInputs(frame.context, inputs);
     const emit = await runStep(node.run, stepContext);
+
+    // Graph-level abort: a step that failed because its in-flight model call
+    // was preempted by an abort message routes to the nearest declared
+    // onAbort target instead of failing the run. `path` is this position's
+    // frame stack innermost-first, so a use()'d subgraph that declares no
+    // onAbort of its own bubbles out to its enclosing graph's declaration.
+    if ("error" in emit && emit.error.cause instanceof ModelCallAbortedError) {
+      const routed = routeAbort(path, currentThread, runtime, getThread, setThread);
+      if (routed) {
+        currentThread = routed.thread;
+        tree = routed.tree;
+        ranStep = true;
+        continue;
+      }
+      // Nobody in the chain declared onAbort — fall through to today's
+      // fail-the-run behavior via driveStepEmit -> handleStepError.
+    }
 
     if ("output" in emit) {
       const branchTargets = fanOutTargets(frame.flow, frame.current);

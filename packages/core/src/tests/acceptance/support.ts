@@ -144,6 +144,27 @@ export async function awaitEventType(
 }
 
 /**
+ * Awaits the next committed assistant-role `message` on `store.changes()` — the
+ * model's own reply, skipping the user-prompt echo that a `waitFor` commits first
+ * when it consumes a prompt (see driveWaitForMessage). Use this, not
+ * `awaitEventType(store, "message")`, whenever the assertion is about what the
+ * model said back: a consumed prompt is always logged as a `message` event before
+ * the reply it triggers, so a plain type filter would resolve on the echo. Same
+ * subscribe-before-triggering discipline as `awaitEventType`.
+ */
+export async function awaitAssistantMessage(store: SessionStore): Promise<CommittedEnvelope> {
+  for await (const envelope of store.changes()) {
+    if (
+      envelope.form === "committed" &&
+      envelope.type === "message" &&
+      (envelope.event as Event["message"]).message.role === "assistant"
+    )
+      return envelope;
+  }
+  throw new Error(`changes() ended without a committed assistant "message" envelope`);
+}
+
+/**
  * Every `toolCall` correlationId in an assistant message with no matching
  * `toolResult` in the very next message — the engine's own pairing contract,
  * independent of any model adapter's wire format. Empty means every tool

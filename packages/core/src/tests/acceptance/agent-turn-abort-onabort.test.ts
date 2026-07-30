@@ -20,7 +20,13 @@ import {
 } from "../../index.js";
 import type { Profile, ModelPort, Runtime, SessionStore, Event } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { assistantText, textOf, awaitEventType, loggedEnvelopes } from "./support.js";
+import {
+  assistantText,
+  textOf,
+  awaitEventType,
+  awaitAssistantMessage,
+  loggedEnvelopes,
+} from "./support.js";
 
 /**
  * A chatGraph-shaped graph (turn <-> waitForPrompt, flow.onAbort(waitForPrompt))
@@ -137,7 +143,7 @@ describe("agentTurn embedded in a chat-shaped graph with flow.onAbort", () => {
     sendAbort(store);
     await abortedCommit;
 
-    const secondReplyCommit = awaitEventType(store, "message");
+    const secondReplyCommit = awaitAssistantMessage(store);
     sendChatPrompt(store, "second");
     const secondReply = await secondReplyCommit;
 
@@ -228,7 +234,7 @@ describe("flow.onAbort bubbling through a use()'d subgraph", () => {
     sendAbort(store);
     await abortedCommit;
 
-    const secondReplyCommit = awaitEventType(store, "message");
+    const secondReplyCommit = awaitAssistantMessage(store);
     store.receive({
       kind: "message",
       message: { role: "user", intent: "standard", kind: "go", content: [{ type: "text", text: "again" }] },
