@@ -135,10 +135,20 @@ export function memoryStore(): SessionStore {
       threadId: ThreadId;
     }): Stream {
       const deltas: Delta[] = [];
+      // A model port's own async work (a real network stream) isn't
+      // cancelled by abort() or commit() — it's raced, not stopped — so it
+      // can keep calling delta()/commit() after this stream is already
+      // finalized. `settled` makes both a no-op once that's happened,
+      // instead of broadcasting stray content past the point the flow
+      // already moved on from (the visible symptom: an aborted turn's
+      // reply keeps growing after the abort "succeeded").
+      let settled = false;
 
       broadcast(buildEnvelope(meta, {} as Event[EventType], sequence, { form: "in-progress" }));
 
       function commit(event: Event[EventType], aborted?: boolean): void {
+        if (settled) return;
+        settled = true;
         sequence += 1;
         const envelope = buildEnvelope(meta, event, sequence, aborted ? { aborted } : undefined);
         log.push(envelope);
@@ -147,6 +157,7 @@ export function memoryStore(): SessionStore {
 
       return {
         delta(part: Delta): void {
+          if (settled) return;
           deltas.push(part); // accumulated for `abort`, never persisted themselves
           broadcast({
             form: "delta",
@@ -166,9 +177,13 @@ export function memoryStore(): SessionStore {
             )
             .map((candidate) => candidate.text)
             .join("");
+          // No text block at all when nothing streamed before the abort —
+          // a real provider's API (Anthropic confirmed) rejects an empty
+          // text content block outright, which would otherwise poison the
+          // very next turn.
           const message: Message = {
             role: "assistant",
-            content: [{ type: "text", text }],
+            content: text ? [{ type: "text", text }] : [],
             provider: "",
             model: "",
             usage: { input: 0, output: 0 },

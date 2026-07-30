@@ -433,6 +433,17 @@ export async function callTool<Input, Output>(
  * `runtime()`) resolves each `toolCall` independently, whenever its handler settles. Does not
  * call the model again itself: a graph loops by routing a step's output back to itself, same as
  * any other edge.
+ *
+ * Abort doesn't just race the model call and walk away from it — `controller.abort()` actually
+ * tells the port's own transport to stop (a cooperative port passes `controller.signal` straight
+ * through to `fetch`/its SDK's own `signal` option), so the real request stops instead of
+ * continuing to stream after this function has already returned. `reply`'s own promise may still
+ * settle later regardless — a real network call isn't guaranteed to die the instant `abort()` is
+ * called, and an uncooperative port ignores the signal entirely — but by the time that happens
+ * nobody is awaiting it anymore, so its eventual settlement (success or failure) is silently
+ * caught purely to stop it surfacing as an unhandled rejection; it can no longer change what this
+ * function already decided. A genuine model-call failure, unrelated to any abort, still rejects
+ * `reply` and still propagates normally through the `Promise.race` below, exactly as before.
  */
 export async function runModelCall(
   profile: Profile,
@@ -442,23 +453,27 @@ export async function runModelCall(
 ): Promise<ModelCallResult> {
   const port = runtime.models(profile.model);
   const stream = context.openStream("message");
+  const controller = new AbortController();
 
   let modelSettled = false;
+  const replyPromise = port
+    .respond(profile, context.thread.messages, stream, controller.signal)
+    .then((message): { kind: "reply"; message: AssistantMessage } => {
+      modelSettled = true;
+      return { kind: "reply", message };
+    });
+
   const outcome = await Promise.race([
-    port
-      .respond(profile, context.thread.messages, stream)
-      .then((message): { kind: "reply"; message: AssistantMessage } => {
-        modelSettled = true;
-        return { kind: "reply", message };
-      }),
+    replyPromise,
     waitForAbort(runtime.store, () => modelSettled).then(
-      (message): { kind: "abort" } | { kind: "reply"; message: AssistantMessage } | undefined =>
-        message ? { kind: "abort" } : undefined,
+      (message): { kind: "abort" } | undefined => (message ? { kind: "abort" } : undefined),
     ),
   ]);
 
   if (!outcome || outcome.kind === "abort") {
+    controller.abort();
     stream.abort();
+    replyPromise.catch(() => undefined); // may still settle later; nobody's listening — silence it
     throw new ModelCallAbortedError();
   }
 

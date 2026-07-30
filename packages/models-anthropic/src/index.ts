@@ -337,7 +337,10 @@ export function isRetryableAnthropicError(cause: unknown): boolean {
  * One port per Anthropic model. `respond` streams the model's response via
  * `client.messages.stream`, pushing token-level deltas to `stream: DeltaSink`
  * as raw Anthropic stream events arrive, and assembles the equivalent
- * `AssistantMessage` incrementally as blocks close.
+ * `AssistantMessage` incrementally as blocks close. Threads `respond`'s own
+ * `signal` straight into the SDK call's `RequestOptions` — the SDK cancels
+ * the underlying HTTP stream the instant it fires, same as any other
+ * `fetch`-based client honoring an `AbortSignal`.
  * @public
  */
 export function createAnthropicPort(model: Model, client?: Anthropic): ModelPort {
@@ -353,18 +356,21 @@ export function createAnthropicPort(model: Model, client?: Anthropic): ModelPort
 
   return {
     model,
-    async respond(profile, messages, stream: DeltaSink) {
+    async respond(profile, messages, stream: DeltaSink, signal?: AbortSignal) {
       const request = toAnthropicRequest(profile, messages, isOAuth);
       const toolNames = profile.tools.map((t) => t.name);
-      const rawStream = resolvedClient.messages.stream({
-        model: model.identifier,
-        max_tokens: DEFAULT_MAX_TOKENS,
-        system: request.system,
-        messages: request.messages,
-        ...(request.thinking ? { thinking: request.thinking } : {}),
-        ...(request.effort ? { output_config: { effort: request.effort } } : {}),
-        ...(request.tools ? { tools: request.tools } : {}),
-      });
+      const rawStream = resolvedClient.messages.stream(
+        {
+          model: model.identifier,
+          max_tokens: DEFAULT_MAX_TOKENS,
+          system: request.system,
+          messages: request.messages,
+          ...(request.thinking ? { thinking: request.thinking } : {}),
+          ...(request.effort ? { output_config: { effort: request.effort } } : {}),
+          ...(request.tools ? { tools: request.tools } : {}),
+        },
+        { signal },
+      );
 
       const correlationIds = new Map<number, string>();
       const blockKinds = new Map<number, "text" | "thinking" | "toolCall">();
