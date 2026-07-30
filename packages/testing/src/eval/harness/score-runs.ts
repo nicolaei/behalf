@@ -6,10 +6,16 @@
 import type { Run } from "../run.js";
 import type { Scorer } from "../scorers.js";
 import type { Distribution } from "../regression.js";
+import { aggregate } from "./aggregate.js";
 
 export async function scoreRuns<World, Output = unknown>(
-  _scorer: Scorer<World, Output>,
-  _runs: Run<World, Output>[],
+  scorer: Scorer<World, Output>,
+  runs: Run<World, Output>[],
 ): Promise<{ scores: number[]; distribution: Distribution }> {
-  throw new Error("not implemented");
+  const scores: number[] = [];
+  for (const run of runs) {
+    scores.push(await scorer.score(run));
+  }
+  const distribution = aggregate(scores, scorer.minimumScore);
+  return { scores, distribution };
 }
