@@ -283,11 +283,22 @@ export function buildToolContext(
 
 /**
  * Executes one already-committed tool call end to end: resolves its binding, runs the handler,
- * and commits its `toolResult`. Never folds a tool message into any thread — only a caller with
- * a live `StepContext.thread` reference can decide when and how to do that. `runModelCall` no
- * longer needs to (it returns before any tool call resolves); a `forEach` branch's own step
- * folds explicitly instead, via `context.compact` (see agent-loop.test.ts). This is the
- * decoupled tool executor's sole dispatch path — nothing here assumes a synchronous caller.
+ * and commits its `toolResult` — always, even when the handler's own promise rejects. A handler
+ * rejection is caught here and folded into the committed event as `{ output: { error: message },
+ * isError: true }` rather than left to propagate: the only thing that ever resolves a pending
+ * `waitFor(toolCall(id))` is a matching `toolResult` event, so a handler that throws without one
+ * would park that Waitable — and the `forEach`/`fold` join that needs every branch resolved, and
+ * the whole turn behind it — forever. `findToolBinding` failing (no binding registered for this
+ * name, in THIS runtime) is deliberately left uncaught, not folded into an isError result: a
+ * missing binding models a call meant to be resolved by some other process sharing the same log
+ * (see tick-foreach-restart.test.ts) or a standalone `appendEvent`'d toolCall never meant to
+ * dispatch at all (see append-event.test.ts) — both rely on staying genuinely pending, not on
+ * this executor manufacturing a result for a call it was never asked to serve. Never folds a tool
+ * message into any thread — only a caller with a live `StepContext.thread` reference can decide
+ * when and how to do that. `runModelCall` no longer needs to (it returns before any tool call
+ * resolves); a `forEach` branch's own step folds explicitly instead, via `context.compact` (see
+ * agent-loop.test.ts). This is the decoupled tool executor's sole dispatch path — nothing here
+ * assumes a synchronous caller.
  */
 export async function executeToolCall(
   call: { correlationId: string; name: string; input: unknown },
@@ -297,10 +308,18 @@ export async function executeToolCall(
 ): Promise<unknown> {
   const handler = findToolBinding(runtime, call.name);
   const toolContext = buildToolContext(threadId, runtime, identity, call.correlationId);
-  const output = await handler(call.input, toolContext);
+
+  let output: unknown;
+  let isError = false;
+  try {
+    output = await handler(call.input, toolContext);
+  } catch (error) {
+    isError = true;
+    output = { error: error instanceof Error ? error.message : String(error) };
+  }
 
   runtime.store.append(
-    { correlationId: call.correlationId, output },
+    { correlationId: call.correlationId, output, ...(isError ? { isError: true } : {}) },
     { type: "toolResult", threadId },
   );
 
@@ -372,10 +391,11 @@ export function startToolExecutor(runtime: Runtime): () => void {
       for (const call of pendingToolCalls()) {
         dispatched.add(call.correlationId);
         executeToolCall(call, call.threadId, runtime, TOOL_EXECUTOR_IDENTITY).catch(() => {
-          // A handler failure has nowhere to surface today: no step is synchronously
-          // awaiting this call, only a later waitFor(toolCall(id)) that would otherwise
-          // just never resolve. Swallowed here rather than crashing the whole watcher —
-          // one failed call must never stop every other in-flight or future one.
+          // executeToolCall itself catches a rejecting handler and commits an
+          // isError toolResult, so a normal handler failure never reaches here. This
+          // only guards a truly unexpected failure (e.g. store.append itself throwing)
+          // — swallowed rather than crashing the whole watcher, since one call's
+          // failure must never stop every other in-flight or future one.
         });
       }
       await store.awaitReceive();
