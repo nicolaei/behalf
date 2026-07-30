@@ -51,8 +51,8 @@ describe("eval subpath export boundary", () => {
 
   it("the top-level entry still exports its own non-eval surface", async () => {
     const topLevel = (await import("@behalf-js/testing")) as Record<string, unknown>;
-    expect(topLevel.stepOnce).toBeDefined();
-    expect(topLevel.stepUntilBlocked).toBeDefined();
-    expect(topLevel.fakePort).toBeDefined();
+    expect(topLevel["stepOnce"]).toBeDefined();
+    expect(topLevel["stepUntilBlocked"]).toBeDefined();
+    expect(topLevel["fakePort"]).toBeDefined();
   });
 });
