@@ -1,6 +1,6 @@
 {
   "name": "@behalf-js/core",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "Build agent workflows as typed, testable graphs — the flow-authoring DSL and the engine that runs it.",
   "type": "module",
   "main": "./dist/index.js",
@@ -30,7 +30,7 @@
     "zod": "^4.1.13"
   },
   "devDependencies": {
-    "@behalf-js/stores": "^0.0.7",
-    "@behalf-js/testing": "^0.0.7"
+    "@behalf-js/stores": "^0.0.8",
+    "@behalf-js/testing": "^0.0.8"
   }
 }

@@ -1,5 +1,13 @@
 # @behalf-js/testing
 
+## 0.0.8
+
+### Patch Changes
+
+- Updated dependencies [d368531]
+  - @behalf-js/core@0.0.8
+  - @behalf-js/stores@0.0.8
+
 ## 0.0.7
 
 ### Patch Changes
