@@ -58,6 +58,29 @@ export interface AgentTurnOptions {
    * today's "no tool calls" behavior.
    */
   finishOn?: FinishOn[];
+  /**
+   * How many of the most recent messages survive a compaction verbatim.
+   * Default: 10 — enough to keep the immediately preceding exchange (a
+   * model reply plus the tool round-trip that produced it) intact, so the
+   * model doesn't lose short-term continuity right when it compacts.
+   */
+  keepLast?: number;
+  /**
+   * The estimated-token budget `maybeCompact` checks the thread against
+   * before deciding to compact. Default: 8000 — a conservative slice of
+   * even a small model's context window.
+   */
+  tokenBudget?: number;
+  /**
+   * Builds the `summary` message for a compaction. This is the
+   * implementor's to supply: `agentTurn` ships only a naive, non-model-
+   * generated default (states how many messages were folded away) so
+   * downstream context loss is honest, not silent, when no real
+   * summarizer is provided — an actual model call that reads the thread
+   * and writes a faithful digest is the caller's responsibility, not
+   * this library's.
+   */
+  summarize?: (messages: Message[]) => Message | Promise<Message>;
 }
 
 /** What `agentTurn` produces once its finish condition is met. @public */
@@ -75,7 +98,9 @@ interface FiredToolCall {
 /** Reads the last assistant message (its toolCall blocks) and the tool message that just
  * followed it (its toolResult blocks) straight off the thread, and returns each fired call
  * paired with its own name and result — no data carried in from earlier steps, since a
- * `compact` emit's routed output is `undefined` downstream (see step-runner.ts/drive.ts). */
+ * paired with its own name and result — reads directly off `context.thread.messages`
+ * rather than threading data through from earlier steps, since neither `fold` nor
+ * `maybeCompact` route anything besides a boolean downstream. */
 function firedToolCalls(messages: Message[]): FiredToolCall[] {
   const toolMessage = messages.at(-1);
   if (toolMessage?.role !== "tool") return [];
@@ -106,7 +131,9 @@ function firedToolCalls(messages: Message[]): FiredToolCall[] {
     });
 }
 
-// --- maybeCompact's policy: a rough estimate, a threshold, and a placeholder summary. ---
+// --- maybeCompact's DEFAULT policy: a rough estimate, a threshold, and a placeholder
+// summary. All three are overridable via AgentTurnOptions (tokenBudget/keepLast/summarize)
+// — these are only the fallbacks used when a caller doesn't supply their own. ---
 // No tokenizer dependency exists in this repo today, and adding one is out of scope for
 // this step: chars/4 is the well-known ballpark approximation for English text used by
 // most "rough token count" heuristics, and it needs no model-specific vocabulary.
@@ -114,11 +141,11 @@ const CHARS_PER_TOKEN_ESTIMATE = 4;
 // 8000 tokens is a conservative slice of even a small (e.g. 32k-context) model's window —
 // comfortably clear of the budget before the thread risks crowding out the model's own
 // reply, while still leaving many turns' worth of headroom before compaction ever fires.
-const TOKEN_BUDGET = 8000;
+const DEFAULT_TOKEN_BUDGET = 8000;
 // How many of the most recent messages survive a compaction verbatim. 10 is enough to keep
 // the immediately preceding exchange (a model reply plus the tool round-trip that produced
 // it) intact, so the model doesn't lose short-term continuity right when it compacts.
-const KEEP_LAST = 10;
+const DEFAULT_KEEP_LAST = 10;
 
 function blockLength(block: ContentBlock): number {
   switch (block.type) {
@@ -143,17 +170,19 @@ function estimateTokens(messages: Message[]): number {
   return Math.ceil(chars / CHARS_PER_TOKEN_ESTIMATE);
 }
 
-function overBudget(estimate: number): boolean {
-  return estimate > TOKEN_BUDGET;
+function overBudget(estimate: number, budget: number): boolean {
+  return estimate > budget;
 }
 
 /**
- * NAIVE PLACEHOLDER — not a real summarization. Real summarization (an actual model call
- * that reads the thread and writes a faithful digest) is out of scope for this step; only
- * the compaction mechanism (estimate -> threshold -> compact()) is. This just states how
- * many messages got folded away, so downstream context loss is at least honest, not silent.
+ * The DEFAULT `summarize` — NAIVE PLACEHOLDER, not a real summarization. This is what
+ * runs when a caller doesn't supply their own `AgentTurnOptions.summarize`. Real
+ * summarization (an actual model call that reads the thread and writes a faithful digest)
+ * is the implementor's job to supply there — this default just states how many messages
+ * got folded away, so downstream context loss is at least honest, not silent, when no
+ * real summarizer is provided.
  */
-function summarize(messages: Message[]): Message {
+function defaultSummarize(messages: Message[]): Message {
   return {
     role: "system",
     content: [
@@ -205,9 +234,12 @@ export function agentTurn(profile: Profile, options?: AgentTurnOptions): Graph {
     // thread is under budget and shouldCompact is false; nothing happens.
     const maybeCompact = flow.step(async (context) => {
       const estimate = estimateTokens(context.thread.messages);
-      const shouldCompact = overBudget(estimate);
+      const budget = options?.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
+      const shouldCompact = overBudget(estimate, budget);
       if (shouldCompact) {
-        await context.compact({ summary: summarize(context.thread.messages), keepLast: KEEP_LAST });
+        const summarize = options?.summarize ?? defaultSummarize;
+        const summary = await summarize(context.thread.messages);
+        await context.compact({ summary, keepLast: options?.keepLast ?? DEFAULT_KEEP_LAST });
       }
       return context.output(shouldCompact);
     });
