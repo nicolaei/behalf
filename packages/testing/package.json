@@ -27,9 +27,7 @@
     "directory": "packages/testing"
   },
   "dependencies": {
-    "@behalf-js/core": "^0.0.4"
-  },
-  "devDependencies": {
+    "@behalf-js/core": "^0.0.4",
     "@behalf-js/stores": "^0.0.4"
   }
 }
