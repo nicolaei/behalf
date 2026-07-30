@@ -1,5 +1,12 @@
 # @behalf-js/tools
 
+## 0.0.10
+
+### Patch Changes
+
+- Updated dependencies [669ab73]
+  - @behalf-js/core@0.0.10
+
 ## 0.0.9
 
 ### Patch Changes
