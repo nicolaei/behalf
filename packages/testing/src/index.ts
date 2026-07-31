@@ -6,6 +6,7 @@
 // wraps it once so a test author never imports `/internal` directly.
 
 import type { Graph, Handle, NodeId, MessageKind, Runtime } from "@behalf-js/core";
+import { seed, driveFlow } from "@behalf-js/core";
 import type { CursorState } from "@behalf-js/core/internal";
 import { tick, tickUntilSuspended } from "@behalf-js/core/internal";
 import { StepUntilError } from "./errors.js";
@@ -107,6 +108,26 @@ export async function stepUntil(
     "budget-exceeded",
     `stepUntil: exceeded maxSteps (${String(maxSteps)}) without satisfying the condition`,
   );
+}
+
+/**
+ * Drives `flow` to completion and resolves with the root cursor's result — the
+ * run-to-completion verb a test suite wants, assembled from the two primitives
+ * a production host wires by hand: `seed()` then `driveFlow()`.
+ *
+ * Seeds only when the session is empty. On a store that already has events the
+ * `input` argument is ignored and the existing session simply resumes, so a test
+ * can hand-seed (or half-step) a flow first and still finish it with one call.
+ * Re-seeding there would append a second entry event and replay would no longer
+ * agree with the caller's real input.
+ */
+export async function runToCompletion(
+  flow: Graph,
+  input: unknown,
+  runtime: Runtime,
+): Promise<unknown> {
+  if (runtime.store.events().length === 0) seed(flow, input, runtime);
+  return driveFlow(flow, runtime);
 }
 
 export { StepUntilError } from "./errors.js";
