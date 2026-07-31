@@ -11,7 +11,7 @@ import { type Graph, type NodeId, type NodeKind, nodeOptionFields } from "../gra
 import type { UserMessage } from "../ai/message.js";
 import type { Waitable } from "../graph/waitable.js";
 import type { ScopeId, ScopeAction } from "../graph/thread.js";
-import { messageKindOf } from "../graph/waitable.js";
+import { messageKindOf, tryMessageKindOf } from "../graph/waitable.js";
 import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../graph/step.js";
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): buildDriveContext.callTool takes a Tool; kept built-in per this task's own scoping.
 import type { Tool } from "../ai/tool.js";
@@ -197,7 +197,7 @@ export async function driveWaitForMessage(
   runtime.store.append({ message }, { type: "message", threadId: context.scope });
 
   const interrupt = interrupts.find(
-    (candidate) => tryMessageKindOfInterrupt(candidate.waitable) === message.kind,
+    (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,
   );
   if (interrupt) {
     stateTracker.maybeEmit(
@@ -236,12 +236,6 @@ export async function driveWaitForMessage(
     input: waitForResult,
     ranInterruptStep: false,
   };
-}
-
-// Mirrors graph/waitable.ts's tryMessageKindOf — re-declared locally to avoid
-// a second import; kept name-distinct to avoid shadowing confusion at call sites.
-function tryMessageKindOfInterrupt(waitable: Waitable<unknown>): string | undefined {
-  return waitable.provider === "userInput" ? waitable.label : undefined;
 }
 
 /**
@@ -291,7 +285,7 @@ export function blockingMessageSource(runtime: Runtime): MessageSource {
         interrupts.map((interrupt) => ({
           id: interrupt.id,
           waitable: interrupt.waitable,
-          messageKind: tryMessageKindOfInterrupt(interrupt.waitable),
+          messageKind: tryMessageKindOf(interrupt.waitable),
         })),
       ),
     signal: (waitable, scope) => waitForSignal(runtime.store, waitable, scope),
@@ -306,7 +300,7 @@ export function peekingMessageSource(runtime: Runtime): MessageSource {
       const message = peekMessageFromInbox(runtime.store, kinds);
       if (!message) return Promise.resolve(undefined);
       const interrupt = interrupts.find(
-        (candidate) => tryMessageKindOfInterrupt(candidate.waitable) === message.kind,
+        (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,
       );
       const winner: RaceWinner = interrupt
         ? {
@@ -348,7 +342,7 @@ export async function runWaitForNode(
   source: MessageSource,
 ): Promise<WaitForOutcome> {
   const { interrupts, context, flow, runtime, stateTracker } = wait;
-  const waitKind = tryMessageKindOfInterrupt(node.waitable);
+  const waitKind = tryMessageKindOf(node.waitable);
 
   if (waitKind === undefined) {
     const matched = await source.signal(node.waitable, context.scope);
@@ -375,7 +369,7 @@ export async function runWaitForNode(
   const wonMessage: UserMessage | undefined =
     winner.kind === "self"
       ? winner.message
-      : tryMessageKindOfInterrupt(winner.interrupt.waitable) !== undefined
+      : tryMessageKindOf(winner.interrupt.waitable) !== undefined
         ? (winner.value as UserMessage)
         : undefined;
 

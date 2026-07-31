@@ -4,6 +4,7 @@
 
 import type { Graph, NodeId, EdgeDefinition } from "../graph/graph.js";
 import type { ScopeId } from "../graph/thread.js";
+import { tryMessageKindOf } from "../graph/waitable.js";
 import type { Emit, StepContext, WaitForResult } from "../graph/step.js";
 import { isCommittedEnvelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
@@ -432,7 +433,7 @@ export function replayBranchSignal(
     branch = group.branches.find((candidate) => {
       if (candidate.done || candidate.started) return false;
       const nodeDef = flow.nodes.get(candidate.current);
-      if (nodeDef?.kind !== "waitFor" || tryMessageKindless(nodeDef.waitable) !== undefined)
+      if (nodeDef?.kind !== "waitFor" || tryMessageKindOf(nodeDef.waitable) !== undefined)
         return false;
       return nodeDef.waitable.match(runtime.store.events()) !== undefined;
     });
@@ -442,7 +443,7 @@ export function replayBranchSignal(
   }
 
   const nodeDef = flow.nodes.get(branch.current);
-  if (nodeDef?.kind !== "waitFor" || tryMessageKindless(nodeDef.waitable) !== undefined) return;
+  if (nodeDef?.kind !== "waitFor" || tryMessageKindOf(nodeDef.waitable) !== undefined) return;
   const matched = nodeDef.waitable.match(runtime.store.events());
   if (matched === undefined) return;
 
@@ -452,10 +453,6 @@ export function replayBranchSignal(
     ok: true,
     result: matched,
   } satisfies WaitForResult);
-}
-
-function tryMessageKindless(waitable: { provider: string; label: string }): string | undefined {
-  return waitable.provider === "userInput" ? waitable.label : undefined;
 }
 
 /** One branch cursor's outward `CursorState` — shared shape for a fan-out branch and a forEach branch (see `forEachBranchCursorState`, foreach.ts): `parked` (not `done`, reserved for the root) once it has folded its own output in or is waiting on its own `waitFor` (with `waitingFor` set, mirroring the root/use-descent cases), `active` while it still has work of its own left. `parentNodeId` names whichever node the caller's branch cursors report as their parent (a fan-out node's or a forEach node's own id). */
