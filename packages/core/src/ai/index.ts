@@ -1,5 +1,10 @@
 // AI authoring — public barrel. Messages, models, tools, and agentTurn.
 
+// Side-effect import: registers the ai extension's declaration-merge
+// augmentation of the core `Event` registry (message/toolCall/toolResult/
+// compaction) — see event.ts.
+import "./event.js";
+
 export type {
   ContentBlock,
   Intent,

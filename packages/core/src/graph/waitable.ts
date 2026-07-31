@@ -2,6 +2,8 @@
 
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) userInput()/toolCall() are ai waitables riding in graph/waitable.ts's plain B1 move; removed when they relocate to ai/ proper.
 import type { MessageKind, UserMessage } from "../ai/message.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) userInput()/toolCall() match on ai-owned event keys (message/toolResult); this side-effect import registers ai/event.ts's declaration merge so any isolated program compiling this file directly (e.g. tools/tsconfig.json) still sees those keys on Event. Removed alongside the import above.
+import "../ai/event.js";
 import type { Envelope } from "../session/index.js";
 
 /**
