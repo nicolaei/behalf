@@ -52,7 +52,11 @@ interface World {
 
 describe("runExplore", () => {
   it("ranks variants by score, worse variant sorts last", async () => {
-    const tinyAgent = agent<World>("tiny", { model: goodModel().model, system: "t", tools: [search] });
+    const tinyAgent = agent<World>("tiny", {
+      model: goodModel().model,
+      system: "t",
+      tools: [search],
+    });
 
     const result = await runExplore({
       of: tinyAgent,
@@ -80,8 +84,8 @@ describe("runExplore", () => {
 
     expect(result.variants).toHaveLength(2);
     expect(result.rankings.default).toBeDefined();
-    expect(result.rankings.default?.[0]?.profile.model?.identifier).toBe("good");
-    expect(result.rankings.default?.[1]?.profile.model?.identifier).toBe("bad");
+    expect(result.rankings.default[0]?.profile.model.identifier).toBe("good");
+    expect(result.rankings.default[1]?.profile.model.identifier).toBe("bad");
   });
 
   it("computes Metrics: mean score, mean usage, mean timeToComplete per variant", async () => {

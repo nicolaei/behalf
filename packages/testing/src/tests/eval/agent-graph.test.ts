@@ -63,7 +63,11 @@ describe("agentGraph", () => {
       store: memoryStore(),
     });
 
-    const result = (await runFlow(agentGraph(profile), userText("find x"), ready)) as ModelCallResult;
+    const result = (await runFlow(
+      agentGraph(profile),
+      userText("find x"),
+      ready,
+    )) as ModelCallResult;
 
     expect(calls).toBe(2); // one tool-calling turn, one finishing turn
     expect(result.usedTools).toBe(false); // the turn that actually finished the flow

@@ -28,9 +28,7 @@ describe("replay folds a bare message event's content, not just its position", (
         context.appendEvent({ message: assistantText("done") }, "message");
         return Promise.resolve(context.output(true));
       });
-      const read = flow.step(
-        outputs((context) => textOf(context.thread.messages.at(-1))),
-      );
+      const read = flow.step(outputs((context) => textOf(context.thread.messages.at(-1))));
       flow.entry(announce);
       announce.then(read);
       read.then(flow.finish);

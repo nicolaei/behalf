@@ -49,7 +49,7 @@ export async function runExplore<World, Output, RankBy extends Record<string, Ra
 ): Promise<ExploreResult<Extract<keyof RankBy, string>>>;
 export async function runExplore<World, Output = unknown>(
   spec: ExploreSpec<World, Output>,
-): Promise<ExploreResult<"default">>;
+): Promise<ExploreResult>;
 export async function runExplore<World, Output>(
   spec: ExploreSpec<World, Output>,
 ): Promise<ExploreResult<string>> {

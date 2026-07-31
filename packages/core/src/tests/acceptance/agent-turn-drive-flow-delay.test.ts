@@ -24,7 +24,12 @@ import { assistantText, assistantToolCall, loggedEnvelopes } from "./support.js"
 // the tool call's own `waitFor(toolCall(id))` is what naturally parks the
 // flow through the real async delay, no outer wrapping required.
 describe("agentTurn + driveFlow survive a real async tool-call delay", () => {
-  const MODEL: Model = { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] };
+  const MODEL: Model = {
+    identifier: "scripted",
+    provider: "test",
+    contextWindow: 1000,
+    reasoning: [],
+  };
   const slow = tool<Record<string, never>, { done: boolean }>(
     "slow",
     "A tool that resolves after a real delay.",
@@ -39,7 +44,9 @@ describe("agentTurn + driveFlow survive a real async tool-call delay", () => {
       model: MODEL,
       respond: () => {
         call += 1;
-        return Promise.resolve(call === 1 ? (assistantToolCall("slow", {}) as never) : assistantText("done"));
+        return Promise.resolve(
+          call === 1 ? (assistantToolCall("slow", {}) as never) : assistantText("done"),
+        );
       },
     };
 

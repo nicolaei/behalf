@@ -10,10 +10,9 @@ import type { Graph, Profile, ModelCallResult } from "@behalf-js/core";
 
 export function agentGraph(profile: Profile): Graph {
   return defineGraph("agent-graph", (flow) => {
-    const respond = flow.step(
-      async (context) => context.output(await context.modelCall(profile)),
-      { label: "respond" },
-    );
+    const respond = flow.step(async (context) => context.output(await context.modelCall(profile)), {
+      label: "respond",
+    });
     flow.entry(respond);
     respond
       .when((result) => !(result as ModelCallResult).usedTools, flow.finish)

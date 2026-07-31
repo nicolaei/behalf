@@ -92,7 +92,7 @@ describe("runRow", () => {
     });
 
     const first = await runRow<World, unknown>(tinyProfile(port.model), row, "test");
-    (first.world as World).hits.push("mutated");
+    first.world.hits.push("mutated");
     const second = await runRow<World, unknown>(tinyProfile(port.model), row, "test");
 
     expect(second.world).toEqual({ hits: [] });
@@ -107,9 +107,13 @@ describe("runRow", () => {
       input: userText("hello"),
     });
 
-    await expect(runRow(tinyProfile({ identifier: "x", provider: "test", contextWindow: 1, reasoning: [] }), row, "myCaller")).rejects.toThrow(
-      /myCaller/,
-    );
+    await expect(
+      runRow(
+        tinyProfile({ identifier: "x", provider: "test", contextWindow: 1, reasoning: [] }),
+        row,
+        "myCaller",
+      ),
+    ).rejects.toThrow(/myCaller/);
   });
 
   it("passes the resolved profile into fixtures(), letting a row pick its fake model by identifier", async () => {

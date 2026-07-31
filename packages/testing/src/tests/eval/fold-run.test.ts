@@ -31,10 +31,9 @@ const search = tool<{ query: string }, { hits: string[] }>("search", "Searches f
 /** The canonical "call model, loop back while it used tools, finish otherwise" agent graph. */
 function agentGraph(profile: Profile): Graph {
   return defineGraph("fold-run-agent", (flow) => {
-    const respond = flow.step(
-      async (context) => context.output(await context.modelCall(profile)),
-      { label: "respond" },
-    );
+    const respond = flow.step(async (context) => context.output(await context.modelCall(profile)), {
+      label: "respond",
+    });
     flow.entry(respond);
     respond
       .when((result) => !(result as { usedTools: boolean }).usedTools, flow.finish)

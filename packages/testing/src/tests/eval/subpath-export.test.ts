@@ -35,7 +35,10 @@ describe("eval subpath export boundary", () => {
   it("every symbol in the eval barrel is reachable from the '@behalf-js/testing/eval' subpath", async () => {
     const evalModule = (await import("@behalf-js/testing/eval")) as Record<string, unknown>;
     for (const name of EVAL_SYMBOLS) {
-      expect(evalModule[name], `expected "${name}" to be exported from @behalf-js/testing/eval`).toBeDefined();
+      expect(
+        evalModule[name],
+        `expected "${name}" to be exported from @behalf-js/testing/eval`,
+      ).toBeDefined();
     }
   });
 

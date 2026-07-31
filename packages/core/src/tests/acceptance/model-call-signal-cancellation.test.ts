@@ -40,8 +40,11 @@ function buildCancellableChatGraph(): {
     model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] },
     respond: (_profile, messages, stream, signal) => {
       const last = messages.at(-1);
-      const text = last?.role === "user" && last.content[0]?.type === "text" ? last.content[0].text : undefined;
-      if (text !== "first") return Promise.resolve(assistantText(`reply to ${text}`));
+      const text =
+        last?.role === "user" && last.content[0]?.type === "text"
+          ? last.content[0].text
+          : undefined;
+      if (text !== "first") return Promise.resolve(assistantText(`reply to ${String(text)}`));
 
       resolveStarted();
       return new Promise(() => {
@@ -89,7 +92,8 @@ function sendAbort(store: SessionStore): void {
 
 describe("runModelCall cancels the port's own transport on abort, not just the flow", () => {
   it("a cooperative port stops emitting real work once its signal fires", async () => {
-    const { graph, store, runtimeReady, modelCallStarted, deltaCount } = buildCancellableChatGraph();
+    const { graph, store, runtimeReady, modelCallStarted, deltaCount } =
+      buildCancellableChatGraph();
     const ready = await runtimeReady;
     driveFlow(graph, ready).catch(() => undefined);
 

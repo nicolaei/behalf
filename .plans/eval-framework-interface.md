@@ -1,35 +1,37 @@
 # Eval framework — public interface breakdown
 
 Source of truth for this note: `.worktrees/testing-framework/src/testing/eval/**`, an unmerged
-branch (`testing-framework`). Never landed in `main`; `packages/testing` today has none of this.
+branch (`testing-framework`).
+Never landed in `main`; `packages/testing` today has none of this.
 This note exists to review the interface before reimplementing it — from scratch, in
 `packages/testing` — rather than porting the branch as-is.
 
 ## Why it exists
 
 `docs/learn/testing/evaluating-personas.md` (the shipped doc) teaches a manual pattern: a plain
-array of cases, `it.each`, hand-written `check` functions, no aggregation. That page says outright
-"there's no built-in eval framework." This branch is the framework that page is the fallback for:
-two vitest-registering functions, `scenario` and `explore`, plus the scorers/regression/ranking
-machinery they share.
+array of cases, `it.each`, hand-written `check` functions, no aggregation.
+That page says outright "there's no built-in eval framework." This branch is the framework that page
+is the fallback for: two vitest-registering functions, `scenario` and `explore`, plus the
+scorers/regression/ranking machinery they share.
 
 ## The two entry points
 
-Both are thin wrappers: a `describe` block containing one `it`. All real logic lives in a
-directly-testable core function (`runScenario` / `runExplore`) that the `it` calls and asserts on.
+Both are thin wrappers: a `describe` block containing one `it`.
+All real logic lives in a directly-testable core function (`runScenario` / `runExplore`) that the
+`it` calls and asserts on.
 
-| | `scenario(name, spec)` | `explore(name, spec)` |
-|---|---|---|
-| Purpose | Gate CI — did behaviour hold | Compare variants — which is best |
-| Variants | One `Subject` | N variants of one `Agent`, via `grid()` or a manual list |
-| Fails the test? | Yes — `expect(result.passed).toBe(true)` | No — always green, `it("ranks", ...)` never asserts |
-| Output | pass/fail + per-scorer `Distribution` | variants sorted by a `Rank` function |
-| Regression check | Optional, against a `BaselineStore` | None |
+|                  | `scenario(name, spec)`                   | `explore(name, spec)`                                    |
+| ---------------- | ---------------------------------------- | -------------------------------------------------------- |
+| Purpose          | Gate CI — did behaviour hold             | Compare variants — which is best                         |
+| Variants         | One `Subject`                            | N variants of one `Agent`, via `grid()` or a manual list |
+| Fails the test?  | Yes — `expect(result.passed).toBe(true)` | No — always green, `it("ranks", ...)` never asserts      |
+| Output           | pass/fail + per-scorer `Distribution`    | variants sorted by a `Rank` function                     |
+| Regression check | Optional, against a `BaselineStore`      | None                                                     |
 
 ## Core data shape: `Run<World, Output>`
 
-Every scorer reads a `Run`, folded from one flow execution's committed event log
-(`foldRun` in `src/testing/graph/run.ts`, already shipped — not part of this branch):
+Every scorer reads a `Run`, folded from one flow execution's committed event log (`foldRun` in
+`src/testing/graph/run.ts`, already shipped — not part of this branch):
 
 ```ts
 interface Run<World = unknown, Output = unknown> {
@@ -47,8 +49,8 @@ interface Run<World = unknown, Output = unknown> {
 ```
 
 A `Run` is produced by driving a synthesized one-step "agent" graph (`agentGraph(profile)` in
-`harness/agent-graph.ts`) through `runFlow`, never the graph/ stepping primitives — evals always
-run a case to completion, they don't pause mid-flow.
+`harness/agent-graph.ts`) through `runFlow`, never the graph/ stepping primitives — evals always run
+a case to completion, they don't pause mid-flow.
 
 ## Building blocks
 
@@ -65,8 +67,8 @@ interface Agent<World, Output> extends Subject<World, Output> {
 ```
 
 The thing under eval. `.with(partial)` returns a **new** Subject with the profile shallow-merged —
-this is what `explore` calls once per variant, never mutating the original agent. A plain
-`Subject` (no `.with`) is enough for `scenario`, which never swaps profiles.
+this is what `explore` calls once per variant, never mutating the original agent.
+A plain `Subject` (no `.with`) is enough for `scenario`, which never swaps profiles.
 
 ### `example(name, { world, fixtures, input }) → Example<World>`
 
@@ -112,9 +114,10 @@ Built-in factories, all boolean (0 or 1) except `llmJudge`:
 - `saidOn(thread, pattern, bars?)` — does `run.lastReply(thread)`'s text match a string/RegExp
 - `llmJudge(rubric, bars, judge?)` — an injected `Judge` rates the reply 0..1. `bars` is
   **mandatory, no default**: a judged score is continuous, not boolean, so there's no honest
-  universal pass bar — the caller must decide `minimumScore` (and optionally `minimumPassRate`)
-  for their own rubric. No `judge` injected and none configured → throws (forces a caller to wire
-  one, keeps this scorer pure and testable without a real model call).
+  universal pass bar — the caller must decide `minimumScore` (and optionally `minimumPassRate`) for
+  their own rubric.
+  No `judge` injected and none configured → throws (forces a caller to wire one, keeps this scorer
+  pure and testable without a real model call).
 - `scoreBy(name, fn, bars?)` — escape hatch, any `(run) => number`
 
 ### Regression: comparing today's distribution against a baseline
@@ -134,8 +137,8 @@ function jsonlBaselineStore(path: string): BaselineStore  // append-only, last-w
 - `fixed(epsilon)`: fail if `current.mean < baseline.mean − epsilon`
 - Only used by `scenario`, never `explore`.
 - Baseline is **per scorer**, ratcheted independently: a scorer that passed its own bar and didn't
-  regress advances its stored baseline; a scorer that failed or regressed keeps its old baseline
-  (so a bad run never becomes the new floor).
+  regress advances its stored baseline; a scorer that failed or regressed keeps its old baseline (so
+  a bad run never becomes the new floor).
 
 ### Ranking (`explore` only)
 
@@ -158,10 +161,11 @@ and get the 4-way cross-product as `explore`'s `variants` list, instead of writi
 rankBy?: Rank | Record<string, Rank>;
 ```
 
-Every variant's runs and `Metrics` are computed exactly **once**, regardless of how many rankers
-are requested. A map of rankers doesn't re-run anything — it just sorts the same computed
-`ExploreVariantResult[]` once per entry, so "rank by quality and by speed at once" is one
-`explore` call, one execution pass, many sorted views of the same data:
+Every variant's runs and `Metrics` are computed exactly **once**, regardless of how many rankers are
+requested.
+A map of rankers doesn't re-run anything — it just sorts the same computed `ExploreVariantResult[]`
+once per entry, so "rank by quality and by speed at once" is one `explore` call, one execution pass,
+many sorted views of the same data:
 
 ```ts
 interface ExploreResult {
@@ -240,8 +244,9 @@ sequenceDiagram
     Fold-->>H: Run<World, Output>
 ```
 
-Each call to `runRow` is fully independent: fresh `world()`, fresh `fixtures()`, fresh `runtime`
-and `memoryStore()`. Nothing carries over between runs of the same row, or between rows.
+Each call to `runRow` is fully independent: fresh `world()`, fresh `fixtures()`, fresh `runtime` and
+`memoryStore()`.
+Nothing carries over between runs of the same row, or between rows.
 
 ## End-to-end shape of a comparison ("grid of personas")
 
@@ -271,15 +276,15 @@ result.rankings.speed[0];    // the fastest variant
 result.rankings.cost[0];     // the cheapest variant — same 4 variants, same 36 executions
 ```
 
-One `explore` call, one execution pass — 4 variants × 3 cases × 3 runs = 36 executions, folded
-into 4 `ExploreVariantResult`s once. Three different orderings of those same 4 results come back
-in `result.rankings`, one per named `rankBy` entry; nothing re-runs to answer "fastest" after
-already asking "best." Nothing here gates CI — it's a report, meant to be read, not asserted on.
+One `explore` call, one execution pass — 4 variants × 3 cases × 3 runs = 36 executions, folded into
+4 `ExploreVariantResult`s once.
+Three different orderings of those same 4 results come back in `result.rankings`, one per named
+`rankBy` entry; nothing re-runs to answer "fastest" after already asking "best." Nothing here gates
+CI — it's a report, meant to be read, not asserted on.
 
 `byScore`, `byTimeToComplete`, `byTokens`, and `byCost` ship as part of the interface — "time to
 complete" and "tokens used" aren't gaps to add later, they're `byTimeToComplete` and `byTokens`
 above.
-
 
 ## Explicit non-goals (as documented in the branch's own comments)
 
@@ -291,30 +296,34 @@ above.
 
 ## Decisions
 
-1. **`Run`/`foldRun` — build fresh in `packages/testing`.** Confirmed: `packages/testing/src/
-   index.ts` (main, today) has no `Run` type and no `foldRun` — it only exports `stepOnce`/
-   `stepUntilBlocked`/`stepUntil` returning `StepResult` (lane status snapshots), a different
-   shape entirely. The branch's `Run`/`foldRun` lived in a `src/testing/graph/run.ts` that never
-   shipped anywhere main. So there's nothing to reuse: this gets implemented from scratch in
-   `packages/testing`, using the branch's version as a design reference, not a source to port.
-2. **Why the branch never merged: likely just forgotten, not a rejected design.** No objection is
-   on record. Treat this interface as the working design and proceed — revisit only if something
-   concrete surfaces during implementation.
+1. **`Run`/`foldRun` — build fresh in `packages/testing`.** Confirmed:
+   `packages/testing/src/ index.ts` (main, today) has no `Run` type and no `foldRun` — it only
+   exports `stepOnce`/ `stepUntilBlocked`/`stepUntil` returning `StepResult` (lane status
+   snapshots), a different shape entirely.
+   The branch's `Run`/`foldRun` lived in a `src/testing/graph/run.ts` that never shipped anywhere
+   main.
+   So there's nothing to reuse: this gets implemented from scratch in `packages/testing`, using the
+   branch's version as a design reference, not a source to port.
+2. **Why the branch never merged: likely just forgotten, not a rejected design.** No objection is on
+   record.
+   Treat this interface as the working design and proceed — revisit only if something concrete
+   surfaces during implementation.
 3. **Package boundary: `packages/testing`.** `scenario`/`explore` and their supporting types live
-   alongside `stepOnce`/`stepUntilBlocked` in `packages/testing`, not a separate package. Keep the
-   branch's "opt-in, not re-exported from the package's main entry" intent by giving eval its own
-   subpath export (e.g. `@behalf-js/testing/eval`) rather than folding it into the package's
+   alongside `stepOnce`/`stepUntilBlocked` in `packages/testing`, not a separate package.
+   Keep the branch's "opt-in, not re-exported from the package's main entry" intent by giving eval
+   its own subpath export (e.g. `@behalf-js/testing/eval`) rather than folding it into the package's
    top-level barrel.
 4. **`llmJudge` has no default score bar — `bars` is a required argument.** Reflected above: the
-   signature is `llmJudge(rubric, bars, judge?)`, not `llmJudge(rubric, bars?, judge?)`. A caller
-   always states their own `minimumScore` for a judged rubric; nothing here guesses one.
+   signature is `llmJudge(rubric, bars, judge?)`, not `llmJudge(rubric, bars?, judge?)`.
+   A caller always states their own `minimumScore` for a judged rubric; nothing here guesses one.
 
 ## Implementation plan
 
-Red → green → refactor, bottom-up. Every red test must fail on **behaviour** (a wrong value, a
-thrown "not implemented"), never on a TypeScript compile error — so step 0 writes the entire
-public type surface and stubs every function body before any test is written. Refactor only
-happens once, after every phase below is green: no mid-stream restructuring.
+Red → green → refactor, bottom-up.
+Every red test must fail on **behaviour** (a wrong value, a thrown "not implemented"), never on a
+TypeScript compile error — so step 0 writes the entire public type surface and stubs every function
+body before any test is written.
+Refactor only happens once, after every phase below is green: no mid-stream restructuring.
 
 ### Phase 0 — interfaces, no behaviour
 
@@ -322,13 +331,14 @@ Write every exported type from this note (`Subject`, `Agent`, `Fixtures`, `Examp
 `Bars`, `Judge`, `Distribution`, `RegressionPolicy`, `BaselineStore`, `Metrics`, `Rank`, `Run`,
 `ScenarioSpec`, `ScenarioResult`, `ExploreSpec`, `ExploreResult`, and friends) into
 `packages/testing/src/eval/`, mirroring the branch's file layout (`subject.ts`, `fixtures.ts`,
-`scorers.ts`, `judge.ts`, `regression.ts`, `harness/*.ts`, `index.ts`). Every function body is
-`throw new Error("not implemented")`. This alone must typecheck and the package must build.
+`scorers.ts`, `judge.ts`, `regression.ts`, `harness/*.ts`, `index.ts`).
+Every function body is `throw new Error("not implemented")`.
+This alone must typecheck and the package must build.
 
 ### Phase 1 — pure leaf utilities (no `Run` dependency)
 
-1. `gate({ scores, minimumScore, minimumPassRate })` — red: pass-rate arithmetic and the
-   pass/fail boundary; green: implement.
+1. `gate({ scores, minimumScore, minimumPassRate })` — red: pass-rate arithmetic and the pass/fail
+   boundary; green: implement.
 2. `aggregate(scores, minimumScore)` / `mean(values)` — red: mean/median/stddev/min/max/passRate
    over a known array, including the empty-array convention (0, not NaN); green: implement.
 3. `grid(axes)` — red: cross-product of 2 and 3 axes, and the zero-axes case; green: implement.
@@ -337,8 +347,8 @@ Write every exported type from this note (`Subject`, `Agent`, `Fixtures`, `Examp
    including `byCost`'s free/local-first and unknown-price-last rules; green: implement.
 5. `variance(k)` / `fixed(epsilon)` / `checkRegression` — red: pass/fail on both policies at the
    threshold boundary; green: implement.
-6. `jsonlBaselineStore(path)` — red: write then read round-trips, and last-write-wins for a
-   repeated `test` key; green: implement against a temp file.
+6. `jsonlBaselineStore(path)` — red: write then read round-trips, and last-write-wins for a repeated
+   `test` key; green: implement against a temp file.
 
 ### Phase 2 — `Subject`/`Example` (pure)
 
@@ -352,8 +362,9 @@ Write every exported type from this note (`Subject`, `Agent`, `Fixtures`, `Examp
 9. Build up `foldRun(events, world, latency)` behaviour-by-behaviour against hand-built committed
    event-log fixtures: `output` (last committed output), `tools` (call/result pairing by
    `correlationId`), `traversal`/`visits` (step order and per-node input/output), `usage`/
-   `messages`/`lastReply` (per-thread and overall). Each is its own red/green pair against the
-   same fixture style already used by the engine's own event tests.
+   `messages`/`lastReply` (per-thread and overall).
+   Each is its own red/green pair against the same fixture style already used by the engine's own
+   event tests.
 
 ### Phase 4 — the canonical agent graph
 
@@ -393,8 +404,8 @@ Write every exported type from this note (`Subject`, `Agent`, `Fixtures`, `Examp
     computes `Metrics` (mean score, mean usage, mean time-to-complete) per variant; normalizes
     `rankBy` to a named map and sorts the same variants once per name — proven with a `rankBy` map
     of two rankers to confirm no second execution happens; proven separately for `byScore`,
-    `byTimeToComplete`, and `byTokens`; never throws or gates regardless of scorer outcome.
-    of scorer outcome.
+    `byTimeToComplete`, and `byTokens`; never throws or gates regardless of scorer outcome. of
+    scorer outcome.
 18. `explore(name, spec)` — red: registers a vitest `it` that always passes; green: implement.
 
 ### Phase 10 — barrel
@@ -408,8 +419,8 @@ Write every exported type from this note (`Subject`, `Agent`, `Fixtures`, `Examp
 20. One end-to-end red test reproducing this note's worked example: a 2×2 `grid()`, three cases,
     `runs: 3`, one exact-match scorer plus one injected fake `Judge`, and a single `explore` call
     with `rankBy: { quality: byScore, speed: byTimeToComplete, cost: byTokens }` — asserting all
-    three rankings come back from one execution pass, plus one `scenario` gating on
-    the same agent. Green once every phase above is wired together correctly.
+    three rankings come back from one execution pass, plus one `scenario` gating on the same agent.
+    Green once every phase above is wired together correctly.
 
 ### Phase 12 — refactor
 

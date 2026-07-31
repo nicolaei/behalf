@@ -8,7 +8,6 @@ dependencies, and scoring a persona across cases.
 - [Setting up fakes](./setting-up-fakes.md) — `fakePort`, a fake `ModelPort`, and other test
   doubles.
 - [Evaluating personas](./evaluating-personas.md) — `scenario`/`explore`: scoring, gating, and
-  comparing personas with `@behalf-js/testing/eval`.
-  outputs across cases.
+  comparing personas with `@behalf-js/testing/eval`. outputs across cases.
 
 **Up:** [Learn behalf](../README.md)

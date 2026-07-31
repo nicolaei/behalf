@@ -24,7 +24,9 @@ function assistant(text: string): AssistantMessage {
   };
 }
 
-function run<World = unknown, Output = unknown>(overrides: Partial<Run<World, Output>>): Run<World, Output> {
+function run<World = unknown, Output = unknown>(
+  overrides: Partial<Run<World, Output>>,
+): Run<World, Output> {
   return {
     output: undefined as Output,
     world: undefined as World,
@@ -125,7 +127,7 @@ describe("saidOn", () => {
   it("passes its thread argument through to run.lastReply", () => {
     let seenThread: string | undefined;
     const scorer = saidOn("t1", "hello");
-    scorer.score(
+    void scorer.score(
       run({
         lastReply: (thread) => {
           seenThread = thread;

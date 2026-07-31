@@ -97,7 +97,9 @@ describe("acceptance: worked example end to end", () => {
     // every ranking is a permutation of the same 4 variants, not independently regenerated
     const profileIdentifiers = (variants: typeof result.variants) =>
       variants.map((v) => v.profile.model?.identifier).sort();
-    expect(profileIdentifiers(result.rankings.quality)).toEqual(profileIdentifiers(result.variants));
+    expect(profileIdentifiers(result.rankings.quality)).toEqual(
+      profileIdentifiers(result.variants),
+    );
     expect(profileIdentifiers(result.rankings.speed)).toEqual(profileIdentifiers(result.variants));
     expect(profileIdentifiers(result.rankings.cost)).toEqual(profileIdentifiers(result.variants));
   });

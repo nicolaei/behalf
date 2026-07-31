@@ -95,7 +95,9 @@ describe("jsonlBaselineStore", () => {
       store.write("my-test", { s: distribution({ mean: 2 }) });
       expect(store.read("my-test")).toEqual({ s: distribution({ mean: 2 }) });
       // append-only: two lines on disk, not one overwritten line
-      const lines = readFileSync(path, "utf8").split("\n").filter((l) => l.trim().length > 0);
+      const lines = readFileSync(path, "utf8")
+        .split("\n")
+        .filter((l) => l.trim().length > 0);
       expect(lines).toHaveLength(2);
     } finally {
       if (existsSync(path)) rmSync(path);

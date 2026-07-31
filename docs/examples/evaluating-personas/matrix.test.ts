@@ -64,7 +64,10 @@ const cases = [
   }),
   example<World>("account-hacked", {
     world: () => ({ ticket: "My account was hacked and I need this fixed now." }),
-    fixtures: () => ({ models: scriptedPort([[{ type: "text", text: "ESCALATE" }]]), bindings: [] }),
+    fixtures: () => ({
+      models: scriptedPort([[{ type: "text", text: "ESCALATE" }]]),
+      bindings: [],
+    }),
     input: userText("My account was hacked and I need this fixed now."),
   }),
   example<World>("business-hours", {

@@ -9,7 +9,14 @@ export type { Fixtures, Example } from "./fixtures.js";
 export { example } from "./fixtures.js";
 
 export type { Bars, Scorer } from "./scorers.js";
-export { toolCalled, toolCalledWith, worldMatches, outputMatches, saidOn, scoreBy } from "./scorers.js";
+export {
+  toolCalled,
+  toolCalledWith,
+  worldMatches,
+  outputMatches,
+  saidOn,
+  scoreBy,
+} from "./scorers.js";
 
 export type { Judge } from "./judge.js";
 export { llmJudge } from "./judge.js";

@@ -33,15 +33,13 @@ export function scorer<World = unknown, Output = unknown>(
 
 /** Did a call to `name` appear in run.tools. @public */
 export function toolCalled(name: string, bars?: Bars): Scorer {
-  return scorer(`toolCalled(${name})`, bars, (run) => (run.tools.some((t) => t.name === name) ? 1 : 0));
+  return scorer(`toolCalled(${name})`, bars, (run) =>
+    run.tools.some((t) => t.name === name) ? 1 : 0,
+  );
 }
 
 /** Did a call to `name` whose input satisfies `ok` appear in run.tools. @public */
-export function toolCalledWith(
-  name: string,
-  ok: (input: unknown) => boolean,
-  bars?: Bars,
-): Scorer {
+export function toolCalledWith(name: string, ok: (input: unknown) => boolean, bars?: Bars): Scorer {
   return scorer(`toolCalledWith(${name})`, bars, (run) =>
     run.tools.some((t) => t.name === name && ok(t.input)) ? 1 : 0,
   );

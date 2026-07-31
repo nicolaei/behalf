@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { agentTurn, driveFlow, runtime, provide, tool } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import type { Message, Model, ModelPort, Profile, Tool } from "../../index.js";
+import type { Model, ModelPort, Profile, Tool } from "../../index.js";
 import { assistantText, assistantToolCall, loggedEnvelopes } from "./support.js";
 
 // The regression this test exists to prove fixed: a tool handler that REJECTS
@@ -21,7 +21,12 @@ import { assistantText, assistantToolCall, loggedEnvelopes } from "./support.js"
 // commits `{ output: { error: message }, isError: true }` instead of letting
 // the rejection propagate un-logged.
 describe("agentTurn survives a rejecting tool handler", () => {
-  const MODEL: Model = { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] };
+  const MODEL: Model = {
+    identifier: "scripted",
+    provider: "test",
+    contextWindow: 1000,
+    reasoning: [],
+  };
   const failing = tool<Record<string, never>, unknown>(
     "failing",
     "A tool whose handler always rejects.",
@@ -36,16 +41,16 @@ describe("agentTurn survives a rejecting tool handler", () => {
       model: MODEL,
       respond: () => {
         call += 1;
-        return Promise.resolve(call === 1 ? (assistantToolCall("failing", {}) as never) : assistantText("done"));
+        return Promise.resolve(
+          call === 1 ? (assistantToolCall("failing", {}) as never) : assistantText("done"),
+        );
       },
     };
 
     const store = memoryStore();
     const ready = await runtime({
       models: () => port,
-      bindings: [
-        provide(failing, () => Promise.reject(new Error("ENOENT: no such file"))),
-      ],
+      bindings: [provide(failing, () => Promise.reject(new Error("ENOENT: no such file")))],
       store,
     });
 

@@ -26,6 +26,6 @@ export function example<World>(
     fixtures: (world: World, profile: Profile) => Fixtures;
     input: Message;
   },
-) : Example<World> {
+): Example<World> {
   return { name, ...row };
 }

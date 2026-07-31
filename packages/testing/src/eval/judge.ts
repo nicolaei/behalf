@@ -20,7 +20,9 @@ export interface Judge {
 export function llmJudge(rubric: string, bars: Bars, judge?: Judge): Scorer {
   return scorer("llmJudge", bars, async (run) => {
     if (!judge) {
-      throw new Error("llmJudge: no Judge configured — pass a judge argument or configure a default.");
+      throw new Error(
+        "llmJudge: no Judge configured — pass a judge argument or configure a default.",
+      );
     }
     return judge.rate(rubric, run.lastReply());
   });

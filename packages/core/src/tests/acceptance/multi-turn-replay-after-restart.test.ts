@@ -46,8 +46,11 @@ function repliesNormallyPort(label: string): ModelPort {
     model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] },
     respond: (_profile, messages) => {
       const last = messages.at(-1);
-      const text = last?.role === "user" && last.content[0]?.type === "text" ? last.content[0].text : undefined;
-      return Promise.resolve(assistantText(`${label}: reply to ${text}`));
+      const text =
+        last?.role === "user" && last.content[0]?.type === "text"
+          ? last.content[0].text
+          : undefined;
+      return Promise.resolve(assistantText(`${label}: reply to ${String(text)}`));
     },
   };
 }
@@ -61,9 +64,17 @@ function sendChatPrompt(store: SessionStore, text: string): void {
 
 describe("a multi-turn conversation, replayed fresh after a simulated restart", () => {
   it("does not fire a phantom model call before any new prompt is sent", async () => {
-    const profile: Profile = { model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] }, system: "test", tools: [] };
+    const profile: Profile = {
+      model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] },
+      system: "test",
+      tools: [],
+    };
     const store = memoryStore();
-    const runtime1 = await runtime({ models: () => repliesNormallyPort("stale"), bindings: [], store });
+    const runtime1 = await runtime({
+      models: () => repliesNormallyPort("stale"),
+      bindings: [],
+      store,
+    });
     const graph1 = chatLikeGraph(profile);
     driveFlow(graph1, runtime1).catch(() => undefined);
 
@@ -96,9 +107,17 @@ describe("a multi-turn conversation, replayed fresh after a simulated restart", 
   });
 
   it("still answers a real third prompt correctly after the restart", async () => {
-    const profile: Profile = { model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] }, system: "test", tools: [] };
+    const profile: Profile = {
+      model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] },
+      system: "test",
+      tools: [],
+    };
     const store = memoryStore();
-    const runtime1 = await runtime({ models: () => repliesNormallyPort("stale"), bindings: [], store });
+    const runtime1 = await runtime({
+      models: () => repliesNormallyPort("stale"),
+      bindings: [],
+      store,
+    });
     const graph1 = chatLikeGraph(profile);
     driveFlow(graph1, runtime1).catch(() => undefined);
 
@@ -107,7 +126,11 @@ describe("a multi-turn conversation, replayed fresh after a simulated restart", 
     sendChatPrompt(store, "second");
     await awaitAssistantMessage(store);
 
-    const runtime2 = await runtime({ models: () => repliesNormallyPort("fresh"), bindings: [], store });
+    const runtime2 = await runtime({
+      models: () => repliesNormallyPort("fresh"),
+      bindings: [],
+      store,
+    });
     const graph2 = chatLikeGraph(profile);
     driveFlow(graph2, runtime2).catch(() => undefined);
     await new Promise((resolve) => setTimeout(resolve, 100));
@@ -123,6 +146,8 @@ describe("a multi-turn conversation, replayed fresh after a simulated restart", 
     // Attributing correct resumption to the fresh instance is the first
     // test's job: a phantom call is exactly what a stuck fresh loop
     // produced before the fix, and it directly proves none fires.
-    expect((await reply).event).toMatchObject({ message: { content: [{ text: /reply to third$/ }] } });
+    expect((await reply).event).toMatchObject({
+      message: { content: [{ text: /reply to third$/ }] },
+    });
   });
 });

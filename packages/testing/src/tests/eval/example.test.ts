@@ -10,7 +10,11 @@ interface World {
 describe("example", () => {
   it("shapes name + { world, fixtures, input } into an Example, unchanged", () => {
     const world = (): World => ({ hits: [] });
-    const fixtures = (_w: World, _p: Profile) => ({ bindings: [] });
+    const fixtures = (_w: World, _p: Profile) => {
+      void _w;
+      void _p;
+      return { bindings: [] };
+    };
     const input = userText("find x");
 
     const row = example("a search", { world, fixtures, input });

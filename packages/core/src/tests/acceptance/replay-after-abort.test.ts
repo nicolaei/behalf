@@ -31,8 +31,12 @@ function hangingPort(label: string): { port: ModelPort; modelCallStarted: Promis
     model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] },
     respond: (_profile, messages, stream) => {
       const last = messages.at(-1);
-      const text = last?.role === "user" && last.content[0]?.type === "text" ? last.content[0].text : undefined;
-      if (text !== "first") return Promise.resolve(assistantText(`${label}: reply to ${text}`));
+      const text =
+        last?.role === "user" && last.content[0]?.type === "text"
+          ? last.content[0].text
+          : undefined;
+      if (text !== "first")
+        return Promise.resolve(assistantText(`${label}: reply to ${String(text)}`));
       resolveStarted();
       return new Promise(() => {
         stream.delta({ correlationId: "1", open: "text" });
@@ -56,7 +60,11 @@ function sendAbort(store: SessionStore): void {
 
 describe("replaying a store containing a real abort, against a brand-new runtime", () => {
   it("does not crash — a fresh process reattaching to an already-aborted session must be able to resume it", async () => {
-    const profile: Profile = { model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] }, system: "test", tools: [] };
+    const profile: Profile = {
+      model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] },
+      system: "test",
+      tools: [],
+    };
     const store = memoryStore();
     const { port, modelCallStarted } = hangingPort("stale");
     const runtime1 = await runtime({ models: () => port, bindings: [], store });
@@ -84,13 +92,21 @@ describe("replaying a store containing a real abort, against a brand-new runtime
         () => "resolved" as const,
         () => "rejected" as const,
       ),
-      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 100)),
+      new Promise<"timeout">((resolve) =>
+        setTimeout(() => {
+          resolve("timeout");
+        }, 100),
+      ),
     ]);
     expect(outcome).not.toBe("rejected");
   });
 
   it("resumes correctly — a real prompt sent after reattaching still gets a real reply, the session isn't left stuck", async () => {
-    const profile: Profile = { model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] }, system: "test", tools: [] };
+    const profile: Profile = {
+      model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] },
+      system: "test",
+      tools: [],
+    };
     const store = memoryStore();
     // memoryStore()/driveFlow() have no "stop" API, so graph1's own
     // background loop is still polling the same store for the rest of this
@@ -121,7 +137,9 @@ describe("replaying a store containing a real abort, against a brand-new runtime
 
     const reply = awaitAssistantMessage(store);
     sendChatPrompt(store, "second");
-    expect((await reply).event).toMatchObject({ message: { content: [{ text: /reply to second$/ }] } });
+    expect((await reply).event).toMatchObject({
+      message: { content: [{ text: /reply to second$/ }] },
+    });
   });
 
   it("resumes an OLD, untagged abort too — data logged before `cause` existed must not be stuck forever", async () => {
@@ -130,7 +148,11 @@ describe("replaying a store containing a real abort, against a brand-new runtime
     // `cause` field and a `target` naming a node id from a process that no
     // longer exists (here, a made-up id that can't possibly match anything —
     // the point is it must NEVER match, the same as a real foreign-process id).
-    const profile: Profile = { model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] }, system: "test", tools: [] };
+    const profile: Profile = {
+      model: { identifier: "scripted", provider: "test", contextWindow: 1000, reasoning: [] },
+      system: "test",
+      tools: [],
+    };
     const store = memoryStore();
     const { port, modelCallStarted } = hangingPort("whichever");
     const runtime1 = await runtime({ models: () => port, bindings: [], store });
@@ -163,7 +185,11 @@ describe("replaying a store containing a real abort, against a brand-new runtime
         () => "resolved" as const,
         () => "rejected" as const,
       ),
-      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 100)),
+      new Promise<"timeout">((resolve) =>
+        setTimeout(() => {
+          resolve("timeout");
+        }, 100),
+      ),
     ]);
     expect(outcome).not.toBe("rejected");
   });

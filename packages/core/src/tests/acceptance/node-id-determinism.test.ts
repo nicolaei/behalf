@@ -71,9 +71,8 @@ describe("node id determinism across separate builds of the same graph shape", (
       return [...node.subgraph.nodes.keys()];
     }
 
-    let firstGraph!: ReturnType<typeof defineGraph>;
     let firstTurn!: Handle;
-    firstGraph = defineGraph("chat-like", (flow) => {
+    const firstGraph: ReturnType<typeof defineGraph> = defineGraph("chat-like", (flow) => {
       firstTurn = flow.use(agentTurn(testProfile()));
       const waitForPrompt = flow.waitFor(userInput("chat"));
       flow.entry(waitForPrompt);
@@ -81,9 +80,8 @@ describe("node id determinism across separate builds of the same graph shape", (
       waitForPrompt.then(firstTurn);
     });
 
-    let secondGraph!: ReturnType<typeof defineGraph>;
     let secondTurn!: Handle;
-    secondGraph = defineGraph("chat-like", (flow) => {
+    const secondGraph: ReturnType<typeof defineGraph> = defineGraph("chat-like", (flow) => {
       secondTurn = flow.use(agentTurn(testProfile()));
       const waitForPrompt = flow.waitFor(userInput("chat"));
       flow.entry(waitForPrompt);

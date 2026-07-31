@@ -14,7 +14,8 @@ export interface Distribution {
 }
 
 /** How a scenario decides its scores haven't regressed against the baseline. @public */
-export type RegressionPolicy = { kind: "variance"; k?: number } | { kind: "fixed"; epsilon: number };
+export type RegressionPolicy =
+  { kind: "variance"; k?: number } | { kind: "fixed"; epsilon: number };
 
 /** Fail if median < baseline.median − k·stddev (default k = 1). @public */
 export function variance(k?: number): RegressionPolicy {

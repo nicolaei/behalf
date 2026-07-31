@@ -110,7 +110,11 @@ describe("agentTurn embedded in a chat-shaped graph with flow.onAbort", () => {
         () => "resolved" as const,
         () => "rejected" as const,
       ),
-      new Promise<"timeout">((resolve) => setTimeout(() => resolve("timeout"), 200)),
+      new Promise<"timeout">((resolve) =>
+        setTimeout(() => {
+          resolve("timeout");
+        }, 200),
+      ),
     ]);
 
     expect(outcome).not.toBe("rejected");
@@ -164,7 +168,9 @@ describe("flow.onAbort backward compatibility", () => {
     const profile: Profile = { model: port.model, system: "test", tools: [] };
 
     const graph = defineGraph("no-onAbort", (flow) => {
-      const respond = flow.step(async (context) => context.output(await context.modelCall(profile)));
+      const respond = flow.step(async (context) =>
+        context.output(await context.modelCall(profile)),
+      );
       flow.entry(respond);
       respond.then(flow.finish);
       // deliberately no flow.onAbort(...)
@@ -205,7 +211,9 @@ describe("flow.onAbort bubbling through a use()'d subgraph", () => {
 
     // inner: no onAbort of its own.
     const inner = defineGraph("inner", (flow) => {
-      const respond = flow.step(async (context) => context.output(await context.modelCall(profile)));
+      const respond = flow.step(async (context) =>
+        context.output(await context.modelCall(profile)),
+      );
       flow.entry(respond);
       respond.then(flow.finish);
     });
@@ -226,7 +234,12 @@ describe("flow.onAbort bubbling through a use()'d subgraph", () => {
 
     store.receive({
       kind: "message",
-      message: { role: "user", intent: "standard", kind: "go", content: [{ type: "text", text: "go" }] },
+      message: {
+        role: "user",
+        intent: "standard",
+        kind: "go",
+        content: [{ type: "text", text: "go" }],
+      },
     });
     await modelCallStarted;
 
@@ -237,7 +250,12 @@ describe("flow.onAbort bubbling through a use()'d subgraph", () => {
     const secondReplyCommit = awaitAssistantMessage(store);
     store.receive({
       kind: "message",
-      message: { role: "user", intent: "standard", kind: "go", content: [{ type: "text", text: "again" }] },
+      message: {
+        role: "user",
+        intent: "standard",
+        kind: "go",
+        content: [{ type: "text", text: "again" }],
+      },
     });
     const secondReply = await secondReplyCommit;
 
