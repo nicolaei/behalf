@@ -44,7 +44,7 @@ npm start
 
 Type your opening message (e.g. "I want a page for tracking book recommendations") into the input
 box at the bottom — that's the only thing the free-text input is wired to.
-It seeds the whole pipeline via `runFlow`.
+It seeds the whole pipeline via `seed()`, then drives it with `driveFlow()`.
 From there, the asker's clarifying questions appear as inline `ask` cards; answer them there.
 Everything after the asker stage runs autonomously (red → green → refactor) with tool calls rendered
 as cards in the transcript, and a `── stage ──` banner marking each stage boundary.

@@ -6,7 +6,7 @@ what happens to it.
 
 ## You will learn
 
-- How to tell `forkedFrom` and `parentThreadId` apart
+- What `forkedFrom` records, and why a child agent isn't a thread relationship at all
 - When to reach for `same`, `fork`, or `new`
 - How forking from an earlier point is how you revert and branch
 - How `{ label: "coder" }` gives a thread a stable, addressable name
@@ -19,12 +19,13 @@ turn.
 A step's own `output` never touches a thread directly: that value only ever travels through
 `context.inputs`, as [Steps and emits](./steps-and-emits.md) covered.
 
-Two ids describe how one thread relates to another. `forkedFrom: { thread, at }` is a tree on an
+One id describes how a thread relates to another. `forkedFrom: { thread, at }` is a tree on an
 existing thread: this thread split off another one at a specific point in its history.
-`parentThreadId` is ownership instead of ancestry: the thread a spawned sub-agent belongs to, not
-one it branched from.
-A forked thread and its parent can both trace back to the same origin; a child thread and its parent
-are simply two separate threads, one of which spawned the other.
+A forked thread and its parent both trace back to the same origin, and both live in the same log.
+
+A genuinely separate child agent is not a thread relationship. `ToolContext.spawnAgent` starts a
+child session with its own store, so nothing on the parent's thread points at it — see
+[Running flows](../wiring-a-runtime/running-flows.md).
 
 ## same, fork, new
 
@@ -106,7 +107,8 @@ as a direct result: the same option, read by the diagram generator instead of th
 ## Recap
 
 - A thread grows via `modelCall`, the inbox, and compaction, never via a step's own `output`
-- `forkedFrom` is ancestry (a fork's own tree); `parentThreadId` is ownership (a spawned sub-agent)
+- `forkedFrom` is ancestry within one log; a child agent from `spawnAgent` is a separate session,
+  not a related thread
 - `same` keeps writing to the current thread; `new` is a deliberate reset; `fork` splits onto a new
   id that still shares history up to that point
 - Reverting is forking from the point worth keeping, seeded with a `prompt`.

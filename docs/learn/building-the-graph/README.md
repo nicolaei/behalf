@@ -9,7 +9,7 @@ Describing a flow — treat it as an opaque named persona for now.
 - [Wiring a graph](./wiring-a-graph.md) — `defineGraph`, `Flow`, `Handle`, edges
   (`when`/`otherwise`/`then`), fan-out.
 - [Threads and forking](./threads-and-forking.md) — `ThreadId`, `ThreadAction`
-  (`same`/`fork`/`new`), `forkedFrom` vs `parentThreadId`.
+  (`same`/`fork`/`new`), `forkedFrom`.
 - [Waiting and interrupts](./waiting-and-interrupts.md) — `Waitable`, `waitFor`, `interrupt`,
   `userInput`.
 

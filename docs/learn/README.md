@@ -18,7 +18,7 @@ For exact signatures, see [`../reference.md`](../reference.md).
 - [Wiring a graph](./building-the-graph/wiring-a-graph.md) — `defineGraph`, `Flow`, `Handle`, edges
   (`when`/`otherwise`/`then`), fan-out.
 - [Threads and forking](./building-the-graph/threads-and-forking.md) — `ThreadId`, `ThreadAction`
-  (`same`/`fork`/`new`), `forkedFrom` vs `parentThreadId`.
+  (`same`/`fork`/`new`), `forkedFrom`.
 - [Waiting and interrupts](./building-the-graph/waiting-and-interrupts.md) — `Waitable`, `waitFor`,
   `interrupt`, `userInput`.
 
