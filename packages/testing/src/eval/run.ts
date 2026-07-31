@@ -52,6 +52,11 @@ function isCommitted(envelope: Envelope): envelope is CommittedEnvelope {
   return envelope.form === "committed";
 }
 
+/** Distinguishes a real `Message` from a plain marker value — mirrors core's own `looksLikeMessage` (runtime/drive.ts), duplicated here since that's not part of core's public surface. An `input` event's `value` is `unknown` (see `Event["input"]`); this is what lets `foldRun` recognize a Message-shaped one (the common case: a session's own starting user message) and fold it in exactly like an ordinary `message` event, without misreading a non-message starting value (e.g. a plain string or marker) as one. */
+function looksLikeMessage(value: unknown): value is Message {
+  return typeof value === "object" && value !== null && "role" in value && "content" in value;
+}
+
 /** Folds one flow execution's committed event log into a `Run`. */
 export function foldRun<World = unknown, Output = unknown>(
   events: Envelope[],
@@ -163,9 +168,20 @@ export function foldRun<World = unknown, Output = unknown>(
       }
       continue;
     }
-    if (envelope.type !== "message") continue;
-    const event = envelope.event as { message: Message };
-    const message = event.message;
+    let message: Message;
+    if (envelope.type === "message") {
+      message = (envelope.event as { message: Message }).message;
+    } else if (
+      envelope.type === "input" &&
+      looksLikeMessage((envelope.event as { value: unknown }).value)
+    ) {
+      // The session's own starting fact (see `Event["input"]`) — folds in
+      // exactly like an ordinary `message` event when its value is one;
+      // see `looksLikeMessage`'s own doc comment.
+      message = (envelope.event as { value: Message }).value;
+    } else {
+      continue;
+    }
 
     allMessages.push(message);
     if (envelope.threadId !== undefined) {

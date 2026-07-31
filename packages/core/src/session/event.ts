@@ -8,6 +8,14 @@ import type { NodeId } from "../graph/graph.js";
 /** The payload of a durable fact. The envelope names which key applies. @public */
 export interface Event {
   message: { message: Message };
+  // The durable "here is your starting value" fact — a session's own first
+  // event, appended once by `seed()` (runtime.ts). `node` is the flow's entry
+  // node; `value` is whatever the caller started the session with (usually a
+  // `Message`, but not required to be one — see `replayPosition`, tick.ts,
+  // which establishes its starting cursor here instead of assuming an empty
+  // log means "start at flow.entry with no input"). A session with no `input`
+  // event yet has no starting cursor at all: `tick` just reports it parked.
+  input: { node: NodeId; value: unknown };
   output: { value: unknown };
   toolCall: { correlationId: string; name: string; input: unknown };
   toolResult: { correlationId: string; output: unknown; isError?: boolean };

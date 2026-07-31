@@ -7,4 +7,4 @@ export type { EngineExtension } from "./extension.js";
 export type { ErrorContext, ErrorDecision, ErrorHandler } from "./errors.js";
 export { RetryableError } from "./errors.js";
 export type { Runtime } from "./runtime.js";
-export { runtime, runFlow, driveFlow } from "./runtime.js";
+export { runtime, runFlow, driveFlow, seed } from "./runtime.js";

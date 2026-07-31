@@ -47,6 +47,7 @@ import {
   findInterruptNodes,
   seedUseNode,
   commitInvalidation,
+  looksLikeMessage,
 } from "./drive.js";
 import { buildForEachGroup, replayForEachBranch, advanceForEachGroup } from "./foreach.js";
 
@@ -162,8 +163,11 @@ interface ReplayPosition {
   pendingInputs?: unknown[];
 }
 
-/** What a fresh replay of `runtime.store` left off at: mid-flight on one line (`single`), or spread across an in-flight fan-out group's branches (`fanout`). */
-type ReplayResult = ({ kind: "single" } & ReplayPosition) | { kind: "fanout"; group: FanOutGroup };
+/** What a fresh replay of `runtime.store` left off at: mid-flight on one line (`single`), spread across an in-flight fan-out group's branches (`fanout`), or — no `input` event committed yet — `not-started`: the session has no starting cursor at all, so `tick` just reports it parked (see the `Event["input"]` doc comment). */
+type ReplayResult =
+  | ({ kind: "single" } & ReplayPosition)
+  | { kind: "fanout"; group: FanOutGroup }
+  | { kind: "not-started" };
 
 /**
  * Reconstructs `tick`'s position purely from `runtime.store.events()` — no
@@ -515,6 +519,11 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     thread: { id: freshThreadId(runtime), messages: [], history: [] },
     tree: { kind: "step", frame: { flow, current: flow.entry, currentInput: undefined } },
   };
+  // Set only once, by the log's own `input` event (see `Event["input"]`'s
+  // doc comment) — a log with no `input` event yet has no starting cursor at
+  // all, distinct from "empty because nothing has happened since the first
+  // event"; see the `kind: "not-started"` return below.
+  let started = false;
 
   for (const envelope of runtime.store.events()) {
     if (envelope.form !== "committed") continue;
@@ -544,6 +553,25 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     const atForEach =
       leaf.node.kind === "step" && leaf.flow.nodes.get(leaf.node.frame.current)?.kind === "forEach";
     if (!atForEach && envelope.threadId) state.thread = { ...state.thread, id: envelope.threadId };
+
+    if (envelope.type === "input" && !started) {
+      // The session's own starting fact: establishes the starting cursor at
+      // the named node with the given value, folding it into the thread the
+      // same way an ordinary `message` event would if the value looks like
+      // one (see `tool-spawns-subflow.test.ts`'s child flow reading
+      // `context.thread.messages.at(-1)` directly in its entry step, no
+      // `waitFor`/`use` involved) — this is the ONE place that fold happens
+      // for a session's own first value, replacing runFlow's old separate
+      // pre-drive `message` commit (see runtime.ts's `seed`/`runFlow`).
+      started = true;
+      const { node, value } = envelope.event as Event["input"];
+      if (looksLikeMessage(value)) state.thread = withMessage(state.thread, value);
+      state.tree = rebuildFromPath(path, path.length - 1, {
+        kind: "step",
+        frame: { flow: leaf.flow, current: node, currentInput: value },
+      });
+      continue;
+    }
 
     if (envelope.type === "output") {
       // A branch's own step outputs (committed on its deterministic branch
@@ -582,6 +610,17 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     }
     // toolCall/toolResult/error don't move the main position on their own
     // — out of scope for this slice's replay.
+  }
+
+  // A `waitFor` entry already parks safely with `currentInput: undefined`
+  // — it peeks the inbox/signal reactively, never reading `currentInput` as
+  // its own value — so "no `input` event yet" is a real, resumable session
+  // start for that shape alone (see `driveFlow`'s own doc comment: "a fresh
+  // flow parks at its own entry waitFor until a message arrives"). Any other
+  // entry kind would otherwise run live with a bogus `undefined` input, so
+  // it genuinely has no starting cursor without a real `input` event.
+  if (!started && flow.nodes.get(flow.entry)?.kind !== "waitFor") {
+    return { kind: "not-started" };
   }
 
   const finalPath = cursorPath(flow, state.tree);
@@ -831,6 +870,14 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
   const stateTracker = replayStateTracker(runtime.store.events());
   const scope = new ExecutionScope(attemptsByNode, stateTracker);
   const position = replayPosition(flow, runtime);
+
+  // No `input` event committed yet: the session has no starting cursor at
+  // all — park at the flow's own entry rather than assuming an empty log
+  // means "start at flow.entry with no input" (today's old implicit rule).
+
+  if (position.kind === "not-started") {
+    return [{ node: flow.entry, status: "parked" }];
+  }
 
   if (position.kind === "fanout") {
     return advanceFanOutGroup(position.group, flow, runtime, scope);

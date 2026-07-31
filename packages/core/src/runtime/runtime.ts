@@ -87,9 +87,38 @@ export async function runtime(config: {
 }
 
 /**
+ * Appends a flow's starting value to a fresh session's log as the durable
+ * `input` event (see `Event["input"]`) — the log's own first fact, node =
+ * `flow.entry`, value = `input`. This is what `tick`/`driveFlow` replay from
+ * to establish a session's opening cursor; a store with no `input` event yet
+ * has no starting cursor at all, and `tick` just reports it parked instead of
+ * assuming some other implicit start condition.
+ *
+ * `runFlow` calls this too (see below), so every session — whether driven by
+ * `runFlow`'s own blocking loop or by `seed()` + `driveFlow` — durably logs
+ * the same starting fact under the same event type.
+ * @public
+ */
+export function seed(flow: Graph, input: unknown, runtime: Runtime): void {
+  runtime.store.append({ node: flow.entry, value: input }, { type: "input" });
+}
+
+/**
  * Seeds a new session with a user message, drives it to completion, and
  * resolves with the terminal output. A `parentThreadId` makes it a child —
  * how a tool spawns a sub-agent.
+ *
+ * Internally: `seed()` first, appending the durable `input` event any later
+ * `driveFlow`/`tick` call on this store would replay from — then drives via
+ * the existing `driveGraph` loop, unconverted, exactly as before `seed()`
+ * existed. Not routed through `tick`'s own replay: `tick`/`replayPosition`
+ * reconstruct position from `runtime.store.events()` with no per-run scoping
+ * key, which is correct under one-Runtime-is-one-session (see `runtime()`'s
+ * own doc comment) but doesn't hold for two concurrent `runFlow` calls
+ * sharing one store (see `agent-turn-primitive.test.ts`'s two-agents-one-log
+ * case) — a pattern the target architecture replaces with one store per
+ * spawned agent (see docs/restructure plan's `AgentSpawner`), not one this
+ * task should teach `tick` to disambiguate.
  * @public
  */
 export async function runFlow(
@@ -106,7 +135,7 @@ export async function runFlow(
     history: [initialPrompt],
   };
 
-  runtime.store.append({ message: initialPrompt }, { type: "message", threadId });
+  seed(flow, initialPrompt, runtime);
 
   const result = await driveGraph(flow, runtime, thread, initialPrompt);
   return result.output;

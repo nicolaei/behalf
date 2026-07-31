@@ -77,7 +77,7 @@ export function findInterruptNodes(flow: Graph): InterruptNode[] {
 }
 
 /** Distinguishes a real `Message` from a plain marker value (e.g. `waitFor`'s `WaitForResult`) reaching a `use` node as its incoming value. */
-function looksLikeMessage(value: unknown): value is Message {
+export function looksLikeMessage(value: unknown): value is Message {
   return typeof value === "object" && value !== null && "role" in value && "content" in value;
 }
 
