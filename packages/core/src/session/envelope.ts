@@ -55,3 +55,8 @@ export interface Stream {
 
 /** Narrows `Envelope` to its committed/in-progress form, excluding a `delta` fragment (which has neither `type` nor `event`). Shared by every replay/reconstruction path that scans the committed log for a specific event type. Not part of the package's public surface — an internal engine helper that happens to live next to `Envelope`. */
 export type CommittedEnvelope = Extract<Envelope, { type: EventType }>;
+
+/** Narrows further to settled (`"committed"`) envelopes only, excluding an `"in-progress"` snapshot — provisional data from a stream still open. Used wherever something reads "this scope's slice of the log" (e.g. `ExecutionScope.events()`) and shouldn't see a not-yet-final stream. Not part of the package's public surface. */
+export function isCommittedEnvelope(envelope: Envelope): envelope is CommittedEnvelope {
+  return envelope.form === "committed";
+}

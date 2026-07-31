@@ -36,6 +36,7 @@ export interface Runtime {
   readonly bindings: Binding[];
   readonly store: SessionStore;
   readonly errorHandlers: ErrorHandler[];
+  readonly extensions: EngineExtension[]; // registered capabilities; their stepContext() is merged into every StepContext
 }
 
 /** Expands every binding into one name -> handler map: direct tool bindings as-is, toolset bindings via their `discover()`, called once each. */
@@ -74,6 +75,7 @@ export async function runtime(config: {
     bindings: config.bindings,
     store: config.store,
     errorHandlers: [...(config.errorHandlers ?? []), defaultErrorHandler],
+    extensions: config.extensions ?? [],
   };
   resolvedTools.set(ready, await expandToolsets(config.bindings));
   startToolExecutor(ready);

@@ -15,6 +15,7 @@ import { tryMessageKindOf, messageKindOf } from "../graph/waitable.js";
 import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../graph/step.js";
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) buildDriveContext.callTool takes a Tool; removed when callTool moves into ai's stepContext hook.
 import type { Tool } from "../ai/tool.js";
+import { isCommittedEnvelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
 import { freshCorrelationId } from "./ids.js";
 import { notImplemented, unreachable } from "./errors.js";
@@ -616,6 +617,14 @@ export function buildDriveContext(
   const context = makeStepContext({
     getThread,
     inputs: [],
+    getEvents: () => {
+      const threadId = getThread().id;
+      return runtime.store
+        .events()
+        .filter(isCommittedEnvelope)
+        .filter((envelope) => envelope.threadId === threadId);
+    },
+    extensions: runtime.extensions,
     openStream: (type) => {
       const identity = currentNodeIdentity(
         getCurrent(),

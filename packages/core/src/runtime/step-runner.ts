@@ -6,14 +6,16 @@
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) commitCompaction takes an ai-shaped Message; removed when compaction moves into ai/.
 import type { Message } from "../ai/message.js";
 import type { NodeId, Graph } from "../graph/graph.js";
+import type { ThreadAction } from "../graph/thread.js";
 import type { Step, StepContext, Emit, ModelCallResult, StepError } from "../graph/step.js";
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) StepContextConfig.callTool takes a Tool; removed when callTool moves into ai's stepContext hook.
 import type { Tool } from "../ai/tool.js";
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) StepContextConfig.modelCall takes a Profile; removed when modelCall moves into ai's stepContext hook.
 import type { Profile } from "../ai/profile.js";
-import type { Stream } from "../session/envelope.js";
+import type { Stream, CommittedEnvelope } from "../session/envelope.js";
 import type { Event, EventType } from "../session/event.js";
 import type { Runtime } from "./runtime.js";
+import type { EngineExtension, ExecutionScope as ScopeHandle } from "./extension.js";
 import { type ErrorContext, type ErrorDecision, unreachable } from "./errors.js";
 import { RetryableError } from "./errors.js";
 import { type Thread, StateTracker, withCompaction } from "./routing.js";
@@ -180,6 +182,63 @@ export interface StepContextConfig {
   modelCall: (profile: Profile) => Promise<ModelCallResult>;
   callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
   compact: (input: { task?: Message; summary: Message; keepLast: number }) => Promise<void>;
+  getEvents: () => readonly CommittedEnvelope[]; // this scope's slice of the committed log, backing ExecutionScope.events()
+  extensions: EngineExtension[]; // registered extensions whose stepContext() is merged into the built StepContext
+}
+
+/** The built-in StepContext field names — reserved so an extension's contributed key can never silently shadow one. */
+const BUILT_IN_STEP_CONTEXT_KEYS = [
+  "thread",
+  "inputs",
+  "openStream",
+  "appendEvent",
+  "modelCall",
+  "callTool",
+  "output",
+  "compact",
+  "invalidate",
+  "fail",
+];
+
+/** Builds the `ExecutionScope` handle passed to each extension's `stepContext(scope)`. `state()` has no real backing yet — the per-extension scope-state slot doesn't exist until reducers land (B2 step 6) — so it's a documented stub. */
+function makeExecutionScope(config: StepContextConfig): ScopeHandle {
+  return {
+    get scope() {
+      return config.getThread().id;
+    },
+    events: config.getEvents,
+    state(): unknown {
+      // TODO(B2 step 6): wire to the real per-extension replay state once reducers land.
+      return undefined;
+    },
+    appendEvent: config.appendEvent,
+  };
+}
+
+/** Merges every registered extension's `stepContext(scope)` contribution into one object. Throws on a key that collides with a built-in field, or with another extension's contribution — a real ambiguity, never resolved by silent last-writer-wins. */
+function mergeExtensionStepContext(
+  extensions: EngineExtension[],
+  scope: ScopeHandle,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+  for (const extension of extensions) {
+    if (!extension.stepContext) continue;
+    const contributed = extension.stepContext(scope);
+    for (const [key, value] of Object.entries(contributed)) {
+      if (BUILT_IN_STEP_CONTEXT_KEYS.includes(key)) {
+        throw new Error(
+          `extension "${extension.name}" contributed stepContext key "${key}", which collides with a built-in StepContext field`,
+        );
+      }
+      if (key in merged) {
+        throw new Error(
+          `two extensions contributed the same stepContext key "${key}" — ambiguous merge, rename one`,
+        );
+      }
+      merged[key] = value;
+    }
+  }
+  return merged;
 }
 
 /**
@@ -187,9 +246,16 @@ export interface StepContextConfig {
  * main drive loop or a fan-out branch. Both call this one factory so a later
  * change (filling in a branch's `call` stub) touches
  * one place instead of two parallel builders.
+ *
+ * Every registered extension's `stepContext(scope)` contribution is merged in
+ * on top of the built-in fields (see `mergeExtensionStepContext`) — this is
+ * the one place that happens, so both `buildDriveContext` (drive.ts/tick.ts)
+ * and the fan-out branch context (fan-out.ts) get it for free.
  */
 export function makeStepContext(config: StepContextConfig): StepContext {
-  return {
+  const scope = makeExecutionScope(config);
+  const extensionFields = mergeExtensionStepContext(config.extensions, scope);
+  const context = {
     get thread() {
       return config.getThread();
     },
@@ -202,7 +268,10 @@ export function makeStepContext(config: StepContextConfig): StepContext {
       return { output: value };
     },
     compact: config.compact,
-    invalidate(target, options): Emit<never> {
+    invalidate(
+      target: NodeId,
+      options?: { threadAction?: ThreadAction; reason?: Message },
+    ): Emit<never> {
       return {
         invalidate: target,
         threadAction: options?.threadAction ?? "same",
@@ -213,6 +282,7 @@ export function makeStepContext(config: StepContextConfig): StepContext {
       return { error };
     },
   };
+  return Object.assign(context, extensionFields);
 }
 
 /**
@@ -223,24 +293,40 @@ export function makeStepContext(config: StepContextConfig): StepContext {
  * value: a plain object spread (`{ ...context, inputs }`) would evaluate
  * `context.thread` once at spread time and freeze that snapshot, missing any
  * later replacement (e.g. a model or tool call folding a message in) that
+ * happens while the derived context's own step is still running. Any
+ * extension-contributed key already merged onto `context` (see
+ * `makeStepContext`) carries over too, since it isn't one of the built-in
+ * fields explicitly re-mapped below.
+ * value: a plain object spread (`{ ...context, inputs }`) would evaluate
+ * `context.thread` once at spread time and freeze that snapshot, missing any
+ * later replacement (e.g. a model or tool call folding a message in) that
  * happens while the derived context's own step is still running.
  */
 export function withInputs(context: StepContext, inputs: unknown[]): StepContext {
-  return {
+  const extensionFields: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(context)) {
+    if (!BUILT_IN_STEP_CONTEXT_KEYS.includes(key)) extensionFields[key] = value;
+  }
+  const derived = {
     get thread() {
       return context.thread;
     },
     inputs,
-    openStream: (type) => context.openStream(type),
-    appendEvent: (payload, type) => {
+    openStream: (type: EventType) => context.openStream(type),
+    appendEvent: (payload: Event[EventType], type: EventType) => {
       context.appendEvent(payload, type);
     },
-    modelCall: (profile) => context.modelCall(profile),
+    modelCall: (profile: Profile) => context.modelCall(profile),
     callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) =>
       context.callTool(tool, input),
     output: <Result>(value: Result) => context.output(value),
-    compact: (input) => context.compact(input),
-    invalidate: (target, options) => context.invalidate(target, options),
-    fail: (error) => context.fail(error),
+    compact: (input: { task?: Message; summary: Message; keepLast: number }) =>
+      context.compact(input),
+    invalidate: (
+      target: Parameters<StepContext["invalidate"]>[0],
+      options?: Parameters<StepContext["invalidate"]>[1],
+    ) => context.invalidate(target, options),
+    fail: (error: StepError) => context.fail(error),
   };
+  return Object.assign(derived, extensionFields) as StepContext;
 }

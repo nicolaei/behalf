@@ -8,6 +8,7 @@ import type { ThreadId } from "../graph/thread.js";
 import type { Message, MessageKind } from "../ai/message.js";
 import { tryMessageKindOf } from "../graph/waitable.js";
 import type { Emit, StepContext, WaitForResult } from "../graph/step.js";
+import { isCommittedEnvelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
 import { freshCorrelationId } from "./ids.js";
 import { notImplemented, unreachable } from "./errors.js";
@@ -165,6 +166,12 @@ export async function runBranchNode(
       thread = commitCompaction(runtime, thread, input);
       return Promise.resolve();
     },
+    getEvents: () =>
+      runtime.store
+        .events()
+        .filter(isCommittedEnvelope)
+        .filter((envelope) => envelope.threadId === thread.id),
+    extensions: runtime.extensions,
   });
 
   if (nodeDef.kind === "waitFor") {
