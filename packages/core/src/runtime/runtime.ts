@@ -17,6 +17,7 @@ import type { ThreadId } from "../graph/thread.js";
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) ModelPort is an ai concern; removed when runtime() stops taking `models` directly.
 import type { ModelPort } from "../ai/model-port.js";
 import type { SessionStore } from "../session/session-store.js";
+import type { EngineExtension } from "./extension.js";
 import { defaultErrorHandler, type ErrorHandler } from "./errors.js";
 import type { Thread } from "./routing.js";
 export type { Thread } from "./routing.js";
@@ -64,6 +65,7 @@ export async function runtime(config: {
   models: (model: Model) => ModelPort;
   bindings: Binding[];
   store: SessionStore;
+  extensions?: EngineExtension[]; // capabilities registering their own waitables (later steps add more)
   errorHandlers?: ErrorHandler[]; // consulted on a step error; a default retry handler runs last
   idFactory?: () => string; // generates every fresh correlation/thread id; omit for the default counters
 }): Promise<Runtime> {
@@ -75,6 +77,9 @@ export async function runtime(config: {
   };
   resolvedTools.set(ready, await expandToolsets(config.bindings));
   startToolExecutor(ready);
+  for (const extension of config.extensions ?? []) {
+    for (const source of extension.waitables ?? []) source.start(config.store);
+  }
   if (config.idFactory) idFactories.set(ready, config.idFactory);
   return ready;
 }

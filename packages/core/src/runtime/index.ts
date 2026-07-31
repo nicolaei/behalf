@@ -3,6 +3,7 @@
 export type { Missing } from "./coverage.js";
 export { satisfiesPersonas, satisfiesFlows, FlowNotReadyError } from "./coverage.js";
 export type { WaitableSource } from "./waitable-source.js";
+export type { EngineExtension } from "./extension.js";
 export type { ErrorContext, ErrorDecision, ErrorHandler } from "./errors.js";
 export { RetryableError } from "./errors.js";
 export type { Runtime } from "./runtime.js";

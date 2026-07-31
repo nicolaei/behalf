@@ -44,7 +44,12 @@ describe("runtime({ extensions }) folds an extension's waitables into its regist
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store, extensions: [extension] });
+    const ready = await runtime({
+      models: neverCalled,
+      bindings: [],
+      store,
+      extensions: [extension],
+    });
 
     const result = await runFlow(flow, userText("go"), ready);
 
