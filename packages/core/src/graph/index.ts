@@ -1,6 +1,6 @@
 // Graph authoring — public barrel. The graph DSL itself: nodes, edges, steps, waitables.
 
-export type { ThreadId, ThreadAction } from "./thread.js";
+export type { ScopeId, ScopeAction } from "./thread.js";
 export type {
   NodeId,
   Graph,

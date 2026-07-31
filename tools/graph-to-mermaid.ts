@@ -11,7 +11,6 @@
 
 import type { Graph, NodeId, NodeKind, EdgeDefinition } from "../packages/core/src/graph/graph.js";
 import type { PersonaStep, JoinStep } from "../packages/core/src/graph/step.js";
-import type { ThreadAction } from "../packages/core/src/graph/thread.js";
 
 function escapeLabel(label: string): string {
   return label.replace(/"/g, "&quot;");
@@ -48,11 +47,12 @@ function renderNode(id: NodeId, node: NodeKind): string {
 }
 
 /** One edge's label: a custom `label` wins outright; otherwise `when`/`otherwise` fall back to their
- *  kind name and a plain `then` stays unlabeled — either way, a non-default `threadAction` is appended. */
+ *  kind name and a plain `then` stays unlabeled — either way, a `run` function tagged with a
+ *  non-default `.scopeAction` (see `startThread`/`forkThread` in `ai/thread.ts`) is appended. */
 function renderEdgeLabel(edge: EdgeDefinition): string | undefined {
   const base = edge.options?.label ?? (edge.edge === "then" ? undefined : edge.edge);
-  const threadAction: ThreadAction | undefined = edge.options?.threadAction;
-  const suffix = threadAction && threadAction !== "same" ? ` (${threadAction})` : "";
+  const scopeAction = (edge.options?.run as { scopeAction?: string } | undefined)?.scopeAction;
+  const suffix = scopeAction ? ` (${scopeAction})` : "";
   if (base === undefined) return suffix ? `then${suffix}` : undefined;
   return `${base}${suffix}`;
 }

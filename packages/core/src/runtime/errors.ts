@@ -1,14 +1,14 @@
 // Systems running flows — Errors. See docs/reference.md § "Errors".
 
-import type { ThreadId } from "../graph/thread.js";
+import type { ScopeId } from "../graph/thread.js";
 import type { StepError } from "../graph/step.js";
 import type { Envelope } from "../session/index.js";
 
 // #region error-context
-/** Context passed to an error handler: the step, thread, attempt count, and session log. @public */
+/** Context passed to an error handler: the step, scope, attempt count, and session log. @public */
 export interface ErrorContext {
   step: { id: string; name?: string };
-  thread: ThreadId;
+  thread: ScopeId;
   attempts: number; // times this step has already errored
   log: Envelope[]; // the session so far, to inspect
 }

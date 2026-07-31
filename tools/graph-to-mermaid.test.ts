@@ -9,6 +9,7 @@ import { join } from "../packages/core/src/graph/step.js";
 import type { StepContext } from "../packages/core/src/graph/step.js";
 import type { Profile } from "../packages/core/src/ai/profile.js";
 import { graphToMermaid } from "./graph-to-mermaid.js";
+import { forkThread } from "../packages/core/src/ai/thread.js";
 
 /** Finds the one node of `kind` a test graph is known to have, or fails loudly. */
 function nodeIdOf(graph: Graph, kind: NodeKind["kind"]): NodeId {
@@ -71,11 +72,11 @@ describe("graphToMermaid", () => {
     expect(graphToMermaid(graph)).toContain(`${stepId} --> ${finishId}`);
   });
 
-  it("labels a `then` edge with a non-default threadAction", () => {
+  it("labels a `then` edge with a non-default scope action", () => {
     const graph = defineGraph("g", (flow) => {
       const s = flow.step((c) => Promise.resolve(c.output(1)));
       flow.entry(s);
-      s.then(flow.finish, { threadAction: "fork" });
+      s.then(flow.finish, { run: forkThread(() => undefined) });
     });
 
     expect(graphToMermaid(graph)).toContain('-->|"then (fork)"|');

@@ -65,9 +65,7 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
       );
       const branch = flow.step((context) =>
         Promise.resolve(
-          context.inputs[0] === 1
-            ? context.invalidate(target.id, { threadAction: "same" })
-            : context.output("done"),
+          context.inputs[0] === 1 ? context.invalidate(target.id) : context.output("done"),
         ),
       );
       const other = flow.step(outputs(() => "other"));
@@ -107,7 +105,7 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     await runFlow(graph, userText("go"), ready);
 
@@ -120,7 +118,7 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
   it("commits an event to the log via the branch's own opened stream, scoped to the branch's forked thread", async () => {
     let branchThreadId: unknown;
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     const graph = defineGraph("branch-opens-stream", (flow) => {
       const start = flow.step(outputs(() => "go"));

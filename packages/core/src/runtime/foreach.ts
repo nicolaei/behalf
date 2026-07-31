@@ -13,142 +13,133 @@
 // `fan-out.ts` does, is thus unavailable here — by design, not by accident.
 //
 // This is resolved by never needing stepId equality at all: each branch gets
-// a deterministic thread id (derived from the forEach node's own stable id,
+// a deterministic scope id (derived from the forEach node's own stable id,
 // its item index, and — critically — how many times this SAME node has
-// already fully completed on this thread before this invocation; see
-// `forEachBranchThreadId`'s own doc comment for why the invocation count is
+// already fully completed on this scope before this invocation; see
+// `forEachBranchScopeId`'s own doc comment for why the invocation count is
 // required), and a branch's position is reconstructed by replaying, in
-// commit order, only the events tagged with that thread id, folding each one
+// commit order, only the events tagged with that scope id, folding each one
 // into a locally-tracked `current` — never comparing the event's own stepId
-// against anything. This works because a thread id, once minted, is a plain
+// against anything. This works because a scope id, once minted, is a plain
 // string persisted in the log itself; it doesn't depend on which process (or
-// which call) reconstructs it. The same thread ids are what keep branch
+// which call) reconstructs it. The same scope ids are what keep branch
 // events out of the main line's own replay: `replayPosition` skips any
-// output event committed on a non-main thread while parked at a forEach
+// output event committed on a non-main scope while parked at a forEach
 // node, precisely because a branch node's id can no longer be relied on to
 // miss the main graph's id set (see tick.ts's replay loop).
 
 import type { Graph, NodeId, NodeKind } from "../graph/graph.js";
-import type { ThreadId } from "../graph/thread.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) forEach branch replay reads ai-shaped MessageKind; removed when message replay moves to ai's reducers.
-import type { MessageKind } from "../ai/message.js";
+import type { ScopeId } from "../graph/thread.js";
 import type { WaitForResult } from "../graph/step.js";
-import type { Event } from "../session/event.js";
 import type { CommittedEnvelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
 import { notImplemented, unreachable } from "./errors.js";
-import { type Thread, withMessage, route } from "./routing.js";
-import { tryMessageKindOf } from "../graph/waitable.js";
+import { route } from "./routing.js";
 import { type ExecutionContext, ExecutionScope } from "./step-runner.js";
-import {
-  runBranchNode,
-  replayForkedThread,
-  branchCursorStateWith,
-  findSingleThenEdge,
-} from "./fan-out.js";
+import { runBranchNode, branchCursorStateWith, findSingleThenEdge } from "./fan-out.js";
 import type { CursorState, TickOutcome } from "./tick.js";
 
-/** One forEach branch's reconstructed progress — mirrors `BranchReplay` (fan-out.ts), but `graph` is rebuilt fresh every call (see this file's own doc comment) and `current`/`thread` are reconstructed by replaying only this branch's own deterministic thread, never by matching stepIds. `thread` is set the first time the branch is touched (forked off the group's `mainThread`, same fork semantics as a static fan-out branch — just onto a deterministic id instead of a fresh one). Once `done`, `current` names the branch graph's own `finish` node and `output` holds what reached it. */
+/** One forEach branch's reconstructed progress — mirrors `BranchReplay` (fan-out.ts), but `graph` is rebuilt fresh every call (see this file's own doc comment) and `current`/`scope` are reconstructed by replaying only this branch's own deterministic scope, never by matching stepIds. `scope` is set the first time the branch is touched (forked off the group's `mainScope`, same fork semantics as a static fan-out branch — just onto a deterministic id instead of a fresh one). Once `done`, `current` names the branch graph's own `finish` node and `output` holds what reached it. */
 export interface ForEachBranchReplay {
   readonly item: unknown;
   readonly index: number;
-  readonly threadId: ThreadId;
+  readonly scopeId: ScopeId;
   readonly graph: Graph;
-  thread?: Thread;
+  scope?: ScopeId;
   current: NodeId;
   currentInput: unknown;
   done: boolean;
   output?: unknown;
-  waitingFor?: MessageKind[];
+  waitingFor?: string[];
 }
 
 /** A forEach node's branches, rebuilt fresh every call from `node.items`/`node.branch` and reconstructed from `runtime.store` the same deterministic way every time — nothing here survives between calls. */
 export interface ForEachGroup {
   forEachNodeId: NodeId;
-  mainThread: Thread;
+  mainScope: ScopeId;
   branches: ForEachBranchReplay[];
 }
 
 /**
  * How many times this forEach node has already fully completed (folded
- * back to its join edge) on this thread, BEFORE this invocation —
+ * back to its join edge) on this scope, BEFORE this invocation —
  * reconstructed purely from the log, the same discipline `replayStateTracker`
  * applies elsewhere: every completed invocation logs exactly one "output"
- * event tagged with the forEach node's own stepId and the thread it folded
+ * event tagged with the forEach node's own stepId and the scope it folded
  * on (see `commitRoute`'s call in `advanceTickForEachNode`), so counting
  * those gives an invocation number that agrees across every replay.
  */
 function completedForEachInvocations(
   runtime: Runtime,
   forEachNodeId: NodeId,
-  threadId: ThreadId,
+  scope: ScopeId,
 ): number {
   let count = 0;
   for (const envelope of runtime.store.events()) {
     if (envelope.form !== "committed") continue;
     if (envelope.type !== "output") continue;
     if (envelope.stepId !== forEachNodeId) continue;
-    if (envelope.threadId !== threadId) continue;
+    if (envelope.threadId !== scope) continue;
     count += 1;
   }
   return count;
 }
 
 /**
- * The deterministic thread id every reconstruction of branch `index` agrees
+ * The deterministic scope id every reconstruction of branch `index` agrees
  * on — derived from the forEach node's own stable id, the branch's position
  * in `node.items`' own returned order (both assumed stable/deterministic —
  * the same assumption `driveForEachNode` already makes for runFlow), AND
  * which pass through this node this is (`invocation`, from
  * `completedForEachInvocations`). The node id and item index alone are NOT
  * enough: `agentTurn`-shaped graphs loop back through the very same static
- * forEach node on a later turn, on the SAME thread — without the invocation
- * number, that later pass's branch 0 would derive the identical thread id an
+ * forEach node on a later turn, on the SAME scope — without the invocation
+ * number, that later pass's branch 0 would derive the identical scope id an
  * earlier, already-completed pass's branch 0 used, and replay would walk
  * straight into that earlier pass's stale committed output instead of
  * running this pass's own tool wait. Folding `invocation` in keeps every
- * pass's branch thread ids distinct, while still being plain, log-derivable
+ * pass's branch scope ids distinct, while still being plain, log-derivable
  * strings — nothing here is per-process or per-call state.
  */
-function forEachBranchThreadId(forEachNodeId: NodeId, invocation: number, index: number): ThreadId {
-  return `${forEachNodeId}::forEach-invocation-${String(invocation)}::forEach-branch-${String(index)}` as ThreadId;
+function forEachBranchScopeId(forEachNodeId: NodeId, invocation: number, index: number): ScopeId {
+  return `${forEachNodeId}::forEach-invocation-${String(invocation)}::forEach-branch-${String(index)}` as ScopeId;
 }
 
 /** Builds a forEach node's group from its own `items`/`branch` functions — recomputed identically on every call (live or replay) from the same `currentInput`, so this never needs to persist anything itself beyond what `completedForEachInvocations` reads back out of the log. */
 export function buildForEachGroup(
   node: Extract<NodeKind, { kind: "forEach" }>,
   forEachNodeId: NodeId,
-  mainThread: Thread,
+  mainScope: ScopeId,
   currentInput: unknown,
   runtime: Runtime,
 ): ForEachGroup {
-  const invocation = completedForEachInvocations(runtime, forEachNodeId, mainThread.id);
+  const invocation = completedForEachInvocations(runtime, forEachNodeId, mainScope);
   const items = node.items(currentInput);
   const branches: ForEachBranchReplay[] = items.map((item, index) => {
     const graph = node.branch(item);
     return {
       item,
       index,
-      threadId: forEachBranchThreadId(forEachNodeId, invocation, index),
+      scopeId: forEachBranchScopeId(forEachNodeId, invocation, index),
       graph,
       current: graph.entry,
       currentInput: item,
       done: false,
     };
   });
-  return { forEachNodeId, mainThread, branches };
+  return { forEachNodeId, mainScope, branches };
 }
 
 /**
  * Reconstructs one branch's position purely from `runtime.store`. A
  * non-message `waitFor` (e.g. `toolCall`) isn't tied to any one event on
- * this branch's own thread — its own Waitable scans the whole committed
+ * this branch's own scope — its own Waitable scans the whole committed
  * log — so it's checked, and advanced past, on every settle attempt rather
- * than folded from the per-thread event list; everything else (a `step`'s
+ * than folded from the per-scope event list; everything else (a `step`'s
  * own output, a message-based `waitFor`) consumes the next not-yet-applied
- * event tagged with this branch's deterministic thread id, in commit order
- * — unambiguously its own, since that thread id belongs to no one else.
- * Interleaving the two (rather than folding thread-scoped events first and
+ * event tagged with this branch's deterministic scope id, in commit order
+ * — unambiguously its own, since that scope id belongs to no one else.
+ * Interleaving the two (rather than folding scope-scoped events first and
  * checking `match()` only once at the end) matters once more than one node
  * has run: a `waitFor` reached mid-branch must be tried immediately, or
  * events logged for the *next* node would be scanned against the wrong
@@ -158,16 +149,16 @@ export function buildForEachGroup(
  */
 export function replayForEachBranch(
   branch: ForEachBranchReplay,
-  group: ForEachGroup,
+  _group: ForEachGroup,
   runtime: Runtime,
 ): void {
   const events: CommittedEnvelope[] = [];
   for (const envelope of runtime.store.events()) {
     if (envelope.form !== "committed") continue;
-    if (envelope.threadId !== branch.threadId) continue;
+    if (envelope.threadId !== branch.scopeId) continue;
     events.push(envelope);
   }
-  let thread: Thread = branch.thread ?? replayForkedThread(group.mainThread, branch.threadId);
+  let scope: ScopeId = branch.scope ?? branch.scopeId;
   let index = 0;
 
   for (;;) {
@@ -175,26 +166,25 @@ export function replayForEachBranch(
     if (!node) unreachable(`forEach branch graph has no node "${branch.current}"`);
 
     if (node.kind === "finish") {
-      branch.thread = thread;
+      branch.scope = scope;
       branch.done = true;
       branch.output = branch.currentInput;
       return;
     }
 
-    if (node.kind === "waitFor" && tryMessageKindOf(node.waitable) === undefined) {
+    if (node.kind === "waitFor" && node.waitable.provider !== "userInput") {
       const matched = node.waitable.match(runtime.store.events());
       if (matched === undefined) {
-        branch.thread = thread;
+        branch.scope = scope;
         return;
       }
       const routed = route(
         branch.graph.edges,
         branch.current,
         { ok: true, result: matched } satisfies WaitForResult,
-        thread,
-        runtime,
+        scope,
       );
-      thread = routed.thread;
+      scope = routed.scope;
       branch.current = routed.to;
       branch.currentInput = routed.input;
       continue;
@@ -204,16 +194,16 @@ export function replayForEachBranch(
     // either way, this branch's next not-yet-applied event, in order.
     const envelope = events[index];
     if (!envelope) {
-      branch.thread = thread;
+      branch.scope = scope;
       return; // nothing logged yet for this node — this is the frontier
     }
 
     if (node.kind === "step") {
       index += 1;
       if (envelope.type !== "output") continue; // not this step's own event
-      const { value } = envelope.event as Event["output"];
-      const routed = route(branch.graph.edges, branch.current, value, thread, runtime);
-      thread = routed.thread;
+      const value = (envelope.event as { value: unknown }).value;
+      const routed = route(branch.graph.edges, branch.current, value, scope);
+      scope = routed.scope;
       branch.current = routed.to;
       branch.currentInput = routed.input;
       continue;
@@ -222,16 +212,14 @@ export function replayForEachBranch(
     if (node.kind === "waitFor") {
       index += 1;
       if (envelope.type !== "message") continue;
-      const { message } = envelope.event as Event["message"];
-      thread = withMessage(thread, message);
+      const message = (envelope.event as { message: unknown }).message;
       const routed = route(
         branch.graph.edges,
         branch.current,
         { ok: true, result: message } satisfies WaitForResult,
-        thread,
-        runtime,
+        scope,
       );
-      thread = routed.thread;
+      scope = routed.scope;
       branch.current = routed.to;
       branch.currentInput = routed.input;
       continue;
@@ -261,7 +249,7 @@ export function forEachBranchCursorState(
 export async function advanceForEachGroup(
   group: ForEachGroup,
   runtime: Runtime,
-  scope: ExecutionScope,
+  execScope: ExecutionScope,
 ): Promise<TickOutcome> {
   const notDone = group.branches.filter((branch) => !branch.done);
   if (notDone.length === 0)
@@ -269,8 +257,8 @@ export async function advanceForEachGroup(
 
   // Every branch in this call descends into the caller's own scope (see
   // ExecutionScope's own doc comment) rather than forking: forEach branches
-  // run on the group's own thread ids, but two branches declaring the same
-  // `state` -- or a branch and the enclosing thread itself -- must still
+  // run on the group's own scope ids, but two branches declaring the same
+  // `state` -- or a branch and the enclosing scope itself -- must still
   // dedupe into one `stateChange`, exactly as `driveForEachNode`'s own
   // branches do on the non-tick drive path (see drive.ts's
   // `driveForEachNode`, whose doc comment explains why). `descend()` always
@@ -278,16 +266,16 @@ export async function advanceForEachGroup(
   // across every branch this call touches, not one per branch.
 
   for (const branch of notDone) {
-    const thread: Thread = branch.thread ?? replayForkedThread(group.mainThread, branch.threadId);
-    branch.thread = thread;
+    const scope: ScopeId = branch.scope ?? branch.scopeId;
+    branch.scope = scope;
     const ctx: ExecutionContext = {
       flow: branch.graph,
       runtime,
-      thread,
-      scope: scope.descend(),
+      scope,
+      execScope: execScope.descend(),
     };
     const result = await runBranchNode(branch.current, branch.currentInput, ctx);
-    branch.thread = result.thread;
+    branch.scope = result.scope;
     if (result.kind === "invalidate") notImplemented("tick: forEach branch invalidate");
 
     if (result.kind === "parked") {

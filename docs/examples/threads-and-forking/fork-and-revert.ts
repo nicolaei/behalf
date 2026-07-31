@@ -1,5 +1,5 @@
 // The Learn "Threads and forking" page's example: a small draft/review loop
-// that exercises all three ThreadActions in one graph. `draft.then(review)`
+// that exercises all three ScopeActions in one graph. `draft.then(review)`
 // is the default (`same`): the review continues on the same thread as the
 // draft. A rejected review forks back to `draft`, seeded with the review's
 // feedback as the new thread's prompt — a revert that keeps the draft's own
@@ -10,6 +10,7 @@
 // fork-and-revert.test.ts, so all three actions are actually exercised.
 
 import { defineGraph, outputs, userText } from "@behalf-js/core";
+import { startThread, forkThread } from "@behalf-js/core";
 import type { Graph, Profile, Model, StepContext } from "@behalf-js/core";
 
 const draftModel: Model = {
@@ -76,15 +77,17 @@ export const draftReview: Graph = defineGraph("fork-and-revert", (flow) => {
   // #region actions
   draft.then(review); // same (default) — review continues the draft's own thread
 
-  review.when((output) => (output as Verdict).approved, notify, {
-    threadAction: "new", // deliberate reset — notify only needs the final text
-    prompt: (output) => userText((output as Verdict).text),
-  });
+  review.when(
+    (output) => (output as Verdict).approved,
+    notify,
+    // deliberate reset — notify only needs the final text
+    { run: startThread((output) => userText((output as Verdict).text)) },
+  );
 
   // #region revert
   review.otherwise(draft, {
-    threadAction: "fork", // revert — split onto a new thread, seeded with feedback
-    prompt: (output) => userText((output as Verdict).text),
+    // revert — split onto a new thread, seeded with feedback
+    run: forkThread((output) => userText((output as Verdict).text)),
   });
   // #endregion revert
   // #endregion actions

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, storeOnlyRuntime, loggedEventTypes, loggedEnvelopes } from "./support.js";
+import { neverCalled, loggedEventTypes, loggedEnvelopes } from "./support.js";
 
 // Needs StepContext/ToolContext.appendEvent to be real — currently missing
 // from both context builders. Mirrors openStream's slice from round 1: a
@@ -42,7 +42,10 @@ describe("a step or tool can append a standalone event", () => {
       step.then(flow.finish);
     });
 
-    const ready = await storeOnlyRuntime();
+    const ready = await runtime({
+      store: memoryStore(),
+      extensions: [ai({ models: neverCalled, bindings: [] })],
+    });
     await runFlow(graph, userText("go"), ready);
 
     const toolCall = loggedEnvelopes(ready.store).find((envelope) => envelope.type === "toolCall");

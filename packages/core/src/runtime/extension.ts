@@ -1,22 +1,25 @@
 // Systems running flows — the extension seam. See docs/reference.md.
 
-import type { ThreadId } from "../graph/thread.js";
+import type { ScopeId, ScopeAction } from "../graph/thread.js";
 import type { Event, EventType } from "../session/event.js";
 import type { CommittedEnvelope } from "../session/envelope.js";
 import type { WaitableSource } from "./waitable-source.js";
 import type { Runtime } from "./runtime.js";
+import { freshScopeId } from "./ids.js";
 
 /**
  * The runtime's per-scope handle, passed to an extension's context factories
- * (`stepContext` today; `edgeContext` and reducers in later B2 steps).
- *
- * `scope` is today's `ThreadId` — the design doc sketches this as `ScopeId`,
- * a rename that only lands with the thread-extraction step (B2 step 8); until
- * then this is the same identity `StepContext.thread.id` already carries.
+ * (`stepContext`/`edgeContext`) and to its `seedScope` hook.
  * @public
  */
 export interface ExecutionScope {
-  readonly scope: ThreadId;
+  readonly scope: ScopeId;
+  /** The scope that spawned this one as a child (a tool's own `runFlow` call), if any —
+   * ownership, not ancestry (see `graph/thread.ts`'s own doc comment on the distinction).
+   * Live/in-memory only, exactly like before this scope's own extraction: never durably
+   * logged, so a later replay of the same session never reconstructs it — only the same
+   * process's own live `runFlow` call sees it. Backs ai's `ctx.thread.parentThreadId`. */
+  readonly parentScope?: ScopeId;
   /** This scope's slice of the committed log, in log order. */
   events(): readonly CommittedEnvelope[];
   /**
@@ -27,18 +30,29 @@ export interface ExecutionScope {
    * no `reducers` — an extension with none simply has no scope state.
    */
   state(extension: string): unknown;
-  /** Commits a standalone event to this scope's thread — the same append path every step uses. */
+  /** Commits a standalone event to this scope — the same append path every step uses. */
   appendEvent<T extends EventType>(payload: Event[T], type: T): void;
+  /**
+   * Derives the scope a subsequent operation on THIS SAME context should run on, per
+   * `action`: `"same"` returns this scope's own id, unchanged; `"fork"`/`"new"` mint a
+   * fresh id (core's own branch-identity generator — the same deterministic counter
+   * `context.invalidate`'s structural decision uses) and switch this context's own
+   * "current scope" so every following `appendEvent`/`state()`/`openStream` call on
+   * it lands on the new one. This is what lets an extension's own `ctx.thread.start`/
+   * `fork` (ai's stepContext/edgeContext contribution) actually redirect where
+   * downstream execution and logging go, while staying purely event-sourced: replay
+   * recognizes the same transition generically, from whichever scope the next
+   * committed envelope is tagged with — no separate replay-side bookkeeping needed.
+   */
+  deriveScope(action: ScopeAction): ScopeId;
+  /** The currently-running node's own declared label, if any — present only on a `StepContext`'s
+   * own scope handle (an edge has no single "currently running node"). Backs ai's `ctx.thread.label`. */
+  label?(): string | undefined;
 }
 
 /**
  * The seam through which a capability (ai, timers, …) attaches to a `Runtime` without the
- * engine knowing its vocabulary. B2.1 gave this just enough for `runtime()` to fold an
- * extension's `waitables` into its existing `WaitableSource` handling; B2.2 added
- * `stepContext`, merged into every `StepContext` the runtime builds; this step adds
- * `edgeContext`, merged into every `EdgeContext` the runtime builds when an edge with a
- * `run` function fires. Later B2 steps extend this interface further with `workers` and
- * `reducers` — additive members only, so today's extensions keep compiling unchanged.
+ * engine knowing its vocabulary.
  * @public
  */
 export interface EngineExtension {
@@ -66,6 +80,20 @@ export interface EngineExtension {
    * always handles inline. Backs `ExecutionScope.state(this.name)`.
    */
   reducers?: Partial<Record<EventType, ScopeStateReducer>>;
+  /**
+   * Called once, synchronously, whenever `context.invalidate(...)`'s own scope-lifecycle
+   * decision resolves — whichever scope ends up current (unchanged for `"same"`, freshly
+   * minted for `"fork"`/`"new"`) — passing along the generic `payload`, if any. This is
+   * the extension-payload counterpart to `deriveScope`: core decides WHICH scope a rerun
+   * lands on; an extension that cares what `payload` means (ai's own reason/message shape)
+   * seeds that scope's own state here, via the given `appendEvent`. A no-op for an
+   * extension that registers none.
+   */
+  seedScope?(
+    scope: ScopeId,
+    payload: unknown,
+    appendEvent: <T extends EventType>(payload: Event[T], type: T) => void,
+  ): void;
   /** Park conditions this extension can satisfy — each is started the same way `runtime()`
    * already starts an extension's `workers`, with no separate setup required by any caller. */
   waitables?: WaitableSource[];
@@ -93,7 +121,7 @@ export interface EngineExtension {
 export type ScopeStateReducer = (
   state: unknown,
   event: CommittedEnvelope,
-  scope: ThreadId,
+  scope: ScopeId,
 ) => unknown;
 
 /**
@@ -106,7 +134,7 @@ export type ScopeStateReducer = (
 export function foldExtensionState(
   events: readonly CommittedEnvelope[],
   extension: EngineExtension | undefined,
-  scope: ThreadId,
+  scope: ScopeId,
 ): unknown {
   if (!extension?.reducers) return undefined;
   let state: unknown;
@@ -116,4 +144,31 @@ export function foldExtensionState(
     state = reducer(state, event, scope);
   }
   return state;
+}
+
+/** Notifies every registered extension's own `seedScope` hook, if it has one — the shared tail `context.invalidate`'s resolution (and `routeAbort`'s synthesized equivalent) both call once a scope-lifecycle decision has settled. A no-op when `payload` is `undefined` or no extension registers the hook. */
+export function seedScope(
+  extensions: readonly EngineExtension[],
+  scope: ScopeId,
+  payload: unknown,
+  appendEvent: <T extends EventType>(payload: Event[T], type: T) => void,
+): void {
+  if (payload === undefined) return;
+  for (const extension of extensions) {
+    extension.seedScope?.(scope, payload, appendEvent);
+  }
+}
+
+/** Builds a `deriveScope` implementation for a mutable "current scope" cell — shared by `step-runner.ts`'s `makeExecutionScope` and `routing.ts`'s `makeEdgeExecutionScope`, the two places an `ExecutionScope` is actually constructed. */
+export function makeDeriveScope(
+  runtime: Runtime,
+  getScope: () => ScopeId,
+  setScope: (scope: ScopeId) => void,
+): (action: ScopeAction) => ScopeId {
+  return (action) => {
+    if (action === "same") return getScope();
+    const next = freshScopeId(runtime);
+    setScope(next);
+    return next;
+  };
 }

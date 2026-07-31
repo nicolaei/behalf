@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { tick, tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import type { TickOutcome } from "../../runtime/runtime.js";
-import { defineGraph, runtime, userText, join, outputs } from "../../index.js";
+import { defineGraph, runtime, join, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 
 // Needs tick() to support a fan-out inside a used subgraph — today it
@@ -28,7 +28,7 @@ describe("ticking a flow through a used subgraph that itself fans out", () => {
     const start = flow.step(outputs(() => "start"));
     const sub = flow.use(inner);
     flow.entry(start);
-    start.then(sub, { prompt: (value) => userText(String(value)) });
+    start.then(sub);
     sub.then(flow.finish);
   });
 

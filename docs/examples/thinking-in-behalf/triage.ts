@@ -78,7 +78,7 @@ export const triage: Graph = defineGraph("triage", (flow) => {
   // #endregion shape
 
   // #region threading
-  waitForHuman.then(respond, { threadAction: "same" });
+  waitForHuman.then(respond); // "same" is the default — no options needed
   // #endregion threading
 
   autoResolve.then(flow.finish);

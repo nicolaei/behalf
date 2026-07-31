@@ -1,19 +1,17 @@
 // Flow authoring — defineGraph. See docs/reference.md § "defineGraph".
 
 import type { Step } from "./step.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) EdgeOptions.prompt carries a Message; removed when prompt/threadAction leave the graph DSL for the ai extension's ctx.thread.
-import type { Message } from "../ai/message.js";
 import type { Waitable } from "./waitable.js";
-import type { ThreadAction, ThreadId } from "./thread.js";
+import type { ScopeId } from "./thread.js";
 import type { Event, EventType } from "../session/event.js";
 
 /** Opaque brand for node identifiers within a graph. @public */
 export type NodeId = string & { readonly __brand: "NodeId" };
 
-/** What an edge function receives. Extensions merge in more (ai: `thread`) — see `EngineExtension.edgeContext`. `scope` is today's `ThreadId`; the design doc's renamed `ScopeId` arrives with the thread-extraction step (B2 step 8), same precedent `ExecutionScope` already set for step context. @public */
+/** What an edge function receives. Extensions merge in more (ai: `thread`) — see `EngineExtension.edgeContext`. @public */
 export interface EdgeContext {
-  readonly scope: ThreadId;
-  /** Commits a standalone event to this scope's thread — the same append path `StepContext.appendEvent` uses. */
+  readonly scope: ScopeId;
+  /** Commits a standalone event to this scope — the same append path `StepContext.appendEvent` uses. */
   appendEvent<T extends EventType>(payload: Event[T], type: T): void;
 }
 
@@ -28,10 +26,8 @@ export interface EdgeContext {
  */
 export type EdgeFn = (value: unknown, ctx: EdgeContext) => unknown;
 
-/** Options attached to an edge — optional thread action, prompt transform, a routing/data-modification function, and a human-readable label (used by `graphToMermaid`; purely descriptive, never read by the engine). @public */
+/** Options attached to an edge — a routing/data-modification function, and a human-readable label (used by `graphToMermaid`; purely descriptive, never read by the engine). Loses `threadAction`/`prompt` (both conversation concepts) — an edge now carries at most a label and a function; the ai extension's `ctx.thread`/`startThread`/`forkThread` replace what those used to do. @public */
 export interface EdgeOptions {
-  threadAction?: ThreadAction; // omitted = "same"
-  prompt?: (output: unknown) => Message;
   run?: EdgeFn; // runs once, at routing commit; see `EdgeFn`
   label?: string; // e.g. "no tools used" — shown instead of the generic when/otherwise/then name
 }

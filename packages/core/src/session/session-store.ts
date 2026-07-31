@@ -2,7 +2,7 @@
 
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 6: reducers + replay slot) PendingEntry's message kind is ai-shaped; removed when a pending message becomes a generic ai-registered inbox kind.
 import type { UserMessage } from "../ai/message.js";
-import type { ThreadId } from "../graph/thread.js";
+import type { ScopeId } from "../graph/thread.js";
 import type { Envelope, Event, EventType, Stream } from "./index.js";
 
 /**
@@ -38,14 +38,14 @@ export interface SessionStore {
   consume(matches: (entry: PendingEntry) => boolean): PendingEntry | undefined; // find-and-remove a pending entry in one call
   append(
     event: Event[EventType],
-    meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId },
+    meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ScopeId },
   ): void;
   open(meta: {
     correlationId: string;
     type: EventType;
     stepId: string;
     stepName?: string;
-    threadId: ThreadId;
+    threadId: ScopeId;
   }): Stream;
   changes(): AsyncIterable<Envelope>;
 }

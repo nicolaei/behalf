@@ -1,6 +1,6 @@
 // Session store — Envelope. See docs/reference.md § "Envelope".
 
-import type { ThreadId } from "../graph/thread.js";
+import type { ScopeId } from "../graph/thread.js";
 import type { Event, EventType } from "./event.js";
 
 /** Opaque brand for session identifiers. @public */
@@ -15,7 +15,7 @@ export type Envelope<Type extends EventType = EventType> =
   | {
       form: "committed" | "in-progress";
       sessionId: SessionId;
-      threadId?: ThreadId;
+      threadId?: ScopeId;
       stepId?: string;
       stepName?: string;
       type: Type;
@@ -27,7 +27,7 @@ export type Envelope<Type extends EventType = EventType> =
   | {
       form: "delta";
       sessionId: SessionId;
-      threadId?: ThreadId;
+      threadId?: ScopeId;
       stepId?: string;
       correlationId: string;
       at: number;

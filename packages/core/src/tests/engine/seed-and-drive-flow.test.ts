@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { seed, driveFlow, runtime } from "../../runtime/runtime.js";
-import { defineGraph, userText, outputs } from "../../index.js";
+import { ai, defineGraph, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { textOf } from "../acceptance/support.js";
+import { textOf, neverCalled } from "../acceptance/support.js";
 
 // B2.4 — seed() + the `input` event become the durable "here is your
 // starting value" fact `tick`/`driveFlow` replay from, replacing the old
@@ -19,7 +19,7 @@ describe("seed() appends the durable input event driveFlow replays from", () => 
 
   it("seed()'s value reaches the entry node as its own currentInput", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     seed(echo, userText("hello"), ready);
 
@@ -30,7 +30,7 @@ describe("seed() appends the durable input event driveFlow replays from", () => 
 
   it("a truly empty, never-seeded session just parks — no crash, no implicit start", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     // Never seeded. driveFlow must not run `respond` with a bogus
     // undefined input, or throw — it just waits, the same as it would at

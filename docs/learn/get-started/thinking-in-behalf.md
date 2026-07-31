@@ -89,7 +89,7 @@ silently guessing one of the two: Step 5 wires up what happens next.
 
 ## Step 3: Choose threading
 
-Every edge carries a `ThreadAction`: `same` (default, context keeps growing), `fork` (a new id that
+Every edge picks a thread action — `same` (default, context keeps growing), `fork` (a new id that
 still shares history up to the split), or `new` (a blank thread, fresh history).
 See [Threads and forking](../building-the-graph/threads-and-forking.md) for the full contract.
 
@@ -97,11 +97,11 @@ This flow only needs `same`: the human answering an escalated ticket needs the w
 of them, not a reset conversation.
 
 ```ts source=docs/examples/thinking-in-behalf/triage.ts#threading
-  waitForHuman.then(respond, { threadAction: "same" });
+  waitForHuman.then(respond); // "same" is the default — no options needed
 ```
 
-`same` is also the default, so writing it here is optional.
-It's spelled out because choosing it deliberately, and saying why, is the point of this step, not
+`same` is also the default, so no `run` function is needed at all here.
+It's called out because choosing it deliberately, and saying why, is the point of this step, not
 because the code requires it. `new` earns its place in a different shape: a step that deliberately
 starts a clean sub-conversation, unrelated to what came before it.
 An unrelated follow-up ticket doesn't need `new` either: a fresh `runFlow()` call already begins on

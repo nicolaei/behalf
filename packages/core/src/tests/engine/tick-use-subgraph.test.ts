@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
-import { defineGraph, runtime, userText, outputs } from "../../index.js";
+import { ai, defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { textOf, loggedEventTypes } from "../acceptance/support.js";
+import { textOf, loggedEventTypes, neverCalled } from "../acceptance/support.js";
 
 // Needs tick() to support "use" nodes — currently it throws
 // notImplemented("tick: node kind \"use\"") whenever the replayed position
@@ -21,13 +21,19 @@ describe("ticking a flow through a used subgraph", () => {
     const start = flow.step(outputs(() => "hi"));
     const sub = flow.use(inner);
     flow.entry(start);
-    start.then(sub, { prompt: (value) => userText(String(value)) });
+    start.then(sub, {
+      run: (value, ctx) => {
+        ctx.thread.say(userText(String(value)));
+        return value;
+      },
+    });
     sub.then(flow.finish);
   });
 
   it("advances through the used subgraph and returns its result via tickUntilSuspended", async () => {
     const ready = await runtime({
       store: memoryStore(),
+      extensions: [ai({ models: neverCalled, bindings: [] })],
     });
     seed(outer, undefined, ready);
 
@@ -39,7 +45,7 @@ describe("ticking a flow through a used subgraph", () => {
 
   it("appends the subgraph's messages and output to the same session log", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
     seed(outer, undefined, ready);
 
     await tickUntilSuspended(outer, ready);

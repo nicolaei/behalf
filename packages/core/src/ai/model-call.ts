@@ -6,10 +6,11 @@ import type { UserMessage, AssistantMessage, ContentBlock } from "./message.js";
 import type { Profile } from "./profile.js";
 import type { StepContext, ModelCallResult } from "../graph/step.js";
 import { ModelCallAbortedError } from "../graph/step.js";
-import type { Runtime, Thread } from "../runtime/index.js";
-import { withMessage } from "../runtime/index.js";
+import type { Runtime } from "../runtime/index.js";
+import type { ScopeId } from "../graph/thread.js";
 import type { SessionStore } from "../session/index.js";
 import { modelResolvers } from "./tool-executor.js";
+import "./context.js"; // side-effect: registers the StepContext/EdgeContext.thread declaration merge
 
 /** Parks until an abort message reaches the inbox — stops the moment `isCancelled` says the
  * race that started it has already been decided some other way. */
@@ -48,8 +49,9 @@ export async function runModelCall(
   profile: Profile,
   context: StepContext,
   runtime: Runtime,
-  setThread: (thread: Thread) => void,
+  setScope: (scope: ScopeId) => void,
 ): Promise<ModelCallResult> {
+  void setScope; // reserved: a model call never itself transitions scope today
   const resolveModel = modelResolvers.get(runtime);
   if (!resolveModel) {
     throw new Error(
@@ -83,8 +85,10 @@ export async function runModelCall(
   }
 
   const { message: reply } = outcome;
+  // One commit only: the stream's own commit IS the logged `message` event the
+  // messageReducer folds back into `ctx.thread.messages` — calling
+  // `context.thread.say(reply)` here too would log the reply twice.
   stream.commit({ message: reply });
-  setThread(withMessage(context.thread, reply));
 
   const toolCalls = reply.content.filter(isToolCall);
   for (const call of toolCalls) {

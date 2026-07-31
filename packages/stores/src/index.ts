@@ -10,7 +10,7 @@ import type {
   EventType,
   SessionId,
   Delta,
-  ThreadId,
+  ScopeId,
 } from "@behalf-js/core";
 
 // The dev-only store never resolves a real session — every envelope carries this placeholder instead.
@@ -45,7 +45,7 @@ class AsyncQueue<T> implements AsyncIterable<T> {
  * paths that turn an event into a logged, broadcast envelope, differing only in whether
  * the event was aborted. */
 function buildEnvelope(
-  meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId },
+  meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ScopeId },
   event: Event[EventType],
   sequence: number,
   options?: { aborted?: boolean; form?: "committed" | "in-progress" },
@@ -118,7 +118,7 @@ export function memoryStore(): SessionStore {
 
     append(
       event: Event[EventType],
-      meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ThreadId },
+      meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ScopeId },
     ): void {
       sequence += 1;
       const envelope = buildEnvelope(meta, event, sequence);
@@ -132,7 +132,7 @@ export function memoryStore(): SessionStore {
       type: EventType;
       stepId: string;
       stepName?: string;
-      threadId: ThreadId;
+      threadId: ScopeId;
     }): Stream {
       const deltas: Delta[] = [];
       // A model port's own async work (a real network stream) isn't

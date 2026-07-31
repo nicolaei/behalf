@@ -4,7 +4,7 @@
 // status snapshots, not a folded execution). Built fresh here, using the
 // unmerged `testing-framework` branch's `src/testing/graph/run.ts` as a
 // design reference only.
-import type { Envelope, AssistantMessage, Message, ThreadId, NodeId, Usage } from "@behalf-js/core";
+import type { Envelope, AssistantMessage, Message, ScopeId, NodeId, Usage } from "@behalf-js/core";
 
 /** One tool call+result pair, matched by correlationId during folding (the id itself is discarded once paired — nothing downstream needs it). @public */
 export interface ToolTrace {
@@ -12,18 +12,18 @@ export interface ToolTrace {
   input: unknown;
   output: unknown;
   isError?: boolean;
-  thread: ThreadId;
+  thread: ScopeId;
 }
 
 /** Nodes entered, in log order — one entry per committed step output. @public */
-export type Traversal = { node: NodeId; name?: string; thread: ThreadId }[];
+export type Traversal = { node: NodeId; name?: string; thread: ScopeId }[];
 
 /** One node's visit — its input (approximated from the same thread's previous committed output; empty for a thread's first visit), its output, and which thread it ran on. @public */
 export interface NodeVisit {
   node: NodeId;
   input: unknown[];
   output: unknown;
-  thread: ThreadId;
+  thread: ScopeId;
 }
 
 /**
@@ -41,7 +41,7 @@ export interface Run<World = unknown, Output = unknown> {
   visits: NodeVisit[];
   usage: Usage;
   latency: number;
-  threads: { id: ThreadId; label?: string }[];
+  threads: { id: ScopeId; label?: string }[];
   lastReply(thread?: string): AssistantMessage | undefined;
   messages(thread?: string): Message[];
 }
@@ -72,11 +72,11 @@ export function foldRun<World = unknown, Output = unknown>(
   const lastOutputValue = outputEnvelopes.at(-1)?.event.value;
 
   const stepEnvelopes = outputEnvelopes.filter(
-    (envelope): envelope is typeof envelope & { stepId: string; threadId: ThreadId } =>
+    (envelope): envelope is typeof envelope & { stepId: string; threadId: ScopeId } =>
       envelope.stepId !== undefined && envelope.threadId !== undefined,
   );
 
-  const threads: { id: ThreadId; label?: string }[] = [];
+  const threads: { id: ScopeId; label?: string }[] = [];
   const seenThreads = new Set<string>();
   for (const envelope of committed) {
     if (envelope.threadId !== undefined && !seenThreads.has(envelope.threadId)) {
@@ -86,7 +86,7 @@ export function foldRun<World = unknown, Output = unknown>(
   }
 
   const tools: ToolTrace[] = [];
-  const pendingCalls = new Map<string, { name: string; input: unknown; thread: ThreadId }>();
+  const pendingCalls = new Map<string, { name: string; input: unknown; thread: ScopeId }>();
   for (const envelope of committed) {
     if (envelope.type === "toolCall" && envelope.threadId !== undefined) {
       const event = envelope.event as { correlationId: string; name: string; input: unknown };

@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { withMessage, withCompaction, deriveCompactedMessages } from "../../runtime/runtime.js";
-import type { Thread } from "../../runtime/runtime.js";
+import { withMessage, withCompaction, deriveCompactedMessages } from "../../ai/thread.js";
+import type { Thread } from "../../ai/thread.js";
 import type { Message } from "../../ai/message.js";
-import type { ThreadId } from "../../graph/thread.js";
+import type { ScopeId } from "../../graph/thread.js";
 
 // Direct unit tests against deriveCompactedMessages/withCompaction themselves —
 // these two pure functions are the ONE place `thread.messages` gets computed
@@ -10,7 +10,7 @@ import type { ThreadId } from "../../graph/thread.js";
 // indirectly (compaction.test.ts drives a whole flow; tick-replay-compaction.test.ts
 // drives a whole replay). This file pins their behavior in isolation.
 
-const threadId = "routing-compaction-test-thread" as ThreadId;
+const threadId = "routing-compaction-test-thread" as ScopeId;
 
 function userMsg(text: string): Message {
   return { role: "user", intent: "standard", content: [{ type: "text", text }] };

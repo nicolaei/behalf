@@ -65,7 +65,7 @@ describe("driveFlow", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     const done = driveFlow(flow, ready);
 
@@ -151,7 +151,7 @@ describe("driveFlow", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     const done = driveFlow(flow, ready);
 
@@ -228,7 +228,7 @@ describe("driveFlow", () => {
       });
     });
 
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     const result = await driveFlow(flow, ready);
 

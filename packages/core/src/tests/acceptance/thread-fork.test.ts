@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, outputs } from "../../index.js";
-import { storeOnlyRuntime } from "./support.js";
+import { ai, defineGraph, runFlow, runtime, userText, outputs, forkThread } from "../../index.js";
+import { memoryStore } from "@behalf-js/stores";
+import { neverCalled } from "./support.js";
 
 describe("forking a thread on an edge", () => {
   const forkGraph = defineGraph("fork-edge", (flow) => {
@@ -13,12 +14,16 @@ describe("forking a thread on an edge", () => {
       })),
     );
     flow.entry(start);
-    start.then(forked, { threadAction: "fork" });
+    start.then(forked, { run: forkThread(() => undefined) });
     forked.then(flow.finish);
   });
 
   it("runs the target on a new thread id, sharing history up to the split point", async () => {
-    const result = (await runFlow(forkGraph, userText("go"), await storeOnlyRuntime())) as {
+    const ready = await runtime({
+      store: memoryStore(),
+      extensions: [ai({ models: neverCalled, bindings: [] })],
+    });
+    const result = (await runFlow(forkGraph, userText("go"), ready)) as {
       startThreadId: unknown;
       forkedThreadId: unknown;
       forkedFrom?: { thread: unknown; at: number };

@@ -1,11 +1,12 @@
-// Routing — edge selection, thread-action application, and the shared
-// output/route-commit helpers every node kind's own routing goes through.
+// Routing — edge selection and the shared output/route-commit helpers every
+// node kind's own routing goes through. Thread/message-fold machinery
+// (`withMessage`, `applyThreadAction`, `deriveCompactedMessages`) moved to
+// `ai/thread.ts` (B2 step 8, thread extraction) — this file now only ever
+// deals in opaque `ScopeId`s; it has no notion of threads, prompts, or
+// messages.
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) withMessage/deriveCompactedMessages fold ai-shaped Message; removed when thread folding moves into ai's reducers.
-import type { Message } from "../ai/message.js";
 import type { NodeId, EdgeDefinition, EdgeContext } from "../graph/graph.js";
-import type { ThreadAction, ThreadId } from "../graph/thread.js";
-import type { StepContext } from "../graph/step.js";
+import type { ScopeId } from "../graph/thread.js";
 import type { Runtime } from "./runtime.js";
 import type { Event, EventType } from "../session/event.js";
 import { isCommittedEnvelope, type CommittedEnvelope } from "../session/envelope.js";
@@ -13,10 +14,8 @@ import {
   type EngineExtension,
   type ExecutionScope as ScopeHandle,
   foldExtensionState,
+  makeDeriveScope,
 } from "./extension.js";
-import { freshThreadId } from "./ids.js";
-
-export type Thread = StepContext["thread"];
 
 /** A step's identity for logging purposes — its node id, and its declared label, if any. */
 export interface StepIdentity {
@@ -48,29 +47,17 @@ export function selectEdge(
   return outgoing.find((candidate) => candidate.edge === "then");
 }
 
-/** Where a followed edge leads, the thread action it carries, and the reason message (if any) that seeds a new thread. */
-export interface Advance {
-  to: NodeId;
-  threadAction: ThreadAction;
-  reason?: Message;
-}
-
 /** Follows the node's outgoing edge for the given output, or throws if it has none. */
-export function advance(edges: readonly EdgeDefinition[], from: NodeId, output: unknown): Advance {
+export function advance(edges: readonly EdgeDefinition[], from: NodeId, output: unknown): NodeId {
   const edge = selectEdge(edges, from, output);
   if (!edge) throw new Error(`node "${from}" has no outgoing edge`);
-  const reason = edge.options?.prompt?.(output);
-  return {
-    to: edge.to,
-    threadAction: edge.options?.threadAction ?? "same",
-    ...(reason ? { reason } : {}),
-  };
+  return edge.to;
 }
 
 /** Appends a node's output event to the log — shared by every path that produces one. */
 export function appendOutput(
   runtime: Runtime,
-  threadId: ThreadId,
+  scope: ScopeId,
   output: unknown,
   step: StepIdentity,
 ): void {
@@ -78,7 +65,7 @@ export function appendOutput(
     { value: output },
     {
       type: "output",
-      threadId,
+      threadId: scope,
       stepId: step.stepId,
       ...(step.stepName ? { stepName: step.stepName } : {}),
     },
@@ -88,68 +75,71 @@ export function appendOutput(
 /** Logs a step's output and follows the resulting edge — the shared tail of every node that emits one. */
 export function commitOutput(
   runtime: Runtime,
-  threadId: ThreadId,
+  scope: ScopeId,
   edges: readonly EdgeDefinition[],
   from: NodeId,
   output: unknown,
   step: StepIdentity,
-): Advance {
-  appendOutput(runtime, threadId, output, step);
+): NodeId {
+  appendOutput(runtime, scope, output, step);
   return advance(edges, from, output);
 }
 
-/** Applies an edge's threadAction and reports where it leads — the shared tail of following any edge. */
-function follow(edge: Advance, thread: Thread, runtime: Runtime): { thread: Thread; to: NodeId } {
-  return {
-    thread: applyThreadAction(thread, edge.threadAction, edge.reason, runtime),
-    to: edge.to,
-  };
-}
-
-/** Where routing a node landed: the (possibly new) thread, the value the next node sees, its seed reason, and the next node id. */
+/** Where routing a node landed: the (possibly new — an edge's own `run` fn may have called `ctx.thread.start`/`fork`) resulting scope, the value the next node sees, and the next node id. */
 export interface RouteResult {
-  thread: Thread;
+  scope: ScopeId;
   input: unknown;
-  reason: Message | undefined;
   to: NodeId;
 }
 
-/** Advances from a node's output and follows the resulting edge, in one step — the combining query every call site that never uses `advance`'s result for anything but an immediate `follow` was writing out by hand. */
+/**
+ * Advances from a node's output and follows the resulting edge, in one step — never runs the
+ * edge's own `run` function (see `commitRoute`, the one call site that does). Used throughout
+ * `tick.ts`'s `replayPosition` to recognize an already-logged event without redoing the work
+ * that produced it: the scope a replayed edge lands on is recovered generically, from whichever
+ * scope the NEXT committed envelope is tagged with (see `replayPosition`'s own resync), not by
+ * re-running anything here.
+ */
 export function route(
   edges: readonly EdgeDefinition[],
   from: NodeId,
   output: unknown,
-  thread: Thread,
-  runtime: Runtime,
+  scope: ScopeId,
 ): RouteResult {
-  const edge = advance(edges, from, output);
-  const followed = follow(edge, thread, runtime);
-  return { thread: followed.thread, input: output, reason: edge.reason, to: followed.to };
+  const to = advance(edges, from, output);
+  return { scope, input: output, to };
 }
 
 /** The built-in `EdgeContext` field names — reserved so an extension's contributed key can never silently shadow one. Mirrors `step-runner.ts`'s `BUILT_IN_STEP_CONTEXT_KEYS`. */
 const BUILT_IN_EDGE_CONTEXT_KEYS = ["scope", "appendEvent"];
 
-/** Builds the `ExecutionScope` handle passed to an extension's `edgeContext(scope)` — same shape `step-runner.ts`'s `makeExecutionScope` builds for `stepContext`, scoped to `threadId` instead of a live-updating getter (an edge fn runs once, against one fixed thread id, never a moving one). `state(name)` folds this scope's events through `name`'s own registered `reducers` (see `foldExtensionState`), same as the step-context side. */
-function makeEdgeExecutionScope(runtime: Runtime, threadId: ThreadId): ScopeHandle {
+/** Builds the `ExecutionScope` handle passed to an extension's `edgeContext(scope)` — scoped to a mutable "current scope" cell (`getScope`/`setScope`) so an extension's own `deriveScope("fork" | "new")` call (ai's `ctx.thread.start`/`fork`) can redirect where this SAME edge invocation's subsequent `appendEvent`/`state()` calls land, without ever touching engine state outside this one edge-run call. `state(name)` folds this scope's events through `name`'s own registered `reducers` (see `foldExtensionState`), same as the step-context side. */
+function makeEdgeExecutionScope(
+  runtime: Runtime,
+  getScope: () => ScopeId,
+  setScope: (scope: ScopeId) => void,
+): ScopeHandle {
   const events = (): readonly CommittedEnvelope[] =>
     runtime.store
       .events()
       .filter(isCommittedEnvelope)
-      .filter((envelope) => envelope.threadId === threadId);
+      .filter((envelope) => envelope.threadId === getScope());
   return {
-    scope: threadId,
+    get scope() {
+      return getScope();
+    },
     events,
     state(extension: string): unknown {
       return foldExtensionState(
         events(),
         runtime.extensions.find((candidate) => candidate.name === extension),
-        threadId,
+        getScope(),
       );
     },
     appendEvent<T extends EventType>(payload: Event[T], type: T): void {
-      runtime.store.append(payload, { type, threadId });
+      runtime.store.append(payload, { type, threadId: getScope() });
     },
+    deriveScope: makeDeriveScope(runtime, getScope, setScope),
   };
 }
 
@@ -179,36 +169,55 @@ function mergeExtensionEdgeContext(
   return merged;
 }
 
-/** Builds the `EdgeContext` an edge's `run` function is called with — the built-in `scope`/`appendEvent` fields, plus every registered extension's `edgeContext(scope)` contribution merged on top (see `mergeExtensionEdgeContext`). */
-function buildEdgeContext(runtime: Runtime, threadId: ThreadId): EdgeContext {
-  const scope = makeEdgeExecutionScope(runtime, threadId);
+/** Builds the `EdgeContext` an edge's `run` function is called with — the built-in `scope`/`appendEvent` fields, plus every registered extension's `edgeContext(scope)` contribution merged on top (see `mergeExtensionEdgeContext`), all scoped to the same mutable "current scope" cell. */
+function buildEdgeContext(
+  runtime: Runtime,
+  getScope: () => ScopeId,
+  setScope: (scope: ScopeId) => void,
+): EdgeContext {
+  const scope = makeEdgeExecutionScope(runtime, getScope, setScope);
   const extensionFields = mergeExtensionEdgeContext(runtime.extensions, scope);
-  const context: EdgeContext = {
-    scope: threadId,
-    appendEvent: (payload, type) => {
+  const context = {
+    get scope() {
+      return getScope();
+    },
+    appendEvent: <T extends EventType>(payload: Event[T], type: T) => {
       scope.appendEvent(payload, type);
     },
   };
-  return Object.assign(context, extensionFields);
+  return Object.assign(context, extensionFields) as unknown as EdgeContext;
 }
 
 /**
  * Runs the followed edge's `run` function, if it has one — exactly once, since this is only
  * ever called from `commitRoute` (the moment a route genuinely commits live), never from the
  * bare `route()` a replay reconstruction uses to recognize an already-logged event without
- * redoing the work that produced it. Returns `output` unchanged when the edge carries no `run`.
+ * redoing the work that produced it. Returns `{ input: output, scope }` unchanged when the
+ * edge carries no `run` — otherwise `input` is the `run` function's own return value, and
+ * `scope` is whatever the edge context's mutable cell ended up on (unchanged unless `run`
+ * itself called `ctx.thread.start`/`fork`, or any other extension-contributed scope-deriving
+ * method).
  */
 function runEdgeFn(
   runtime: Runtime,
-  threadId: ThreadId,
+  scope: ScopeId,
   edges: readonly EdgeDefinition[],
   from: NodeId,
   output: unknown,
-): unknown {
+): { input: unknown; scope: ScopeId } {
   const edge = selectEdge(edges, from, output);
   const run = edge?.options?.run;
-  if (!run) return output;
-  return run(output, buildEdgeContext(runtime, threadId));
+  if (!run) return { input: output, scope };
+  let current = scope;
+  const context = buildEdgeContext(
+    runtime,
+    () => current,
+    (next) => {
+      current = next;
+    },
+  );
+  const input = run(output, context);
+  return { input, scope: current };
 }
 
 /**
@@ -220,92 +229,20 @@ function runEdgeFn(
  */
 export function commitRoute(
   runtime: Runtime,
-  threadId: ThreadId,
+  scope: ScopeId,
   edges: readonly EdgeDefinition[],
   from: NodeId,
   output: unknown,
   step: StepIdentity,
-  thread: Thread,
 ): RouteResult {
-  const edge = commitOutput(runtime, threadId, edges, from, output, step);
-  const input = runEdgeFn(runtime, threadId, edges, from, output);
-  const followed = follow(edge, thread, runtime);
-  return { thread: followed.thread, input, reason: edge.reason, to: followed.to };
-}
-
-/** Returns a new thread with `message` appended to both its assembled view and its full history — never mutates the thread passed in. The shared tail of every path that folds one in. */
-export function withMessage(thread: Thread, message: Message): Thread {
-  return {
-    ...thread,
-    messages: [...thread.messages, message],
-    history: [...thread.history, message],
-  };
+  const to = commitOutput(runtime, scope, edges, from, output, step);
+  const followed = runEdgeFn(runtime, scope, edges, from, output);
+  return { scope: followed.scope, input: followed.input, to };
 }
 
 /**
- * Derives the `messages` a `"compaction"` event produces, given the thread's
- * own `history` up to that point: an optional restated `task`, the
- * synthesized `summary`, then the last `keepLast` messages pulled straight
- * out of `history` — never duplicated content, just a pointer back into it.
- * The one place this shape is computed, so the live drive (`withCompaction`,
- * below) and any from-scratch replay that folds the whole event list derive
- * identical `messages` for the same event sequence.
- */
-export function deriveCompactedMessages(
-  history: readonly Message[],
-  compaction: Event["compaction"],
-): Message[] {
-  const { task, summary, keepLast } = compaction;
-  const tail = history.slice(Math.max(0, history.length - keepLast));
-  return [...(task ? [task] : []), summary, ...tail];
-}
-
-/**
- * Returns a new thread with `messages` replaced per a compaction event —
- * `history` untouched, since only `"message"` events ever extend it (see
- * `deriveCompactedMessages`). Never mutates the thread passed in. Shared by
- * every path that folds a `compact()` effect into the live thread the same
- * way — the main drive loop and a fan-out branch alike.
- */
-export function withCompaction(thread: Thread, compaction: Event["compaction"]): Thread {
-  return { ...thread, messages: deriveCompactedMessages(thread.history, compaction) };
-}
-
-/**
- * Resolves the thread an invalidated node reruns on, per its `threadAction`:
- * `same` keeps the current thread, pushing `reason` onto it if given; `fork`
- * splits onto a new thread that shares the current thread's history so far,
- * linked back by `forkedFrom`; `new` starts a blank thread whose only message
- * is `reason`, if given.
- */
-export function applyThreadAction(
-  current: Thread,
-  threadAction: ThreadAction,
-  reason: Message | undefined,
-  runtime: Runtime,
-): Thread {
-  if (threadAction === "new") {
-    const messages = reason ? [reason] : [];
-    return { id: freshThreadId(runtime), messages, history: [...messages] };
-  }
-
-  if (threadAction === "fork") {
-    const forked: Thread = {
-      id: freshThreadId(runtime),
-      forkedFrom: { thread: current.id, at: current.history.length },
-      messages: [...current.messages],
-      history: [...current.history],
-    };
-    return reason ? withMessage(forked, reason) : forked;
-  }
-
-  // "same": no new thread — return it as-is, or with reason appended.
-  return reason ? withMessage(current, reason) : current;
-}
-
-/**
- * Owns "last state seen per thread" and emits a `stateChange` event when a
- * node's declared `state` differs from it — omitting `from` on that thread's
+ * Owns "last state seen per scope" and emits a `stateChange` event when a
+ * node's declared `state` differs from it — omitting `from` on that scope's
  * first entry. `maybeEmit` is a no-op when `state` is `undefined`: a node with
  * no declared state is invisible to the state machine, not a silent
  * transition to some "undefined" phase. Shared by every node kind's own
@@ -320,32 +257,32 @@ export function applyThreadAction(
  * starting empty.
  */
 export class StateTracker {
-  private readonly lastState: Map<ThreadId, string>;
+  private readonly lastState: Map<ScopeId, string>;
 
-  constructor(seed: Iterable<readonly [ThreadId, string]> = []) {
+  constructor(seed: Iterable<readonly [ScopeId, string]> = []) {
     this.lastState = new Map(seed);
   }
 
   maybeEmit(
     runtime: Runtime,
-    threadId: ThreadId,
+    scope: ScopeId,
     state: string | undefined,
     step?: StepIdentity,
   ): void {
     if (state === undefined) return;
-    const previous = this.lastState.get(threadId);
+    const previous = this.lastState.get(scope);
     if (previous === state) return;
     runtime.store.append(
       { ...(previous !== undefined ? { from: previous } : {}), to: state },
       {
         type: "stateChange",
-        threadId,
+        threadId: scope,
         ...(step
           ? { stepId: step.stepId, ...(step.stepName ? { stepName: step.stepName } : {}) }
           : {}),
       },
     );
-    this.lastState.set(threadId, state);
+    this.lastState.set(scope, state);
   }
 }
 

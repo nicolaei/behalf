@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { memoryStore } from "@behalf-js/stores";
 import type { Event, EventType } from "../../session/event.js";
-import type { ThreadId } from "../../graph/thread.js";
+import type { ScopeId } from "../../graph/thread.js";
 // Side-effect import: this is where B2.5 puts the ai extension's own
 // declaration-merge augmentation of `Event` (message/toolCall/toolResult/
 // compaction). Its mere existence — a module OTHER than session/event.ts
@@ -47,7 +47,7 @@ describe("Event is an open registry", () => {
       correlationId: "corr-1",
       type: "customPing" satisfies EventType,
       stepId: "step-1",
-      threadId: "thread-1" as ThreadId,
+      threadId: "thread-1" as ScopeId,
     });
     stream.commit({ note: "streamed" });
 

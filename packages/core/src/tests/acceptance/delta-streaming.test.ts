@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { memoryStore } from "@behalf-js/stores";
-import type { ThreadId } from "../../index.js";
+import type { ScopeId } from "../../index.js";
 import { loggedEnvelopes } from "./support.js";
 
 describe("streaming partial content before it's committed to the log", () => {
@@ -51,7 +51,7 @@ describe("streaming partial content before it's committed to the log", () => {
       correlationId: "1",
       type: "output",
       stepId: "step-1",
-      threadId: "thread-1" as ThreadId,
+      threadId: "thread-1" as ScopeId,
     });
 
     stream.delta({ correlationId: "1", text: "partial" });
@@ -66,7 +66,7 @@ describe("streaming partial content before it's committed to the log", () => {
       correlationId: "1",
       type: "output",
       stepId: "step-1",
-      threadId: "thread-1" as ThreadId,
+      threadId: "thread-1" as ScopeId,
     });
 
     stream.commit({ value: "done" });
@@ -84,7 +84,7 @@ describe("streaming partial content before it's committed to the log", () => {
       correlationId: "1",
       type: "output",
       stepId: "step-1",
-      threadId: "thread-1" as ThreadId,
+      threadId: "thread-1" as ScopeId,
     });
     stream.delta({ correlationId: "1", text: "partial" });
 
@@ -103,7 +103,7 @@ describe("streaming partial content before it's committed to the log", () => {
       correlationId: "1",
       type: "output",
       stepId: "step-1",
-      threadId: "thread-1" as ThreadId,
+      threadId: "thread-1" as ScopeId,
     });
     stream.delta({ correlationId: "1", text: "partial" });
 
@@ -122,7 +122,7 @@ describe("streaming partial content before it's committed to the log", () => {
       correlationId: "1",
       type: "output",
       stepId: "step-1",
-      threadId: "thread-1" as ThreadId,
+      threadId: "thread-1" as ScopeId,
     });
     stream.commit({ value: "done" });
 
@@ -142,7 +142,7 @@ describe("streaming partial content before it's committed to the log", () => {
       correlationId: "1",
       type: "output",
       stepId: "step-1",
-      threadId: "thread-1" as ThreadId,
+      threadId: "thread-1" as ScopeId,
     });
 
     expect((await received).form).toBe("in-progress");

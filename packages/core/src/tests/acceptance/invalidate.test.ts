@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { textOf, loggedEventTypes } from "./support.js";
+import { textOf, loggedEventTypes, neverCalled } from "./support.js";
 
 describe("invalidate reruns a node out of band", () => {
   // A fresh counter per test, so `planRuns` starts at zero each time.
@@ -18,7 +18,7 @@ describe("invalidate reruns a node out of band", () => {
         const draft = context.inputs[0] as string;
         return Promise.resolve(
           draft === "draft-1"
-            ? context.invalidate(plan.id, { reason: userText("revise the plan") })
+            ? context.invalidate(plan.id, { payload: { reason: userText("revise the plan") } })
             : context.output(`implemented:${draft}`),
         );
       });
@@ -32,6 +32,7 @@ describe("invalidate reruns a node out of band", () => {
     const graph = planThenImplement();
     const ready = await runtime({
       store: memoryStore(),
+      extensions: [ai({ models: neverCalled, bindings: [] })],
     });
 
     const result = await runFlow(graph, userText("go"), ready);
@@ -43,7 +44,7 @@ describe("invalidate reruns a node out of band", () => {
   it("appends an invalidation event between the two plan runs", async () => {
     const graph = planThenImplement();
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     await runFlow(graph, userText("go"), ready);
 
@@ -70,7 +71,7 @@ describe("invalidate reruns a node out of band", () => {
         const draft = context.inputs[0] as { runNumber: number; sawReason: boolean };
         return Promise.resolve(
           draft.runNumber === 1
-            ? context.invalidate(plan.id, { reason: userText("revise the plan") })
+            ? context.invalidate(plan.id, { payload: { reason: userText("revise the plan") } })
             : context.output(draft),
         );
       });
@@ -84,6 +85,7 @@ describe("invalidate reruns a node out of band", () => {
       userText("go"),
       await runtime({
         store: memoryStore(),
+        extensions: [ai({ models: neverCalled, bindings: [] })],
       }),
     )) as { runNumber: number; sawReason: boolean };
 
@@ -105,7 +107,7 @@ describe("invalidate reruns a node out of band", () => {
       const implement = flow.step((context) =>
         Promise.resolve(
           planRuns === 1
-            ? context.invalidate(plan.id, { threadAction: "fork" })
+            ? context.invalidate(plan.id, { action: "fork" })
             : context.output({ firstThreadId, secondThreadId: context.thread.id }),
         ),
       );
@@ -119,6 +121,7 @@ describe("invalidate reruns a node out of band", () => {
       userText("go"),
       await runtime({
         store: memoryStore(),
+        extensions: [ai({ models: neverCalled, bindings: [] })],
       }),
     )) as { firstThreadId: unknown; secondThreadId: unknown };
 
@@ -138,7 +141,10 @@ describe("invalidate reruns a node out of band", () => {
         const messageCount = context.inputs[0] as number;
         return Promise.resolve(
           planRuns === 1
-            ? context.invalidate(plan.id, { threadAction: "new", reason: userText("start fresh") })
+            ? context.invalidate(plan.id, {
+                action: "new",
+                payload: { reason: userText("start fresh") },
+              })
             : context.output(messageCount),
         );
       });
@@ -152,6 +158,7 @@ describe("invalidate reruns a node out of band", () => {
       userText("go"),
       await runtime({
         store: memoryStore(),
+        extensions: [ai({ models: neverCalled, bindings: [] })],
       }),
     );
 

@@ -3,14 +3,14 @@
 // tagging, and folding the compact/error emits every step-running path
 // handles the same way.
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) commitCompaction takes an ai-shaped Message; removed when compaction moves into ai/ alongside Thread itself.
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): commitCompaction takes an ai-shaped Message/compaction payload; compact stays a built-in StepContext field per this task's own scoping (see task notes).
 import type { Message } from "../ai/message.js";
 import type { NodeId, Graph } from "../graph/graph.js";
-import type { ThreadAction } from "../graph/thread.js";
+import type { ScopeId, ScopeAction } from "../graph/thread.js";
 import type { Step, StepContext, Emit, ModelCallResult, StepError } from "../graph/step.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) StepContextConfig.callTool takes a Tool; kept built-in for B2.7's minimal path (see ai/model-call.ts's import note in drive.ts) — removed only once callTool routes through the stepContext extension seam.
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): StepContextConfig.callTool takes a Tool; kept built-in per this task's own scoping.
 import type { Tool } from "../ai/tool.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) StepContextConfig.modelCall takes a Profile; same reasoning as callTool's note above.
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): StepContextConfig.modelCall takes a Profile; same reasoning as callTool's note above.
 import type { Profile } from "../ai/profile.js";
 import type { Stream, CommittedEnvelope } from "../session/envelope.js";
 import type { Event, EventType } from "../session/event.js";
@@ -19,10 +19,12 @@ import {
   type EngineExtension,
   type ExecutionScope as ScopeHandle,
   foldExtensionState,
+  makeDeriveScope,
+  seedScope,
 } from "./extension.js";
 import { type ErrorContext, type ErrorDecision, unreachable } from "./errors.js";
 import { RetryableError } from "./errors.js";
-import { type Thread, StateTracker, withCompaction } from "./routing.js";
+import { StateTracker } from "./routing.js";
 
 /**
  * Bundles the two pieces of per-branching-construct bookkeeping that used to
@@ -34,20 +36,20 @@ import { type Thread, StateTracker, withCompaction } from "./routing.js";
  * construction site (driveStepEmit's fan-out, fan-out.ts's `runBranch`/
  * `advanceFanOutGroup`, foreach.ts's `advanceForEachGroup`).
  *
- * `fork()` — a branch that gets its OWN new thread (a static fan-out
- * branch, forked off the parent's thread): fresh `stateTracker`, since a
- * `state` declared inside it must not dedupe against the parent thread's
- * already-tracked state — it's genuinely a different thread now. Does NOT
+ * `fork()` — a branch that gets its OWN new scope (a static fan-out
+ * branch, forked off the parent's scope): fresh `stateTracker`, since a
+ * `state` declared inside it must not dedupe against the parent scope's
+ * already-tracked state — it's genuinely a different scope now. Does NOT
  * fork `attemptsByNode`: a retry budget has never had a forking distinction
  * anywhere in this engine (every branching construct shares one counter per
  * node id), and this refactor preserves that rather than changing it as a
  * side effect.
  *
- * `descend()` — a branch that continues on the SAME (unforked) thread, just
+ * `descend()` — a branch that continues on the SAME (unforked) scope, just
  * a new call/frame scope (a `use` node's subgraph, a `forEach` branch):
  * shares the parent's `stateTracker`, since two such branches (or a branch
- * and the thread it shares) declaring the same `state` must dedupe into one
- * `stateChange` — they're really the same thread's own history.
+ * and the scope it shares) declaring the same `state` must dedupe into one
+ * `stateChange` — they're really the same scope's own history.
  */
 export class ExecutionScope {
   readonly attemptsByNode: Map<NodeId, number>;
@@ -72,12 +74,12 @@ export class ExecutionScope {
   }
 }
 
-/** Everything a step or branch needs to run against: the runtime it calls into, the graph it's routing through, the thread it's advancing, and the `ExecutionScope` (attempts + stateTracker) for this drive scope. The one bundle every drive-loop and fan-out-branch function threads through instead of separate positional parameters. */
+/** Everything a step or branch needs to run against: the runtime it calls into, the graph it's routing through, the scope it's advancing, and the `ExecutionScope` (attempts + stateTracker) for this drive scope. The one bundle every drive-loop and fan-out-branch function threads through instead of separate positional parameters. */
 export interface ExecutionContext {
   runtime: Runtime;
   flow: Graph;
-  thread: Thread;
-  scope: ExecutionScope;
+  scope: ScopeId;
+  execScope: ExecutionScope;
 }
 
 /**
@@ -115,16 +117,6 @@ export function assertJoinTagging(nodeId: NodeId, run: Step, inputs: unknown[]):
   }
 }
 
-/** Appends a compaction event and returns a thread with `messages` derived from it (see `withCompaction`) — never mutates the thread passed in. Shared by the main-loop and branch paths, and by `StepContext.compact` itself, since every path commits a compaction the same way. */
-export function commitCompaction(
-  runtime: Runtime,
-  thread: Thread,
-  compaction: Event["compaction"],
-): Thread {
-  runtime.store.append(compaction, { type: "compaction", threadId: thread.id });
-  return withCompaction(thread, compaction);
-}
-
 /**
  * Handles a step's `error` emit: logs it, consults the runtime's error
  * handlers, and either decides to retry the node (bumping its attempt count)
@@ -136,9 +128,8 @@ export async function handleStepError(
   nodeId: NodeId,
   ctx: ExecutionContext,
 ): Promise<{ kind: "retry" }> {
-  const { runtime, thread, scope } = ctx;
-  const { attemptsByNode } = scope;
-  const threadId = thread.id;
+  const { runtime, scope, execScope } = ctx;
+  const { attemptsByNode } = execScope;
   runtime.store.append(
     {
       type: emit.error.type,
@@ -146,13 +137,13 @@ export async function handleStepError(
       ...(emit.error.retryable !== undefined ? { retryable: emit.error.retryable } : {}),
       ...(emit.error.cause !== undefined ? { cause: emit.error.cause } : {}),
     },
-    { type: "error", threadId },
+    { type: "error", threadId: scope },
   );
 
   const attempts = attemptsByNode.get(nodeId) ?? 0;
   const errorContext: ErrorContext = {
     step: { id: nodeId },
-    thread: threadId,
+    thread: scope,
     attempts,
     log: runtime.store.events(),
   };
@@ -179,10 +170,14 @@ export async function handleStepError(
 
 /** Config that differs between the main-loop StepContext and a fan-out branch's — everything else is shared. */
 export interface StepContextConfig {
-  getThread: () => Thread;
+  runtime: Runtime;
+  getScope: () => ScopeId;
+  setScope: (scope: ScopeId) => void;
+  getLabel?: () => string | undefined;
+  parentScope?: ScopeId; // this scope's owner, if it's a spawned child (see ExecutionScope.parentScope)
   inputs: unknown[];
   openStream: (type: EventType) => Stream; // on-demand stream factory model calls and steps use to create a logged event
-  appendEvent: <T extends EventType>(payload: Event[T], type: T) => void; // commits a standalone event to this scope's thread
+  appendEvent: <T extends EventType>(payload: Event[T], type: T) => void; // commits a standalone event to this scope
   modelCall: (profile: Profile) => Promise<ModelCallResult>;
   callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
   compact: (input: { task?: Message; summary: Message; keepLast: number }) => Promise<void>;
@@ -192,7 +187,7 @@ export interface StepContextConfig {
 
 /** The built-in StepContext field names — reserved so an extension's contributed key can never silently shadow one. */
 const BUILT_IN_STEP_CONTEXT_KEYS = [
-  "thread",
+  "scope",
   "inputs",
   "openStream",
   "appendEvent",
@@ -208,17 +203,20 @@ const BUILT_IN_STEP_CONTEXT_KEYS = [
 function makeExecutionScope(config: StepContextConfig): ScopeHandle {
   return {
     get scope() {
-      return config.getThread().id;
+      return config.getScope();
     },
     events: config.getEvents,
     state(extension: string): unknown {
       return foldExtensionState(
         config.getEvents(),
         config.extensions.find((candidate) => candidate.name === extension),
-        config.getThread().id,
+        config.getScope(),
       );
     },
     appendEvent: config.appendEvent,
+    deriveScope: makeDeriveScope(config.runtime, config.getScope, config.setScope),
+    ...(config.getLabel ? { label: config.getLabel } : {}),
+    ...(config.parentScope ? { parentScope: config.parentScope } : {}),
   };
 }
 
@@ -263,8 +261,8 @@ export function makeStepContext(config: StepContextConfig): StepContext {
   const scope = makeExecutionScope(config);
   const extensionFields = mergeExtensionStepContext(config.extensions, scope);
   const context = {
-    get thread() {
-      return config.getThread();
+    get scope() {
+      return config.getScope();
     },
     inputs: config.inputs,
     openStream: config.openStream,
@@ -275,39 +273,29 @@ export function makeStepContext(config: StepContextConfig): StepContext {
       return { output: value };
     },
     compact: config.compact,
-    invalidate(
-      target: NodeId,
-      options?: { threadAction?: ThreadAction; reason?: Message },
-    ): Emit<never> {
+    invalidate(target: NodeId, options?: { action?: ScopeAction; payload?: unknown }): Emit<never> {
       return {
         invalidate: target,
-        threadAction: options?.threadAction ?? "same",
-        ...(options?.reason ? { reason: options.reason } : {}),
+        ...(options?.action ? { action: options.action } : {}),
+        ...(options?.payload !== undefined ? { payload: options.payload } : {}),
       };
     },
     fail(error: StepError): Emit<never> {
       return { error };
     },
   };
-  return Object.assign(context, extensionFields);
+  return Object.assign(context, extensionFields) as unknown as StepContext;
 }
 
 /**
  * Derives a `StepContext` that shares everything with `context` except its
  * `inputs` — used everywhere a node needs to rerun the same context with
  * different inputs (an interrupt's own message, a join's per-branch array).
- * `thread` is re-exposed through a delegating getter rather than copied by
- * value: a plain object spread (`{ ...context, inputs }`) would evaluate
- * `context.thread` once at spread time and freeze that snapshot, missing any
- * later replacement (e.g. a model or tool call folding a message in) that
- * happens while the derived context's own step is still running. Any
- * extension-contributed key already merged onto `context` (see
+ * `scope` is re-exposed through a delegating getter rather than copied by
+ * value, so a later replacement (a scope transition mid-step) is never
+ * missed. Any extension-contributed key already merged onto `context` (see
  * `makeStepContext`) carries over too, since it isn't one of the built-in
  * fields explicitly re-mapped below.
- * value: a plain object spread (`{ ...context, inputs }`) would evaluate
- * `context.thread` once at spread time and freeze that snapshot, missing any
- * later replacement (e.g. a model or tool call folding a message in) that
- * happens while the derived context's own step is still running.
  */
 export function withInputs(context: StepContext, inputs: unknown[]): StepContext {
   const extensionFields: Record<string, unknown> = {};
@@ -315,8 +303,8 @@ export function withInputs(context: StepContext, inputs: unknown[]): StepContext
     if (!BUILT_IN_STEP_CONTEXT_KEYS.includes(key)) extensionFields[key] = value;
   }
   const derived = {
-    get thread() {
-      return context.thread;
+    get scope() {
+      return context.scope;
     },
     inputs,
     openStream: (type: EventType) => context.openStream(type),
@@ -335,5 +323,10 @@ export function withInputs(context: StepContext, inputs: unknown[]): StepContext
     ) => context.invalidate(target, options),
     fail: (error: StepError) => context.fail(error),
   };
-  return Object.assign(derived, extensionFields) as StepContext;
+  return Object.assign(derived, extensionFields) as unknown as StepContext;
 }
+
+// Re-exported so callers of `context.invalidate`'s payload-seeding side effect
+// (drive.ts's `commitInvalidation`, tick.ts's `routeAbort`) reach it through
+// the same module they already import extension helpers from.
+export { seedScope };

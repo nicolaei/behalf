@@ -11,7 +11,7 @@
 import type { MessageKind, UserMessage } from "../ai/message.js";
 import type { Waitable } from "../graph/waitable.js";
 import type { NodeId } from "../graph/graph.js";
-import type { ThreadId } from "../graph/thread.js";
+import type { ScopeId } from "../graph/thread.js";
 import type { SessionStore } from "../session/session-store.js";
 import { unreachable } from "./errors.js";
 
@@ -35,7 +35,7 @@ async function pollInbox<T>(
 }
 
 /** Consumes one pending `signal` entry, if any is queued, and commits it to the log as a `signal` event — the "drain one pending signal and commit it" step every non-message `waitFor` path repeats (blocking here in `waitForSignal`/`waitForRace`, or peeked non-blockingly in `tick`/`runBranchNode`) until its `Waitable`'s own `match()` catches up with the log. `threadId`, when given, tags the committed event with the waitFor node's own thread — a fan-out branch's own forked thread, so replay can later recognize which branch this signal resolved (see `replayBranchSignal`, fan-out.ts); the top-level single-line path doesn't need it (there's only one line to attribute anything to) but passes its own thread id anyway, for parity. Returns whether an entry was drained. */
-export function drainOnePendingSignal(store: SessionStore, threadId?: ThreadId): boolean {
+export function drainOnePendingSignal(store: SessionStore, threadId?: ScopeId): boolean {
   const entry = store.consume((candidate) => candidate.kind === "signal");
   if (entry?.kind !== "signal") return false;
   store.append(
@@ -81,7 +81,7 @@ export function peekMessageFromInbox(
 export function peekSignalMatch<T>(
   store: SessionStore,
   waitable: Waitable<T>,
-  threadId?: ThreadId,
+  threadId?: ScopeId,
 ): T | undefined {
   let matched = waitable.match(store.events());
   if (matched === undefined && drainOnePendingSignal(store, threadId)) {
@@ -105,7 +105,7 @@ export function peekSignalMatch<T>(
 export async function waitForSignal<T>(
   store: SessionStore,
   waitable: Waitable<T>,
-  threadId?: ThreadId,
+  threadId?: ScopeId,
 ): Promise<T> {
   const result = await pollInbox(store, () => {
     for (;;) {

@@ -3,28 +3,22 @@
 // helper that repeats until every cursor is parked or done.
 
 import type { Graph, NodeId, NodeKind } from "../graph/graph.js";
-import type { ThreadId } from "../graph/thread.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) tick's replay folds ai-shaped Message/MessageKind; removed when message replay moves to ai's reducers.
-import type { Message, MessageKind } from "../ai/message.js";
+import type { ScopeId } from "../graph/thread.js";
 import { tryMessageKindOf } from "../graph/waitable.js";
 import type { StepContext, WaitForResult } from "../graph/step.js";
 import { ModelCallAbortedError } from "../graph/step.js";
-import type { Event, EventType } from "../session/event.js";
+import type { Event } from "../session/event.js";
 import type { CommittedEnvelope, Envelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
-import type { ScopeStateReducer } from "./extension.js";
-import { freshThreadId } from "./ids.js";
+import { freshScopeId } from "./ids.js";
 import { notImplemented, unreachable } from "./errors.js";
 import {
-  type Thread,
   stepIdentity,
   appendOutput,
   route,
   commitRoute,
-  withMessage,
   thenEdges,
   StateTracker,
-  applyThreadAction,
 } from "./routing.js";
 import { runStep, assertJoinTagging, withInputs, ExecutionScope } from "./step-runner.js";
 import {
@@ -45,9 +39,7 @@ import {
   peekingMessageSource,
   fanOutTargets,
   findInterruptNodes,
-  seedUseNode,
   commitInvalidation,
-  looksLikeMessage,
 } from "./drive.js";
 import { buildForEachGroup, replayForEachBranch, advanceForEachGroup } from "./foreach.js";
 
@@ -58,11 +50,9 @@ export interface CursorState {
   // Present only when status is "parked". A known overload: for a userInput-based
   // wait, these are message kinds a real message could carry; for a signal-based
   // wait, this instead holds the Waitable's own `label` (its display identifier),
-  // not a message kind at all. It compiles either way because `MessageKind` is
-  // just `string` underneath, with no way for a reader to tell the two apart from
-  // the type alone. Deliberately deferred: distinguishing them for real would
-  // need a breaking change to this public shape, out of scope for this pass.
-  waitingFor?: MessageKind[];
+  // not a message kind at all. Deliberately deferred: distinguishing them for real
+  // would need a breaking change to this public shape, out of scope for this pass.
+  waitingFor?: string[];
   result?: unknown; // present only when status is "done" (root cursor only)
   parent?: string; // absent = this is the root cursor; present = identifies which cursor this folds into
 }
@@ -75,10 +65,6 @@ interface ReplayFrame {
   flow: Graph;
   current: NodeId;
   currentInput: unknown;
-  // The edge-resolved prompt (if any) that led to `current` — what a `use`
-  // node reached next would seed its subgraph with. Mirrors driveGraph's
-  // own `reason` variable, reconstructed the same way from replay.
-  reason?: Message | undefined;
 }
 
 /**
@@ -151,9 +137,9 @@ function rebuildFromPath<TFrame>(
   return result;
 }
 
-/** Where a fresh replay of `runtime.store`'s committed events left off: the position tree plus the thread it shares throughout (a `use` node's subgraph never forks it) and any pending fan-out join inputs. */
+/** Where a fresh replay of `runtime.store`'s committed events left off: the position tree plus the scope it shares throughout (a `use` node's subgraph never forks it) and any pending fan-out join inputs. */
 interface ReplayPosition {
-  thread: Thread;
+  scope: ScopeId;
   tree: CursorTree;
   // Set only when replay landed on a join node whose fan-out group just
   // folded (every branch reported) — one entry per branch, in declared
@@ -169,46 +155,9 @@ type ReplayResult =
   | { kind: "fanout"; group: FanOutGroup }
   | { kind: "not-started" };
 
-/**
- * Reconstructs `tick`'s position purely from `runtime.store.events()` — no
- * state survives anywhere else. Starts at `flow.entry` with a fresh thread
- * when the log is empty, then replays every committed `output` (a step ran;
- * follow the edge its value selects, same as `advance`) and `message` (a
- * `waitFor` consumed one, or a `use` node's subgraph was seeded; follow *its*
- * edge, or descend into it, the same way) event in order, landing exactly
- * where the last tick call left off. A fan-out node's own output event
- * switches this into per-branch reconstruction (`FanOutGroup`) until either
- * every branch has reported (folding back to a single position at the join
- * node, `pendingInputs` set) or the join node's own output event shows the
- * fold already ran on an earlier tick call — the log-level signal to resume
- * ordinary single-line replay from there. This works at any depth — a
- * fan-out reconstructed while inside a use-descent builds the group as that
- * level's own tree node (see the `leaf.node.kind === "fan-out"` handling
- * below), matching tick()'s own live handling of the same nesting.
- *
- * A `use` node's subgraph shares its parent's thread (never forked), so
- * thread identity says nothing about whether a given event belongs to the
- * outer flow or a nested descent — only the event's own node id does. Every
- * node in one composed graph tree gets an id unique across every nesting
- * level of that tree (see flow/graph.ts's `nodeIdSequence` — nested builds
- * draw from the enclosing build's running counter, and `Flow.use` reserves a
- * pre-built subgraph's ids before allocating its own), so an output event's
- * `stepId` belongs to exactly one level of the current descent path;
- * `cursorPath` mirrors the `use` descents a live tick() call would
- * have made: a level is added the moment a `message` event seeds a `use`
- * node's subgraph, and levels below an enclosing owner are dropped the
- * moment an output event turns up whose id belongs to that enclosing level
- * instead — the completion event `commitOutput` tags with the `use` node's
- * own (outer) id once its subgraph reaches `finish`. A `forEach` branch
- * graph is the one deliberate exception to tree-wide id uniqueness (built at
- * runtime as its own outermost build, its ids CAN coincide with main-path
- * ids) — its events are excluded from this id search by thread id instead;
- * see the forEach handling in the replay loop below.
- */
-
-/** `replayPosition`'s own mutable working state — the thread and position tree it's rebuilding, threaded through each per-event-type handler by reference so every handler sees (and can advance) exactly where the previous one left off. */
+/** `replayPosition`'s own mutable working state — the scope and position tree it's rebuilding, threaded through each per-event-type handler by reference so every handler sees (and can advance) exactly where the previous one left off. */
 interface ReplayState {
-  thread: Thread;
+  scope: ScopeId;
   tree: CursorTree;
 }
 
@@ -228,16 +177,15 @@ function applyFanOutEvent(
       // The join already ran on an earlier tick call: the group folded
       // in the log itself. Resume ordinary single-line replay from here,
       // rebuilding whatever use-descent wrapping led to this depth.
-      state.thread = group.mainThread;
-      const routed = route(ownerFlow.edges, stepId, value, state.thread, runtime);
-      state.thread = routed.thread;
+      state.scope = group.mainScope;
+      const routed = route(ownerFlow.edges, stepId, value, state.scope);
+      state.scope = routed.scope;
       state.tree = rebuildFromPath(path, path.length - 1, {
         kind: "step",
         frame: {
           flow: ownerFlow,
           current: routed.to,
           currentInput: routed.input,
-          reason: routed.reason,
         },
       });
     } else {
@@ -260,7 +208,6 @@ function applyFanOutEvent(
 function applyOutputEvent(
   envelope: CommittedEnvelope,
   path: PathLevel<ReplayFrame>[],
-  runtime: Runtime,
   state: ReplayState,
 ): void {
   const { value } = envelope.event as Event["output"];
@@ -293,46 +240,28 @@ function applyOutputEvent(
     // outermost level or nested inside a used subgraph.
     state.tree = rebuildFromPath(path, depth, {
       kind: "fan-out",
-      group: buildFanOutGroup(branchTargets, stepId, ownerFlow, state.thread, value),
+      group: buildFanOutGroup(branchTargets, stepId, ownerFlow, state.scope, value),
     });
     return;
   }
 
-  const routed = route(ownerFlow.edges, stepId, value, state.thread, runtime);
-  state.thread = routed.thread;
+  const routed = route(ownerFlow.edges, stepId, value, state.scope);
+  state.scope = routed.scope;
   state.tree = rebuildFromPath(path, depth, {
     kind: "step",
     frame: {
       flow: ownerFlow,
       current: routed.to,
       currentInput: routed.input,
-      reason: routed.reason,
     },
   });
 }
 
-/** The first registered extension's reducer for `type`, or `undefined` if nothing registered one — what lets `tick.ts`'s replay switch delegate a non-core event type to whichever extension owns it (see `EngineExtension.reducers`) instead of hardcoding a case for it. Core's own six event types (input/output/signal/stateChange/invalidation/error) never call this; they're handled inline above/below, unconditionally. */
-function delegatedReducer(runtime: Runtime, type: EventType): ScopeStateReducer | undefined {
-  for (const extension of runtime.extensions) {
-    const reducer = extension.reducers?.[type];
-    if (reducer) return reducer;
-  }
-  return undefined;
-}
-
-/** Folds a committed `message` event onto `thread` through whichever extension registered a `message` reducer (the ai extension's `messageReducer` — see `ai/reducers.ts` — when the caller passed `ai({ models, bindings })` via `runtime({ extensions })`). Falls back to `withMessage` itself only if nothing is registered, e.g. a `Runtime` built with no ai extension at all. */
-function foldMessage(runtime: Runtime, thread: Thread, envelope: CommittedEnvelope): Thread {
-  const reducer = delegatedReducer(runtime, "message");
-  if (!reducer) return withMessage(thread, (envelope.event as Event["message"]).message);
-  return reducer(thread, envelope, thread.id) as Thread;
-}
-
-/** `replayPosition`'s handling of a committed `message` event: a `waitFor` node that consumed it routes off the message, same as `advance`; a `use` node being seeded descends a level into its subgraph; any other current node folds the message's content onto `state.thread` (same as `applyInvalidationEvent` already does for its own event type) without moving any level's position — content-folding is orthogonal to position tracking, which is all the waitFor/use special-casing above ever protected. The fold itself goes through `foldMessage` (delegated to whichever extension registered a `message` reducer — today, ai's `messageReducer`) rather than calling `withMessage` directly: one source of truth for "how a message folds," reached from all three branches below. */
+/** `replayPosition`'s handling of a committed `message` event: a `waitFor` node that consumed it routes off the message, same as `advance`; a `use` node being seeded descends a level into its subgraph; any other current node's own content is left entirely to whichever extension owns "message" (ai's own `state("ai")` fold, read on demand) — content-folding is no longer core's concern at all; this only ever moves a level's position, when the message is what a `waitFor`/`use` node was expecting. */
 function applyMessageEvent(
   envelope: CommittedEnvelope,
   path: PathLevel<ReplayFrame>[],
   leaf: PathLevel<ReplayFrame>,
-  runtime: Runtime,
   state: ReplayState,
 ): void {
   const { message } = envelope.event as Event["message"];
@@ -341,29 +270,25 @@ function applyMessageEvent(
   const node = leaf.flow.nodes.get(topFrame.current);
 
   if (node?.kind === "waitFor") {
-    state.thread = foldMessage(runtime, state.thread, envelope);
-    const routed = route(leaf.flow.edges, topFrame.current, message, state.thread, runtime);
-    state.thread = routed.thread;
+    const routed = route(leaf.flow.edges, topFrame.current, message, state.scope);
+    state.scope = routed.scope;
     state.tree = rebuildFromPath(path, path.length - 1, {
       kind: "step",
       frame: {
         flow: leaf.flow,
         current: routed.to,
         currentInput: { ok: true, result: message } satisfies WaitForResult,
-        reason: routed.reason,
       },
     });
     return;
   }
 
   if (node?.kind === "use") {
-    // Entering this use node's subgraph: mirrors driveUseNode's own seed
-    // dedup (a "same"-threadAction reaching edge already pushed this
-    // message onto the thread; this event just echoes it into the log)
-    // and descends a level at the subgraph's own entry, seeded with this
-    // exact message — the same value `driveGraph`'s own `input`
-    // parameter would carry.
-    if (!topFrame.reason) state.thread = foldMessage(runtime, state.thread, envelope);
+    // Entering this use node's subgraph — the same descent `driveUseNode`
+    // performs, just captured as data here. The subgraph's entry sees
+    // this event's own value as its input; any scope transition (an ai
+    // `ctx.thread.start`/`fork` on the reaching edge's own `run` fn)
+    // already happened before this event was even logged.
     state.tree = rebuildFromPath(path, path.length - 1, {
       kind: "use-descent",
       outerNode: topFrame.current,
@@ -375,12 +300,9 @@ function applyMessageEvent(
     return;
   }
   // Belongs to a node this replay isn't tracking as any level's `current` —
-  // never needs to move a level's position — but its CONTENT still belongs
-  // on the thread: an ordinary step logging a message directly (modelCall's
-  // own reply, `fold`'s combined tool-result message, `appendEvent` calls in
-  // general) is exactly this case, and skipping the fold here would silently
-  // drop it from `thread.messages` on every replay that lands past it.
-  state.thread = foldMessage(runtime, state.thread, envelope);
+  // never needs to move a level's position. Its content (if any) is folded
+  // by whichever extension owns "message", read on demand via `state()` —
+  // nothing for core to do here.
 }
 
 /** `replayPosition`'s handling of a committed `signal` event: only ever moves the position when the innermost node is a non-message `waitFor` whose `Waitable` now matches the log up to and including this event — mirrors `applyMessageEvent`'s `waitFor` case, but the value routed downstream is `match()`'s own result rather than the raw event. */
@@ -402,17 +324,15 @@ function applySignalEvent(
     leaf.flow.edges,
     topFrame.current,
     { ok: true, result: matched } satisfies WaitForResult,
-    state.thread,
-    runtime,
+    state.scope,
   );
-  state.thread = routed.thread;
+  state.scope = routed.scope;
   state.tree = rebuildFromPath(path, path.length - 1, {
     kind: "step",
     frame: {
       flow: leaf.flow,
       current: routed.to,
       currentInput: { ok: true, result: matched } satisfies WaitForResult,
-      reason: routed.reason,
     },
   });
 }
@@ -421,9 +341,11 @@ function applySignalEvent(
  * `replayPosition`'s handling of a committed `invalidation` event: the same structural gap
  * `compaction` had before Phase 1 — `commitInvalidation` never logs an `output` event for the
  * step that invalidated, so replay has nothing else to recognize that step as already-completed.
- * Routes straight to a target, applying the event's own `threadAction`/`reason` the same way
- * `commitInvalidation` did live, instead of falling through and leaving the position sitting on
- * the invalidating step (which would re-run it, re-invalidating on every subsequent replay).
+ * Routes straight to a target — the scope resync itself is handled generically, by the top-of-loop
+ * check against whichever event's own `threadId` comes next (an extension's `seedScope`-appended
+ * event, or the target step's own next output) — instead of falling through and leaving the
+ * position sitting on the invalidating step (which would re-run it, re-invalidating on every
+ * subsequent replay).
  *
  * `cause === "abort"` (set only by `routeAbort`) marks a target logged by whatever process was
  * running at abort time. When this mechanism shipped, node ids were only unique per PROCESS —
@@ -447,11 +369,9 @@ function applySignalEvent(
 function applyInvalidationEvent(
   envelope: CommittedEnvelope,
   path: PathLevel<ReplayFrame>[],
-  runtime: Runtime,
   state: ReplayState,
 ): void {
-  const { target, threadAction, reason, cause } = envelope.event as Event["invalidation"];
-  state.thread = applyThreadAction(state.thread, threadAction, reason, runtime);
+  const { target, cause } = envelope.event as Event["invalidation"];
 
   // Walks path innermost-first for the first frame declaring its own
   // flow.onAbort, landing there — the same decision routeAbort made live.
@@ -509,12 +429,12 @@ function applyInvalidationEvent(
  * mirrors `replayPosition`'s own reconstruction of cursor position: no state
  * may survive between separate `tick()` calls except what's already in the
  * log. Walks every committed `stateChange` event in order, keeping only the
- * latest `to` per thread — `from` never matters here, since a freshly
- * rebuilt tracker only needs "what's the last state this thread saw", not
+ * latest `to` per scope — `from` never matters here, since a freshly
+ * rebuilt tracker only needs "what's the last state this scope saw", not
  * how it got there.
  */
 function replayStateTracker(events: readonly Envelope[]): StateTracker {
-  const lastState = new Map<ThreadId, string>();
+  const lastState = new Map<ScopeId, string>();
   for (const envelope of events) {
     if (envelope.form !== "committed" || envelope.type !== "stateChange") continue;
     if (!envelope.threadId) continue; // stateChange always carries one; guard satisfies the type
@@ -526,7 +446,7 @@ function replayStateTracker(events: readonly Envelope[]): StateTracker {
 
 function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
   const state: ReplayState = {
-    thread: { id: freshThreadId(runtime), messages: [], history: [] },
+    scope: freshScopeId(runtime),
     tree: { kind: "step", frame: { flow, current: flow.entry, currentInput: undefined } },
   };
   // Set only once, by the log's own `input` event (see `Event["input"]`'s
@@ -542,40 +462,70 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     // it may be a still-in-flight fan-out (root or nested inside one or more
     // use-descents), which needs its own per-branch handling below instead of
     // the ordinary step/message dispatch.
-    const path: PathLevel<ReplayFrame>[] = cursorPath(flow, state.tree);
-    const leaf = path[path.length - 1];
+    let path: PathLevel<ReplayFrame>[] = cursorPath(flow, state.tree);
+    let leaf = path[path.length - 1];
     if (!leaf) unreachable("replayPosition: position path is empty");
+
+    // Mirror the live loop's own use-descent (`advanceTickUseNode`): a position
+    // that reached a `use` node descends into its subgraph immediately, and —
+    // post thread-extraction — entering a use commits NO event of its own (the
+    // old seed `message` append moved into ai's edge-run vocabulary), so replay
+    // must reconstruct that same descent as data BEFORE dispatching the next
+    // event. Without this, an inner node's own committed `output` events find no
+    // owning level in `applyOutputEvent`'s path walk and are skipped as noise —
+    // position never advances, and every later tick() re-runs the subgraph's
+    // entry from scratch, forever (a multi-tick subgraph with a plain-step entry,
+    // e.g. one that fans out, hangs `tickUntilSuspended` exactly that way).
+    // Loops for a use-at-entry-of-a-use; only once `started`, since the `input`
+    // event below is what establishes the real starting node.
+    while (started && leaf.node.kind === "step") {
+      const currentNode = leaf.flow.nodes.get(leaf.node.frame.current);
+      if (currentNode?.kind !== "use") break;
+      state.tree = rebuildFromPath(path, path.length - 1, {
+        kind: "use-descent",
+        outerNode: leaf.node.frame.current,
+        inner: {
+          kind: "step",
+          frame: {
+            flow: currentNode.subgraph,
+            current: currentNode.subgraph.entry,
+            currentInput: leaf.node.frame.currentInput,
+          },
+        },
+      });
+      path = cursorPath(flow, state.tree);
+      const descended = path[path.length - 1];
+      if (!descended) unreachable("replayPosition: path empty after use-descent");
+      leaf = descended;
+    }
 
     if (leaf.node.kind === "fan-out") {
       applyFanOutEvent(envelope, path, leaf.node.group, leaf.flow, runtime, state);
       continue;
     }
 
-    // A forEach node's branches each run on their own per-branch thread (see
-    // foreach.ts), and every event they commit is tagged with that thread —
+    // A forEach node's branches each run on their own per-branch scope (see
+    // foreach.ts), and every event they commit is tagged with that scope —
     // never the main line's. While the position is parked at a forEach node,
-    // those branch events must NOT move `state.thread`: the forEach fold
-    // (advanceTickForEachNode's commitRoute) reads it back as the thread the
+    // those branch events must NOT move `state.scope`: the forEach fold
+    // (advanceTickForEachNode's commitRoute) reads it back as the scope the
     // folded `output` event is committed on, and it has to stay the outer
-    // flow's own thread. Skip the correction here, the same way the fan-out
+    // flow's own scope. Skip the correction here, the same way the fan-out
     // case above never runs it. The fold's own edge is followed by `route`,
-    // which carries the thread forward correctly without this blanket sync.
+    // which carries the scope forward correctly without this blanket sync.
     const atForEach =
       leaf.node.kind === "step" && leaf.flow.nodes.get(leaf.node.frame.current)?.kind === "forEach";
-    if (!atForEach && envelope.threadId) state.thread = { ...state.thread, id: envelope.threadId };
+    if (!atForEach && envelope.threadId) state.scope = envelope.threadId;
 
     if (envelope.type === "input" && !started) {
       // The session's own starting fact: establishes the starting cursor at
-      // the named node with the given value, folding it into the thread the
-      // same way an ordinary `message` event would if the value looks like
-      // one (see `tool-spawns-subflow.test.ts`'s child flow reading
-      // `context.thread.messages.at(-1)` directly in its entry step, no
-      // `waitFor`/`use` involved) — this is the ONE place that fold happens
-      // for a session's own first value, replacing runFlow's old separate
-      // pre-drive `message` commit (see runtime.ts's `seed`/`runFlow`).
+      // the named node with the given value — the ONE place that fold
+      // happens for a session's own first value, replacing runFlow's old
+      // separate pre-drive `message` commit (see runtime.ts's `seed`/
+      // `runFlow`). Content-folding (if the value looks like a message) is
+      // entirely an extension's own concern now, read back via `state()`.
       started = true;
       const { node, value } = envelope.event as Event["input"];
-      if (looksLikeMessage(value)) state.thread = withMessage(state.thread, value);
       state.tree = rebuildFromPath(path, path.length - 1, {
         kind: "step",
         frame: { flow: leaf.flow, current: node, currentInput: value },
@@ -585,22 +535,22 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
 
     if (envelope.type === "output") {
       // A branch's own step outputs (committed on its deterministic branch
-      // thread, never the main line's) are replayed per-branch by
+      // scope, never the main line's) are replayed per-branch by
       // `replayForEachBranch` — never here. They used to fall out of
       // `applyOutputEvent`'s id search by accident (branch graphs once drew
       // globally unique ids, so no level ever owned one); now that a branch
       // graph is rebuilt as its own outermost build (see flow/graph.ts's
       // nodeIdSequence), a branch node's id CAN coincide with a main-path
-      // node's, so they must be excluded by thread id instead of by an
+      // node's, so they must be excluded by scope id instead of by an
       // id-membership miss.
-      if (atForEach && envelope.threadId !== undefined && envelope.threadId !== state.thread.id)
+      if (atForEach && envelope.threadId !== undefined && envelope.threadId !== state.scope)
         continue;
-      applyOutputEvent(envelope, path, runtime, state);
+      applyOutputEvent(envelope, path, state);
       continue;
     }
 
     if (envelope.type === "message") {
-      applyMessageEvent(envelope, path, leaf, runtime, state);
+      applyMessageEvent(envelope, path, leaf, state);
       continue;
     }
 
@@ -610,20 +560,17 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     }
 
     if (envelope.type === "invalidation") {
-      applyInvalidationEvent(envelope, path, runtime, state);
+      applyInvalidationEvent(envelope, path, state);
       continue;
     }
 
     // Any event type that isn't one of core's own six (input/output/signal/stateChange/
     // invalidation/error — every one handled inline above) and isn't `message` (handled
     // inline above too, since a waitFor/use node consuming one also moves position) is
-    // never structural to replay's own position tracking — delegate to whichever
-    // extension registered a reducer for it (see `EngineExtension.reducers`). Today that's
-    // `compaction` (ai's `compactionReducer`, folded onto `state.thread` the same way
-    // `foldMessage` folds a message); `toolCall`/`toolResult`/`error` remain no-ops, same
-    // as before this generalized, since nothing registers a reducer for them.
-    const reducer = delegatedReducer(runtime, envelope.type);
-    if (reducer) state.thread = reducer(state.thread, envelope, state.thread.id) as Thread;
+    // never structural to replay's own position tracking — no core action needed. An
+    // extension's own `state()` fold reads it back on demand (today that's ai's
+    // compaction/threadGenesis reducers); `toolCall`/`toolResult`/`error` remain no-ops,
+    // same as before this generalized, since nothing registers a reducer for them.
   }
 
   // A `waitFor` entry already parks safely with `currentInput: undefined`
@@ -647,7 +594,7 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     if (folded) {
       return {
         kind: "single",
-        thread: group.mainThread,
+        scope: group.mainScope,
         tree: rebuildFromPath(finalPath, finalPath.length - 1, {
           kind: "step",
           frame: { flow: finalLeaf.flow, current: folded.current, currentInput: undefined },
@@ -662,10 +609,10 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     // own live loop advances it from there (see its matching
     // `leaf.node.kind === "fan-out"` branch).
     if (finalPath.length === 1) return { kind: "fanout", group };
-    return { kind: "single", thread: state.thread, tree: state.tree };
+    return { kind: "single", scope: state.scope, tree: state.tree };
   }
 
-  return { kind: "single", thread: state.thread, tree: state.tree };
+  return { kind: "single", scope: state.scope, tree: state.tree };
 }
 
 /** One level of tick()'s live execution — same shape as a `ReplayFrame`, plus what only matters while actually running: this level's own armed interrupts (recomputed per level, same as `driveGraph` does for every nested `driveGraph` call) and the `StepContext` its own nodes run with. */
@@ -674,7 +621,6 @@ interface LiveFrame {
   interrupts: InterruptNode[];
   current: NodeId;
   currentInput: unknown;
-  reason?: Message | undefined;
   context: StepContext;
 }
 
@@ -682,8 +628,8 @@ interface LiveFrame {
 function buildLiveFrame(
   replayFrame: ReplayFrame,
   runtime: Runtime,
-  getThread: () => Thread,
-  setThread: (thread: Thread) => void,
+  getScope: () => ScopeId,
+  setScope: (scope: ScopeId) => void,
 ): LiveFrame {
   const holder = { current: replayFrame.current };
   return {
@@ -696,14 +642,7 @@ function buildLiveFrame(
       holder.current = value;
     },
     currentInput: replayFrame.currentInput,
-    ...(replayFrame.reason !== undefined ? { reason: replayFrame.reason } : {}),
-    context: buildDriveContext(
-      replayFrame.flow,
-      runtime,
-      () => holder.current,
-      getThread,
-      setThread,
-    ),
+    context: buildDriveContext(replayFrame.flow, runtime, () => holder.current, getScope, setScope),
   };
 }
 
@@ -711,16 +650,16 @@ function buildLiveFrame(
 function toLiveTree(
   tree: CursorTree,
   runtime: Runtime,
-  getThread: () => Thread,
-  setThread: (thread: Thread) => void,
+  getScope: () => ScopeId,
+  setScope: (scope: ScopeId) => void,
 ): CursorTree<LiveFrame> {
   if (tree.kind === "step")
-    return { kind: "step", frame: buildLiveFrame(tree.frame, runtime, getThread, setThread) };
+    return { kind: "step", frame: buildLiveFrame(tree.frame, runtime, getScope, setScope) };
   if (tree.kind === "use-descent")
     return {
       kind: "use-descent",
       outerNode: tree.outerNode,
-      inner: toLiveTree(tree.inner, runtime, getThread, setThread),
+      inner: toLiveTree(tree.inner, runtime, getScope, setScope),
     };
   return { kind: "fan-out", group: tree.group };
 }
@@ -731,69 +670,60 @@ function parentOf<TFrame>(path: PathLevel<TFrame>[]): NodeId | undefined {
   return enclosing?.kind === "use-descent" ? enclosing.outerNode : undefined;
 }
 
-/** `tick()`'s own `use` node handling: seeds the subgraph from the outer frame's current input/reason (`seedUseNode`), then wraps it in a `use-descent` tree node ready for the loop's next iteration to drive — same descent `driveUseNode` builds for `runFlow`, just captured as data instead of an immediate recursive call. */
+/** `tick()`'s own `use` node handling: descends a level into the subgraph, seeded with the outer frame's own current input (no core-side seeding logic left — any scope transition the reaching edge's own `run` fn made via `ctx.thread.start`/`fork` already happened before this node was ever entered) — same descent `driveUseNode` builds for `runFlow`, just captured as data instead of an immediate recursive call. */
 function advanceTickUseNode(
   node: Extract<NodeKind, { kind: "use" }>,
   frame: LiveFrame,
-  currentThread: Thread,
+  currentScope: ScopeId,
   path: PathLevel<LiveFrame>[],
   runtime: Runtime,
-  getThread: () => Thread,
-  setThread: (thread: Thread) => void,
-): { thread: Thread; tree: CursorTree<LiveFrame> } {
-  const { seed, thread: seededThread } = seedUseNode(
-    frame.reason,
-    frame.currentInput,
-    currentThread,
-    runtime,
-  );
-
+  getScope: () => ScopeId,
+  setScope: (scope: ScopeId) => void,
+): { scope: ScopeId; tree: CursorTree<LiveFrame> } {
   const tree = rebuildFromPath(path, path.length - 1, {
     kind: "use-descent",
     outerNode: frame.current,
     inner: {
       kind: "step",
       frame: buildLiveFrame(
-        { flow: node.subgraph, current: node.subgraph.entry, currentInput: seed },
+        { flow: node.subgraph, current: node.subgraph.entry, currentInput: frame.currentInput },
         runtime,
-        getThread,
-        setThread,
+        getScope,
+        setScope,
       ),
     },
   });
 
-  return { thread: seededThread, tree };
+  return { scope: currentScope, tree };
 }
 
 /** `tick()`'s own `forEach` node handling: builds and replays the group's branches, folding to the join (mutating `frame` in place, same as tick()'s own step-folding elsewhere) the instant every branch is done, or handing off to `advanceForEachGroup` for one more branch-step of work otherwise. */
 async function advanceTickForEachNode(
   node: Extract<NodeKind, { kind: "forEach" }>,
   frame: LiveFrame,
-  currentThread: Thread,
+  currentScope: ScopeId,
   runtime: Runtime,
-  scope: ExecutionScope,
-): Promise<{ kind: "folded"; thread: Thread } | { kind: "outcome"; outcome: TickOutcome }> {
-  const group = buildForEachGroup(node, frame.current, currentThread, frame.currentInput, runtime);
+  execScope: ExecutionScope,
+): Promise<{ kind: "folded"; scope: ScopeId } | { kind: "outcome"; outcome: TickOutcome }> {
+  const group = buildForEachGroup(node, frame.current, currentScope, frame.currentInput, runtime);
   for (const branch of group.branches) replayForEachBranch(branch, group, runtime);
 
   if (group.branches.every((branch) => branch.done)) {
     const outputs = group.branches.map((branch) => branch.output);
     const routed = commitRoute(
       runtime,
-      currentThread.id,
+      currentScope,
       frame.flow.edges,
       frame.current,
       outputs,
       stepIdentity(frame.current),
-      currentThread,
     );
     frame.current = routed.to;
     frame.currentInput = routed.input;
-    frame.reason = routed.reason;
-    return { kind: "folded", thread: routed.thread };
+    return { kind: "folded", scope: routed.scope };
   }
 
-  return { kind: "outcome", outcome: await advanceForEachGroup(group, runtime, scope) };
+  return { kind: "outcome", outcome: await advanceForEachGroup(group, runtime, execScope) };
 }
 
 /**
@@ -801,8 +731,8 @@ async function advanceTickForEachNode(
  * bubbling outward through `use()`-embedding frames. Walks the live position
  * `path` from the innermost frame (whose step just aborted) outward: the first
  * frame whose graph declares `flow.onAbort` wins, and execution jumps to that
- * target on the SAME thread — synthesizing the exact outcome a
- * `context.invalidate(target, { threadAction: "same" })` call would have
+ * target on the SAME scope — synthesizing the exact outcome a
+ * `context.invalidate(target, { action: "same" })` call would have
  * produced and committing it through the shared `commitInvalidation`, so an
  * abort and an explicit invalidate reach `commitInvalidation` by one path. A
  * `use()`-embedded subgraph (e.g. `agentTurn`) that declares no `onAbort` of
@@ -818,19 +748,19 @@ async function advanceTickForEachNode(
  */
 function routeAbort(
   path: PathLevel<LiveFrame>[],
-  currentThread: Thread,
+  currentScope: ScopeId,
   runtime: Runtime,
-  getThread: () => Thread,
-  setThread: (thread: Thread) => void,
-): { thread: Thread; tree: CursorTree<LiveFrame> } | undefined {
+  getScope: () => ScopeId,
+  setScope: (scope: ScopeId) => void,
+): { scope: ScopeId; tree: CursorTree<LiveFrame> } | undefined {
   for (let depth = path.length - 1; depth >= 0; depth -= 1) {
     const owner = path[depth];
     const target = owner?.flow.onAbort;
     if (!owner || target === undefined) continue;
     const outcome = commitInvalidation(
       runtime,
-      currentThread,
-      { invalidate: target, threadAction: "same" },
+      currentScope,
+      { invalidate: target, action: "same" },
       "abort",
     );
     if (outcome.kind !== "advance") unreachable("routeAbort: commitInvalidation must advance");
@@ -841,14 +771,13 @@ function routeAbort(
           flow: owner.flow,
           current: outcome.to,
           currentInput: outcome.input,
-          ...(outcome.reason !== undefined ? { reason: outcome.reason } : {}),
         },
         runtime,
-        getThread,
-        setThread,
+        getScope,
+        setScope,
       ),
     });
-    return { thread: outcome.thread, tree };
+    return { scope: outcome.scope, tree };
   }
   return undefined;
 }
@@ -869,7 +798,7 @@ function routeAbort(
  *
  * A `use` node is driven the same way tick() drives its own top-level graph:
  * one node at a time, on a child level wrapped in a `use-descent` tree node
- * (not forked — `use` shares its parent's thread, unlike a fan-out branch).
+ * (not forked — `use` shares its parent's scope, unlike a fan-out branch).
  * Reaching the subgraph's own `finish` unwraps that level and folds its
  * result into the enclosing one, exactly like `driveUseNode`'s own tail;
  * parking on the subgraph's own `waitFor` reports a cursor whose `parent` is
@@ -882,7 +811,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
   // log itself — same reconstruct-from-the-log discipline `replayPosition`
   // applies to cursor position (see `replayStateTracker`'s own doc comment).
   const stateTracker = replayStateTracker(runtime.store.events());
-  const scope = new ExecutionScope(attemptsByNode, stateTracker);
+  const execScope = new ExecutionScope(attemptsByNode, stateTracker);
   const position = replayPosition(flow, runtime);
 
   // No `input` event committed yet: the session has no starting cursor at
@@ -894,19 +823,19 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
   }
 
   if (position.kind === "fanout") {
-    return advanceFanOutGroup(position.group, flow, runtime, scope);
+    return advanceFanOutGroup(position.group, flow, runtime, execScope);
   }
 
-  let currentThread: Thread = position.thread;
+  let currentScope: ScopeId = position.scope;
   let pendingInputs: unknown[] | undefined = position.pendingInputs;
   let ranStep = false;
 
-  const getThread = (): Thread => currentThread;
-  const setThread = (next: Thread): void => {
-    currentThread = next;
+  const getScope = (): ScopeId => currentScope;
+  const setScope = (next: ScopeId): void => {
+    currentScope = next;
   };
 
-  let tree: CursorTree<LiveFrame> = toLiveTree(position.tree, runtime, getThread, setThread);
+  let tree: CursorTree<LiveFrame> = toLiveTree(position.tree, runtime, getScope, setScope);
 
   for (;;) {
     const path = cursorPath(flow, tree);
@@ -922,7 +851,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       // folded, parent-less "active" cursor needs tagging with this level's
       // own enclosing use node, matching how an ordinary step cursor at
       // this depth would be tagged (see `parentOf`).
-      const outcome = await advanceFanOutGroup(leaf.node.group, leaf.flow, runtime, scope);
+      const outcome = await advanceFanOutGroup(leaf.node.group, leaf.flow, runtime, execScope);
       const parentNode = parentOf(path);
       if (parentNode === undefined) return outcome;
       return outcome.map((cursor) =>
@@ -942,7 +871,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     // `replayStateTracker` above) has something to dedupe against.
     stateTracker.maybeEmit(
       runtime,
-      currentThread.id,
+      currentScope,
       node.state,
       stepIdentity(frame.current, node.label),
     );
@@ -962,14 +891,13 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       const useNodeId = enclosing.node.outerNode;
       const routed = commitRoute(
         runtime,
-        currentThread.id,
+        currentScope,
         enclosing.flow.edges,
         useNodeId,
         frame.currentInput,
         stepIdentity(useNodeId),
-        currentThread,
       );
-      currentThread = routed.thread;
+      currentScope = routed.scope;
       tree = rebuildFromPath(path, path.length - 2, {
         kind: "step",
         frame: buildLiveFrame(
@@ -977,11 +905,10 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
             flow: enclosing.flow,
             current: routed.to,
             currentInput: routed.input,
-            reason: routed.reason,
           },
           runtime,
-          getThread,
-          setThread,
+          getScope,
+          setScope,
         ),
       });
       continue;
@@ -1000,7 +927,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
           context: frame.context,
           flow: frame.flow,
           runtime,
-          setThread,
+          setScope,
           stateTracker,
         },
         peekingMessageSource(runtime),
@@ -1012,10 +939,9 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
         ];
       }
 
-      currentThread = outcome.thread;
+      currentScope = outcome.scope;
       frame.current = outcome.to;
       frame.currentInput = outcome.input;
-      frame.reason = outcome.reason;
       // A "free" waitFor (consumed a message but no interrupt fired) doesn't
       // count toward this tick's one-step budget — only an interrupt running
       // is billable work; see tick()'s own doc comment.
@@ -1028,22 +954,22 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       const advanced = advanceTickUseNode(
         node,
         frame,
-        currentThread,
+        currentScope,
         path,
         runtime,
-        getThread,
-        setThread,
+        getScope,
+        setScope,
       );
-      currentThread = advanced.thread;
+      currentScope = advanced.scope;
       tree = advanced.tree;
       continue;
     }
 
     if (node.kind === "forEach") {
       if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
-      const advanced = await advanceTickForEachNode(node, frame, currentThread, runtime, scope);
+      const advanced = await advanceTickForEachNode(node, frame, currentScope, runtime, execScope);
       if (advanced.kind === "outcome") return advanced.outcome;
-      currentThread = advanced.thread;
+      currentScope = advanced.scope;
       ranStep = true;
       continue;
     }
@@ -1051,8 +977,6 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     if (node.kind !== "step") notImplemented(`tick: node kind "${node.kind}"`);
 
     if (ranStep) return [{ node: frame.current, status: "active", ...parent }];
-
-    if (node.label) currentThread = { ...currentThread, label: node.label };
 
     const inputs = pendingInputs ?? [frame.currentInput];
     pendingInputs = undefined;
@@ -1070,9 +994,9 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     // frame stack innermost-first, so a use()'d subgraph that declares no
     // onAbort of its own bubbles out to its enclosing graph's declaration.
     if ("error" in emit && emit.error.cause instanceof ModelCallAbortedError) {
-      const routed = routeAbort(path, currentThread, runtime, getThread, setThread);
+      const routed = routeAbort(path, currentScope, runtime, getScope, setScope);
       if (routed) {
-        currentThread = routed.thread;
+        currentScope = routed.scope;
         tree = routed.tree;
         ranStep = true;
         continue;
@@ -1086,54 +1010,52 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
       if (branchTargets.length > 1) {
         // Same detection driveStepEmit uses (fanOutTargets), but tick spawns
         // per-branch cursors instead of running every branch to completion in
-        // one Promise.all — see advanceFanOutGroup. Works at any depth: the
-        // returned branch cursors already carry their own `parent` (the
-        // fan-out node id), and a resumed reconstruction of this same group
-        // is handled by replayPosition's matching `leaf.node.kind === "fan-out"`
+        // one Promise.all — see advanceFanOutGroup. Reports the freshly-spawned
+        // group's own cursors (nothing run yet) and returns immediately —
+        // advancing even the first branch has to wait for the NEXT tick() call,
+        // preserving tick's one-step-of-work-per-call budget (this step that just
+        // ran IS this call's one step; advanceFanOutGroup would spend a second).
+        // Works at any depth: the returned branch cursors already carry their own
+        // `parent` (the fan-out node id), and a resumed reconstruction of this same
+        // group is handled by replayPosition's matching `leaf.node.kind === "fan-out"`
         // branch.
-        appendOutput(
-          runtime,
-          currentThread.id,
-          emit.output,
-          stepIdentity(frame.current, node.label),
-        );
+        appendOutput(runtime, currentScope, emit.output, stepIdentity(frame.current, node.label));
         const group: FanOutGroup = buildFanOutGroup(
           branchTargets,
           frame.current,
           frame.flow,
-          currentThread,
+          currentScope,
           emit.output,
         );
-        return group.branches.map((branch) => branchCursorState(branch, group));
+        const parentNode = parentOf(path);
+        return group.branches.map((branch) => {
+          const cursor = branchCursorState(branch, group);
+          return parentNode !== undefined && cursor.parent === undefined
+            ? { ...cursor, parent: parentNode }
+            : cursor;
+        });
       }
     }
 
-    const outcome = await driveStepEmit(emit, node, frame.current, {
+    const routed = await driveStepEmit(emit, node, frame.current, {
       flow: frame.flow,
       runtime,
-      thread: currentThread,
-      // tick()'s own top-of-loop check above already fired this node's
-      // state (or deduped it) before this step ran; this call's own scope
-      // just needs to see the same stateTracker instance so a later dedupe
-      // check inside driveStepEmit's fan-out branch handling (a fresh
-      // tracker per forked branch, via `scope.fork()`) still sees this
-      // thread's latest state as its starting point.
-      scope,
+      scope: currentScope,
+      execScope,
     });
-
-    if (outcome.kind === "retry") continue;
-    if (outcome.pendingInputs)
-      unreachable("tick: driveStepEmit reported a fan-out after tick's own check ruled it out");
-
-    currentThread = outcome.thread;
-    frame.currentInput = outcome.input;
-    frame.reason = outcome.reason;
-    frame.current = outcome.to;
+    if (routed.kind === "retry") {
+      ranStep = true;
+      continue;
+    }
+    currentScope = routed.scope;
+    frame.current = routed.to;
+    frame.currentInput = routed.input;
+    pendingInputs = routed.pendingInputs;
     ranStep = true;
   }
 }
 
-/** Calls `tick` until it stops advancing — every cursor either parked or done. */
+/** Repeats `tick()` until every cursor reports something other than "active" — parked or done. The loop tick()'s own `driveFlow` caller (runtime.ts) drives to exhaust a session's currently-available work before parking on the store's next event. */
 export async function tickUntilSuspended(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
   for (;;) {
     const outcome = await tick(flow, runtime);

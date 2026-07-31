@@ -30,5 +30,7 @@ export type { ModelPort } from "./model-port.js";
 export type { AiConfig } from "./extension.js";
 export { ai } from "./extension.js";
 export { userInput, toolCall } from "./waitable.js";
+export type { Thread, ThreadApi, ThreadContext } from "./thread.js";
+export { startThread, forkThread } from "./thread.js";
 export type { Missing } from "../runtime/index.js";
 export { satisfiesPersonas } from "./coverage.js";

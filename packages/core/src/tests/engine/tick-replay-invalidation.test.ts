@@ -30,7 +30,7 @@ describe("replay recognizes an invalidating step as already-completed", () => {
         const draft = context.inputs[0] as string;
         return Promise.resolve(
           draft === "draft-1"
-            ? context.invalidate(plan.id, { threadAction: "fork" })
+            ? context.invalidate(plan.id, { action: "fork" })
             : context.output(`implemented:${draft}`),
         );
       });

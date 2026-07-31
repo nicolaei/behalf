@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, userText, outputs, forkThread } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { stateChanges } from "./support.js";
+import { stateChanges, neverCalled } from "./support.js";
 
 describe("stateChange and the general fork rule: a new thread id always starts with a clean slate", () => {
   // A plain edge fork, no invalidate/fan-out/forEach involved — proves the
@@ -17,13 +17,13 @@ describe("stateChange and the general fork rule: a new thread id always starts w
       { state: "red" },
     );
     flow.entry(start);
-    start.then(forked, { threadAction: "fork" });
+    start.then(forked, { run: forkThread(() => undefined) });
     forked.then(flow.finish);
   });
 
   it("fires again with no `from` on the forked thread, even for the same state value", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
     await runFlow(graph, userText("go"), ready);
 
     // "red" on the start thread, then "red" again on the forked thread —

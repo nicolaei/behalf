@@ -1,7 +1,8 @@
 # Threads and forking
 
-A thread is one growing message context. `ThreadAction`, `same`, `fork`, or `new`, is the one
-vocabulary every edge and `invalidate` uses to choose what happens to it.
+A thread is one growing message context. `same`, `fork`, or `new` is the one vocabulary every edge
+(via `ctx.thread`, or the `startThread`/`forkThread` edge-sugar) and `invalidate` uses to choose
+what happens to it.
 
 ## You will learn
 
@@ -32,24 +33,27 @@ Every edge (and every `invalidate`) picks one of three actions for the thread it
 ```ts source=docs/examples/threads-and-forking/fork-and-revert.ts#actions
   draft.then(review); // same (default) — review continues the draft's own thread
 
-  review.when((output) => (output as Verdict).approved, notify, {
-    threadAction: "new", // deliberate reset — notify only needs the final text
-    prompt: (output) => userText((output as Verdict).text),
-  });
+  review.when(
+    (output) => (output as Verdict).approved,
+    notify,
+    // deliberate reset — notify only needs the final text
+    { run: startThread((output) => userText((output as Verdict).text)) },
+  );
 
   review.otherwise(draft, {
-    threadAction: "fork", // revert — split onto a new thread, seeded with feedback
-    prompt: (output) => userText((output as Verdict).text),
+    // revert — split onto a new thread, seeded with feedback
+    run: forkThread((output) => userText((output as Verdict).text)),
   });
 ```
 
 `same` is the default: the next node just keeps writing to the thread it's already on, context
-growing with every step. `draft.then(review)` above never mentions a `threadAction` at all, because
+growing with every step. `draft.then(review)` above passes no `run` function at all, because
 `review` genuinely needs everything `draft` just wrote.
 There's no reason to reach for anything else.
 
-`new` is a deliberate reset: a brand-new thread whose only message is whatever `prompt` builds.
-`notify` above never sees the draft/review back-and-forth, only the approved text.
+`new` is a deliberate reset: a brand-new thread whose only message is whatever `startThread`'s
+message-builder function returns. `notify` above never sees the draft/review back-and-forth, only
+the approved text.
 It doesn't need the history that produced it, so carrying it forward would just be dead weight on
 every future model call.
 
@@ -72,8 +76,8 @@ a second rejection has to wade through the first attempt's mess to find what act
 
 ```ts source=docs/examples/threads-and-forking/fork-and-revert.ts#revert
   review.otherwise(draft, {
-    threadAction: "fork", // revert — split onto a new thread, seeded with feedback
-    prompt: (output) => userText((output as Verdict).text),
+    // revert — split onto a new thread, seeded with feedback
+    run: forkThread((output) => userText((output as Verdict).text)),
   });
 ```
 
@@ -85,15 +89,15 @@ The original, rejected attempt is still reachable through `forkedFrom`; it just 
 retry's own model calls see going forward.
 
 This is the general shape for reverting and branching: fork from whatever point you want to keep,
-seed the new thread with a `prompt`, and the tail that came after the split is left behind on the
-old thread, untouched.
+seed the new thread with a message via `forkThread`, and the tail that came after the split is left
+behind on the old thread, untouched.
 
 ## Labeling threads
 
 `flow.step(run, { label })` names the node, what a generated diagram shows in its box instead of an
 opaque `node-3`, and, the moment that step runs, stamps its `label` onto the thread it ran on.
 The thread keeps that label until a later labeled step overwrites it, so a UI or a log line can
-address "the coder's thread" by name instead of its generated `ThreadId`.
+address "the coder's thread" by name instead of its generated `ScopeId`.
 
 The `audit` example in [Wiring a graph](./wiring-a-graph.md#joining) labels every step this way.
 Its generated diagram reads "security"/"performance"/"style" instead of `node-3`/`node-4`/`node-5`

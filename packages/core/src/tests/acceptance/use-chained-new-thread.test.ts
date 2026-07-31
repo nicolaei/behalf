@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, outputs } from "../../index.js";
-import { storeOnlyRuntime } from "./support.js";
+import { defineGraph, runFlow, userText, outputs, startThread } from "../../index.js";
+import { fakePortRuntime } from "./support.js";
 
 // Existing coverage proves "plain step -> new thread -> use" (use-thread-new.test.ts)
 // and "use -> same thread -> use" (use-in-loop.test.ts). Neither proves the shape a
@@ -32,12 +32,12 @@ describe("use(subgraph A) -> new thread -> use(subgraph B)", () => {
     const a = flow.use(subgraphA);
     const b = flow.use(subgraphB);
     flow.entry(a);
-    a.then(b, { threadAction: "new", prompt: (value) => userText(String(value)) });
+    a.then(b, { run: startThread((value) => userText(String(value))) });
     b.then(flow.finish);
   });
 
   it("gives B a brand-new thread, seeded only from A's own output — not A's history", async () => {
-    const result = await runFlow(pipeline, userText("go"), await storeOnlyRuntime());
+    const result = await runFlow(pipeline, userText("go"), await fakePortRuntime());
 
     expect(result).toMatchObject({ messageCount: 1 }); // only the seed message — A's history is not present
     expect(

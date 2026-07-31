@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { storeOnlyRuntime, textOf, loggedEventTypes } from "./support.js";
+import { fakePortRuntime, textOf, loggedEventTypes, neverCalled } from "./support.js";
 
 describe("composing a graph as a node with `use`", () => {
   const inner = defineGraph("inner", (flow) => {
@@ -16,19 +16,24 @@ describe("composing a graph as a node with `use`", () => {
     const start = flow.step(outputs(() => "hi"));
     const sub = flow.use(inner);
     flow.entry(start);
-    start.then(sub, { prompt: (value) => userText(String(value)) });
+    start.then(sub, {
+      run: (value, ctx) => {
+        ctx.thread.say(userText(String(value)));
+        return value;
+      },
+    });
     sub.then(flow.finish);
   });
 
   it("seeds the subgraph with the incoming value and returns its result as the step's output", async () => {
-    const result = await runFlow(outer, userText("go"), await storeOnlyRuntime());
+    const result = await runFlow(outer, userText("go"), await fakePortRuntime());
 
     expect(result).toBe("HI");
   });
 
   it("appends the subgraph's messages and output to the same session log", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     await runFlow(outer, userText("go"), ready);
 

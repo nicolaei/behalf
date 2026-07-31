@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { textOf, loggedEventTypes } from "./support.js";
+import { textOf, loggedEventTypes, neverCalled } from "./support.js";
 
 describe("a graph that waits for the next prompt", () => {
   const twoTurns = defineGraph("two-turns", (flow) => {
@@ -16,7 +16,7 @@ describe("a graph that waits for the next prompt", () => {
 
   it("resumes with the follow-up, not the first message", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     // parked at `waitFor`, a follow-up is submitted
     // NOTE: submit timing here is a known open concern — `waitFor` must check the
@@ -38,7 +38,7 @@ describe("a graph that waits for the next prompt", () => {
 
   it("appends both user messages and one output per turn to the session log", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     const done = runFlow(twoTurns, userText("first"), ready);
     store.receive({

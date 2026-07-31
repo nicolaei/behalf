@@ -14,7 +14,7 @@ describe("stateChange and invalidate: same thread suppresses, a forked/new threa
       const implement = flow.step((context) =>
         Promise.resolve(
           context.inputs[0] === 1
-            ? context.invalidate(plan.id, { reason: userText("revise") })
+            ? context.invalidate(plan.id, { payload: { reason: userText("revise") } })
             : context.output("done"),
         ),
       );
@@ -43,7 +43,7 @@ describe("stateChange and invalidate: same thread suppresses, a forked/new threa
       const implement = flow.step((context) =>
         Promise.resolve(
           context.inputs[0] === 1
-            ? context.invalidate(plan.id, { threadAction: "fork" })
+            ? context.invalidate(plan.id, { action: "fork" })
             : context.output("done"),
         ),
       );

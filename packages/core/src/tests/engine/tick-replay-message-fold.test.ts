@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { tick, seed } from "../../runtime/runtime.js";
 import type { TickOutcome, Runtime } from "../../runtime/runtime.js";
-import { defineGraph, runtime, outputs } from "../../index.js";
+import { ai, defineGraph, runtime, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, SessionStore } from "../../index.js";
-import { textOf, assistantText } from "../acceptance/support.js";
+import { textOf, assistantText, neverCalled } from "../acceptance/support.js";
 
 // applyMessageEvent (tick.ts's replayPosition dispatch for a committed
 // "message" event) only ever folds it into state.thread when the CURRENT
@@ -46,11 +46,18 @@ describe("replay folds a bare message event's content, not just its position", (
     // force a pause between steps: `announce` and `read` each land in their
     // own call.
     async function freshTick(): Promise<TickOutcome> {
-      const ready: Runtime = await runtime({ store });
+      const ready: Runtime = await runtime({
+        store,
+        extensions: [ai({ models: neverCalled, bindings: [] })],
+      });
       return tick(graph, ready);
     }
 
-    seed(graph, undefined, await runtime({ store }));
+    seed(
+      graph,
+      undefined,
+      await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] }),
+    );
 
     await freshTick(); // runs announce: logs the message, reports active at read
 

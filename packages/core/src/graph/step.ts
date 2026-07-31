@@ -1,12 +1,12 @@
 // Flow authoring — Step, PersonaStep, StepContext, Emit. See docs/reference.md § "StepContext".
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) StepContext.thread/modelCall carry Message/Usage; removed when the ai extension supplies these via declaration merging.
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): modelCall/callTool/compact stay built-in StepContext fields per this task's own scoping (see task notes) — only `thread` moved to the ai extension's declaration-merge contribution this step. Message/Usage are still needed for their signatures.
 import type { Message, Usage } from "../ai/message.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) StepContext.modelCall(profile) takes a Profile; kept built-in for B2.7's minimal path (ai/model-call.ts's runModelCall still needs drive.ts's own setThread plumbing) — removed only once modelCall routes through the stepContext extension seam declaration-merge style, alongside thread.
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): see the note above — modelCall(profile) takes a Profile, kept built-in.
 import type { Profile } from "../ai/profile.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) StepContext.callTool(tool) takes a Tool; same reasoning as modelCall's note above.
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): see the note above — callTool(tool) takes a Tool, kept built-in.
 import type { Tool } from "../ai/tool.js";
-import type { ThreadId, ThreadAction } from "./thread.js";
+import type { ScopeId, ScopeAction } from "./thread.js";
 import type { NodeId } from "./graph.js";
 import type { Stream } from "../session/envelope.js";
 import type { Event, EventType } from "../session/event.js";
@@ -56,35 +56,31 @@ export interface WaitForResult<T = unknown> {
   result: T;
 }
 
-/** The one outcome a step returns. Only `output` is routed by edges. @public */
+/**
+ * The one outcome a step returns. Only `output` is routed by edges. `invalidate`'s `action`
+ * is core's own minimal, ai-neutral branch-lifecycle decision (`"same" | "fork" | "new"`,
+ * default `"same"`); `payload` is a generic extension slot — ai rides its own reason/message
+ * shape there to seed whatever scope results, but core never interprets it.
+ * @public
+ */
 export type Emit<Result = unknown> =
   | { output: Result }
-  | { invalidate: NodeId; threadAction: ThreadAction; reason?: Message }
+  | { invalidate: NodeId; action?: ScopeAction; payload?: unknown }
   | { error: StepError };
 
-/** What a step sees and does. @public */
+/** What a step sees and does. Extensions merge in more (ai: `thread`). @public */
 export interface StepContext {
-  readonly thread: {
-    id: ThreadId;
-    label?: string;
-    forkedFrom?: { thread: ThreadId; at: number };
-    parentThreadId?: ThreadId;
-    messages: Message[]; // the assembled view — compaction applied, tail trimmed
-    history: Message[]; // the full record on this thread, including compaction messages
-  };
   readonly inputs: unknown[]; // upstream outputs; a join gets one per branch
-  openStream(type: EventType): Stream; // open a fresh stream scoped to this step's thread
-  appendEvent<T extends EventType>(payload: Event[T], type: T): void; // commit a standalone event to this step's own thread
+  readonly scope: ScopeId;
+  openStream(type: EventType): Stream; // open a fresh stream scoped to this step's own scope
+  appendEvent<T extends EventType>(payload: Event[T], type: T): void; // commit a standalone event to this step's own scope
 
   modelCall(profile: Profile): Promise<ModelCallResult>; // one request + its tools, appended to the log
   callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output>;
 
   output<Result>(value: Result): Emit<Result>;
   compact(input: { task?: Message; summary: Message; keepLast: number }): Promise<void>;
-  invalidate(
-    target: NodeId,
-    options?: { threadAction?: ThreadAction; reason?: Message },
-  ): Emit<never>;
+  invalidate(target: NodeId, options?: { action?: ScopeAction; payload?: unknown }): Emit<never>;
   fail(error: StepError): Emit<never>;
 }
 

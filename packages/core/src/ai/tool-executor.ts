@@ -5,7 +5,7 @@
 // half lives alongside this in model-call.ts.
 
 import type { NodeId } from "../graph/graph.js";
-import type { ThreadId } from "../graph/thread.js";
+import type { ScopeId } from "../graph/thread.js";
 import type { Runtime, StepIdentity } from "../runtime/index.js";
 import { runFlow, stepIdentity, freshCorrelationId } from "../runtime/index.js";
 import type { Tool, ToolContext, ToolHandler, Binding } from "./tool.js";
@@ -43,26 +43,26 @@ export function findToolBinding(runtime: Runtime, name: string): ToolHandler {
 
 /** The `ToolContext` every tool handler runs with, wherever it's called from. */
 export function buildToolContext(
-  threadId: ThreadId,
+  scope: ScopeId,
   runtime: Runtime,
   identity: StepIdentity,
   correlationId: string,
 ): ToolContext {
   return {
-    thread: threadId,
+    thread: scope,
     correlationId,
     openStream: (type) =>
       runtime.store.open({
         correlationId: freshCorrelationId(runtime),
         type,
-        threadId,
+        threadId: scope,
         ...identity,
       }),
     appendEvent: (payload, type) => {
-      runtime.store.append(payload, { type, threadId });
+      runtime.store.append(payload, { type, threadId: scope });
     },
     runFlow: (flow, initialPrompt) =>
-      runFlow(flow, initialPrompt, runtime, { parentThreadId: threadId }),
+      runFlow(flow, initialPrompt, runtime, { parentThreadId: scope }),
   };
 }
 
@@ -80,12 +80,12 @@ export function buildToolContext(
  */
 export async function executeToolCall(
   call: { correlationId: string; name: string; input: unknown },
-  threadId: ThreadId,
+  scope: ScopeId,
   runtime: Runtime,
   identity: StepIdentity,
 ): Promise<unknown> {
   const handler = findToolBinding(runtime, call.name);
-  const toolContext = buildToolContext(threadId, runtime, identity, call.correlationId);
+  const toolContext = buildToolContext(scope, runtime, identity, call.correlationId);
 
   let output: unknown;
   let isError = false;
@@ -98,7 +98,7 @@ export async function executeToolCall(
 
   runtime.store.append(
     { correlationId: call.correlationId, output, ...(isError ? { isError: true } : {}) },
-    { type: "toolResult", threadId },
+    { type: "toolResult", threadId: scope },
   );
 
   return output;
@@ -127,7 +127,7 @@ export async function runToolExecutorLoop(runtime: Runtime, signal: AbortSignal)
     correlationId: string;
     name: string;
     input: unknown;
-    threadId: ThreadId;
+    threadId: ScopeId;
   }[] {
     const events = store.events();
     const resolved = new Set<string>();
@@ -141,11 +141,11 @@ export async function runToolExecutorLoop(runtime: Runtime, signal: AbortSignal)
       correlationId: string;
       name: string;
       input: unknown;
-      threadId: ThreadId;
+      threadId: ScopeId;
     }[] = [];
     for (const envelope of events) {
       if (envelope.form !== "committed" || envelope.type !== "toolCall") continue;
-      if (!envelope.threadId) continue; // a toolCall is always committed with its owning thread
+      if (!envelope.threadId) continue; // a toolCall is always committed with its owning scope
       const event = envelope.event as { correlationId: string; name: string; input: unknown };
       if (resolved.has(event.correlationId) || dispatched.has(event.correlationId)) continue;
       pending.push({ ...event, threadId: envelope.threadId });
@@ -175,12 +175,12 @@ export async function runToolExecutorLoop(runtime: Runtime, signal: AbortSignal)
 export async function callTool<Input, Output>(
   tool: Tool<Input, Output>,
   input: Input,
-  threadId: ThreadId,
+  scope: ScopeId,
   runtime: Runtime,
   identity: StepIdentity,
 ): Promise<Output> {
   const handler = findToolBinding(runtime, tool.name);
-  const toolContext = buildToolContext(threadId, runtime, identity, freshCorrelationId(runtime));
+  const toolContext = buildToolContext(scope, runtime, identity, freshCorrelationId(runtime));
   return handler(input, toolContext) as Promise<Output>;
 }
 

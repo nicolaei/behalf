@@ -6,18 +6,15 @@
 // lives alongside this file in src/runtime/ and is re-exported below so
 // `import ... from "./runtime/runtime.js"` keeps resolving exactly as before.
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) runFlow's initialPrompt is a Message; removed when a session starts from its first event instead of runFlow seeding a prompt.
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): runFlow's initialPrompt is a Message; removed when a session starts from its first event instead of runFlow seeding a prompt.
 import type { Message } from "../ai/message.js";
 import type { Graph } from "../graph/graph.js";
-import type { ThreadId } from "../graph/thread.js";
+import type { ScopeId } from "../graph/thread.js";
 import type { SessionStore } from "../session/session-store.js";
 import type { EngineExtension } from "./extension.js";
 import { defaultErrorHandler, type ErrorHandler } from "./errors.js";
-import type { Thread } from "./routing.js";
-export type { Thread } from "./routing.js";
-export { withMessage, withCompaction, deriveCompactedMessages } from "./routing.js";
 import { driveGraph } from "./drive.js";
-import { idFactories, freshThreadId } from "./ids.js";
+import { idFactories, freshScopeId } from "./ids.js";
 import { tickUntilSuspended } from "./tick.js";
 
 export type { CursorState, TickOutcome } from "./tick.js";
@@ -49,7 +46,7 @@ export function runtime(config: {
   store: SessionStore;
   extensions?: EngineExtension[]; // capabilities registering their own waitables/workers/reducers/context contributions
   errorHandlers?: ErrorHandler[]; // consulted on a step error; a default retry handler runs last
-  idFactory?: () => string; // generates every fresh correlation/thread id; omit for the default counters
+  idFactory?: () => string; // generates every fresh correlation/scope id; omit for the default counters
 }): Promise<Runtime> {
   const extensions = config.extensions ?? [];
   const abortController = new AbortController();
@@ -83,18 +80,27 @@ export function runtime(config: {
  * has no starting cursor at all, and `tick` just reports it parked instead of
  * assuming some other implicit start condition.
  *
+ * Mints the session's starting scope and tags the event with it — replay
+ * re-syncs its current scope from each envelope's own tag (see
+ * `replayPosition`), and an extension's `state()` fold only sees events
+ * tagged with the scope it's asked about, so an untagged seed would be
+ * invisible to (e.g.) ai's own thread fold. Returns the minted scope so
+ * `runFlow` drives on the same one instead of minting a second.
+ *
  * `runFlow` calls this too (see below), so every session — whether driven by
  * `runFlow`'s own blocking loop or by `seed()` + `driveFlow` — durably logs
  * the same starting fact under the same event type.
  * @public
  */
-export function seed(flow: Graph, input: unknown, runtime: Runtime): void {
-  runtime.store.append({ node: flow.entry, value: input }, { type: "input" });
+export function seed(flow: Graph, input: unknown, runtime: Runtime): ScopeId {
+  const scope = freshScopeId(runtime);
+  runtime.store.append({ node: flow.entry, value: input }, { type: "input", threadId: scope });
+  return scope;
 }
 
 /**
  * Seeds a new session with a user message, drives it to completion, and
- * resolves with the terminal output. A `parentThreadId` makes it a child —
+ * resolves with the terminal output. A `parentScope` makes it a child —
  * how a tool spawns a sub-agent.
  *
  * Internally: `seed()` first, appending the durable `input` event any later
@@ -114,19 +120,18 @@ export async function runFlow(
   flow: Graph,
   initialPrompt: Message,
   runtime: Runtime,
-  options?: { parentThreadId?: ThreadId },
+  options?: { parentThreadId?: ScopeId },
 ): Promise<unknown> {
-  const threadId = freshThreadId(runtime);
-  const thread: Thread = {
-    id: threadId,
-    ...(options?.parentThreadId ? { parentThreadId: options.parentThreadId } : {}),
-    messages: [initialPrompt],
-    history: [initialPrompt],
-  };
+  const scope = seed(flow, initialPrompt, runtime);
 
-  seed(flow, initialPrompt, runtime);
-
-  const result = await driveGraph(flow, runtime, thread, initialPrompt);
+  const result = await driveGraph(
+    flow,
+    runtime,
+    scope,
+    initialPrompt,
+    undefined,
+    options?.parentThreadId,
+  );
   return result.output;
 }
 

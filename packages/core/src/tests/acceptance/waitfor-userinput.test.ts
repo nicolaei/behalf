@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { textOf, loggedEventTypes } from "./support.js";
+import { textOf, loggedEventTypes, neverCalled } from "./support.js";
 
 describe("waitFor(userInput(kind)) behaves identically to today's waitFor(kind)", () => {
   const twoTurns = defineGraph("two-turns-userinput", (flow) => {
@@ -16,7 +16,7 @@ describe("waitFor(userInput(kind)) behaves identically to today's waitFor(kind)"
 
   it("resumes with the follow-up, not the first message", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     const done = runFlow(twoTurns, userText("first"), ready);
     store.receive({
@@ -34,7 +34,7 @@ describe("waitFor(userInput(kind)) behaves identically to today's waitFor(kind)"
 
   it("appends both user messages and one output per turn to the session log", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     const done = runFlow(twoTurns, userText("first"), ready);
     store.receive({

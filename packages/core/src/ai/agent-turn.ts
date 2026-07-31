@@ -24,6 +24,7 @@ import type { ModelCallResult, WaitForResult } from "../graph/step.js";
 import { toolCall } from "./waitable.js";
 import type { Profile } from "./profile.js";
 import type { Message, ContentBlock } from "./message.js";
+import "./context.js"; // side-effect: registers the StepContext/EdgeContext.thread declaration merge
 
 function toolBranch(item: unknown): Graph {
   const { correlationId } = item as { correlationId: string; name: string };

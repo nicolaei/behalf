@@ -17,7 +17,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import TextInput from "ink-text-input";
 import { runFlow, userText } from "@behalf-js/core";
-import type { Runtime, Message, StepError, ThreadId } from "@behalf-js/core";
+import type { Runtime, Message, StepError, ScopeId } from "@behalf-js/core";
 import { pipeline } from "./pipeline.js";
 import { DEFAULT_MODEL, askerProfile } from "./profiles.js";
 import type { AskBridge, PendingAsk } from "./ask-bridge.js";
@@ -241,7 +241,7 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
   const [pendingAsk, setPendingAsk] = useState<PendingAsk | undefined>(undefined);
   const [currentStage, setCurrentStage] = useState<StageName | undefined>(undefined);
   const started = useRef(false);
-  const stageByThread = useRef(new Map<ThreadId, StageName>());
+  const stageByThread = useRef(new Map<ScopeId, StageName>());
   const nextStageIndex = useRef(0);
 
   // A real full-screen TUI: take over the alternate screen buffer on mount,

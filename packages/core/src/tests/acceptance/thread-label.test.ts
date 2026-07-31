@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, userText, outputs } from "../../index.js";
-import { storeOnlyRuntime } from "./support.js";
+import { fakePortRuntime } from "./support.js";
 
 describe("a step's thread label", () => {
   const labeled = defineGraph("labeled-step", (flow) => {
@@ -13,7 +13,7 @@ describe("a step's thread label", () => {
   });
 
   it("gives the step's thread a stable label, readable via context.thread.label", async () => {
-    const result = await runFlow(labeled, userText("go"), await storeOnlyRuntime());
+    const result = await runFlow(labeled, userText("go"), await fakePortRuntime());
 
     expect(result).toBe("coder");
   });

@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Waitable, WaitForResult } from "../../index.js";
+import { neverCalled } from "./support.js";
 
 // The unified message-or-signal pending queue and the signal Event kind
 // don't exist yet — `store.receive` isn't implemented. Written now so the
@@ -62,7 +63,7 @@ describe("waitFor on a signal-based Waitable resumes with the right value", () =
     });
 
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     const done = runFlow(flow, userText("go"), ready);
     store.receive({ kind: "signal", name: "ping", payload: { pong: "hello" } });
