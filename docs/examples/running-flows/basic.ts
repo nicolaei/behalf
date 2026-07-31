@@ -15,7 +15,7 @@ import {
   tool,
 } from "@behalf-js/core";
 import type { Profile, Graph, StepContext } from "@behalf-js/core";
-import { fakePort } from "@behalf-js/testing";
+import { fakePort } from "@behalf-js/testing/ai";
 import { memoryStore } from "@behalf-js/stores";
 
 function lastAssistantText(context: StepContext): string {

@@ -415,8 +415,8 @@ type ThreadAction = "same" | "fork" | "new";
 - **`same`** (default) — continue this thread; context grows.
 - **`fork`** — a new id that shares this thread's history up to the split point, linked back by
   `forkedFrom: { thread, at }`.
-  A tree on an existing thread — distinct from `spawnAgent`, which starts a child agent in a
-  session of its own, with no shared thread at all.
+  A tree on an existing thread — distinct from `spawnAgent`, which starts a child agent in a session
+  of its own, with no shared thread at all.
 - **`new`** — a brand-new empty thread with a fresh initial message; a deliberate reset, such as a
   new turn that drops prior context.
 

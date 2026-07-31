@@ -5,7 +5,8 @@
 import { describe, it, expect } from "vitest";
 import { ai, defineGraph, agentTurn, userText, runtime, provide, tool } from "@behalf-js/core";
 import type { ModelPort, Profile, AssistantMessage } from "@behalf-js/core";
-import { fakePort, runToCompletion } from "@behalf-js/testing";
+import { runToCompletion } from "@behalf-js/testing";
+import { fakePort } from "@behalf-js/testing/ai";
 import { memoryStore } from "@behalf-js/stores";
 import { z } from "zod";
 

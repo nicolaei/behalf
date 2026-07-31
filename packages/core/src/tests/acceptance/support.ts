@@ -2,7 +2,7 @@
 
 import { ai, runtime } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { fakePort } from "@behalf-js/testing";
+import { fakePort } from "@behalf-js/testing/ai";
 import type {
   Runtime,
   Message,

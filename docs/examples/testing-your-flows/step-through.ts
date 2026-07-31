@@ -16,7 +16,7 @@ import {
   type Graph,
   type Handle,
 } from "@behalf-js/core";
-import { fakePort } from "@behalf-js/testing";
+import { fakePort } from "@behalf-js/testing/ai";
 import { memoryStore } from "@behalf-js/stores";
 import { stepOnce, stepUntilBlocked, stepUntil, atNode } from "@behalf-js/testing";
 

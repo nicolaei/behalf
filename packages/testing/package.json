@@ -1,7 +1,7 @@
 {
   "name": "@behalf-js/testing",
   "version": "0.0.10",
-  "description": "Test-author vocabulary for behalf flows — stepOnce/stepUntilBlocked/stepUntil, and a fake ModelPort.",
+  "description": "Test-author vocabulary for behalf flows — stepOnce/stepUntilBlocked/stepUntil at the root, model fakes under ./ai, the evaluation harness under ./eval.",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./ai": {
+      "types": "./dist/ai/index.d.ts",
+      "default": "./dist/ai/index.js"
     },
     "./eval": {
       "types": "./dist/eval/index.d.ts",

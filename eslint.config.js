@@ -175,5 +175,32 @@ export default defineConfig([
     },
   },
 
+  // @behalf-js/testing's own layering, mirroring core's: the root subpath is
+  // the pure engine stepping vocabulary and must never reach into ai/ — a
+  // test helper that needs a model fake belongs on the ./ai subpath. ai/ and
+  // eval/ are exempt (eval sits atop ai by design).
+  {
+    files: ["packages/testing/src/**/*.ts"],
+    ignores: [
+      "packages/testing/src/ai/**",
+      "packages/testing/src/eval/**",
+      "packages/testing/src/tests/**",
+    ],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["./ai/*", "../ai/*", "**/testing/src/ai/*", "@behalf-js/testing/ai"],
+              message:
+                "@behalf-js/testing's root subpath must not import from ai/ — the stepping vocabulary is engine-only. A helper that needs a model fake belongs under src/ai/ and ships on the ./ai subpath.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   eslintConfigPrettier,
 ]);

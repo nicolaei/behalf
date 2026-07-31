@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { ai, defineGraph, runtime, provide, tool, userText } from "../../index.js";
-import { fakePort, runToCompletion } from "@behalf-js/testing";
+import { runToCompletion } from "@behalf-js/testing";
+import { fakePort } from "@behalf-js/testing/ai";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, assistantToolCall } from "./support.js";
 

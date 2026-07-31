@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { ai, defineGraph, runtime, userText } from "../../index.js";
 import type { Message, ModelCallResult, Profile } from "../../index.js";
-import { fakePort, runToCompletion } from "@behalf-js/testing";
+import { runToCompletion } from "@behalf-js/testing";
+import { fakePort } from "@behalf-js/testing/ai";
 import { memoryStore } from "@behalf-js/stores";
 import { fakePortRuntime, loggedEventTypes, loggedEventAt } from "./support.js";
 

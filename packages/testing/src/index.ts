@@ -131,4 +131,3 @@ export async function runToCompletion(
 }
 
 export { StepUntilError } from "./errors.js";
-export { fakePort } from "./fake-port.js";
