@@ -38,7 +38,13 @@ export interface SessionStore {
   consume(matches: (entry: PendingEntry) => boolean): PendingEntry | undefined; // find-and-remove a pending entry in one call
   append(
     event: Event[EventType],
-    meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ScopeId },
+    meta: {
+      type: EventType;
+      stepId?: string;
+      stepName?: string;
+      threadId?: ScopeId;
+      branchId?: string;
+    },
   ): void;
   open(meta: {
     correlationId: string;

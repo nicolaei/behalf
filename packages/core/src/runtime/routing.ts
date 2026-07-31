@@ -54,12 +54,13 @@ export function advance(edges: readonly EdgeDefinition[], from: NodeId, output: 
   return edge.to;
 }
 
-/** Appends a node's output event to the log — shared by every path that produces one. */
+/** Appends a node's output event to the log — shared by every path that produces one. `branchId`, when given, attributes it to a dynamic (`forEach`) branch running on the shared parent scope (see `Envelope.branchId`). */
 export function appendOutput(
   runtime: Runtime,
   scope: ScopeId,
   output: unknown,
   step: StepIdentity,
+  branchId?: string,
 ): void {
   runtime.store.append(
     { value: output },
@@ -68,6 +69,7 @@ export function appendOutput(
       threadId: scope,
       stepId: step.stepId,
       ...(step.stepName ? { stepName: step.stepName } : {}),
+      ...(branchId ? { branchId } : {}),
     },
   );
 }

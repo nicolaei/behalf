@@ -17,6 +17,14 @@ export type Envelope<Type extends EventType = EventType> =
       sessionId: SessionId;
       threadId?: ScopeId;
       stepId?: string;
+      // Which dynamic branch committed this, when one did. A `forEach`
+      // branch runs on its PARENT's scope by design (so its steps read the
+      // same thread, and a repeated `state` dedupes against it), which leaves
+      // `threadId` unable to tell one branch's events from a sibling's — and
+      // branch graphs are rebuilt per call, so their node ids collide too.
+      // This is that missing axis: an opaque, deterministic per-branch key
+      // replay matches on. Absent everywhere else.
+      branchId?: string;
       stepName?: string;
       type: Type;
       event: Event[Type];

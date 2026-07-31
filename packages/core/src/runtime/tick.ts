@@ -161,7 +161,7 @@ interface ReplayState {
   tree: CursorTree;
 }
 
-/** `replayPosition`'s handling of an event while the innermost position is a still-in-flight fan-out group: folds an `output`/`message` event into whichever branch owns it, or — for the join node's own output — recognizes the fold already happened on an earlier tick call and resumes ordinary single-line replay from its routed edge. */
+/** `replayPosition`'s handling of an event while the innermost position is a still-in-flight fan-out group: folds an `output`/`message`/`signal` event into whichever branch owns it, recognizes the join node's own output as a fold that already happened on an earlier tick call, or — for an `invalidation` — collapses the group entirely and resumes single-line replay at the invalidated node. */
 function applyFanOutEvent(
   envelope: CommittedEnvelope,
   path: PathLevel<ReplayFrame>[],
@@ -199,9 +199,19 @@ function applyFanOutEvent(
   if (envelope.type === "signal") {
     replayBranchSignal(group, envelope.threadId, ownerFlow, runtime);
   }
-  // toolCall/toolResult/compaction/invalidation/error inside a branch aren't
-  // produced by any node kind `runBranchNode` supports — out of scope for
-  // this slice's replay, same as the single-line path.
+  if (envelope.type === "invalidation") {
+    // A branch invalidated a node instead of joining (see
+    // `advanceFanOutGroup`): the whole group is abandoned and the invalidated
+    // node reruns on the group's own pre-fork line. Collapse back to
+    // single-line replay — `applyInvalidationEvent` rebuilds the tree at
+    // whichever level owns the target, which is exactly what this position
+    // needs, fan-out group and all, dropped.
+    state.scope = group.mainScope;
+    applyInvalidationEvent(envelope, path, state);
+  }
+  // toolCall/toolResult/compaction/error inside a branch aren't produced by any
+  // node kind `runBranchNode` supports — out of scope for this slice's replay,
+  // same as the single-line path.
 }
 
 /** `replayPosition`'s handling of a committed `output` event outside an in-flight fan-out: finds the level that actually owns the node id (walking outward, since a level above may already have finished), then either hands off to per-branch fan-out reconstruction or routes to the next node the same way `advance` would. */
@@ -504,18 +514,25 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
       continue;
     }
 
-    // A forEach node's branches each run on their own per-branch scope (see
-    // foreach.ts), and every event they commit is tagged with that scope —
-    // never the main line's. While the position is parked at a forEach node,
-    // those branch events must NOT move `state.scope`: the forEach fold
-    // (advanceTickForEachNode's commitRoute) reads it back as the scope the
-    // folded `output` event is committed on, and it has to stay the outer
-    // flow's own scope. Skip the correction here, the same way the fan-out
-    // case above never runs it. The fold's own edge is followed by `route`,
-    // which carries the scope forward correctly without this blanket sync.
+    // A forEach node's branches run on the enclosing flow's own scope (see
+    // foreach.ts), tagged with their own `branchId`. While the position is
+    // parked at a forEach node, a branch event must NOT move `state.scope`:
+    // the forEach fold (advanceTickForEachNode's commitRoute) reads it back as
+    // the scope the folded `output` event is committed on, and it has to stay
+    // the outer flow's own. Skip the correction for anything branch-tagged,
+    // the same way the fan-out case above never runs it at all. The fold's own
+    // edge is followed by `route`, which carries the scope forward correctly
+    // without this blanket sync.
     const atForEach =
       leaf.node.kind === "step" && leaf.flow.nodes.get(leaf.node.frame.current)?.kind === "forEach";
-    if (!atForEach && envelope.threadId) state.scope = envelope.threadId;
+    // A branch's own events are replayed per-branch by `replayForEachBranch`,
+    // never here. They run on the SAME scope as the main line, and a rebuilt
+    // branch graph's node ids can coincide with a main-path node's, so neither
+    // scope nor an id-membership miss can exclude them — their `branchId` is
+    // what marks them as somebody else's, both for the scope sync and for the
+    // dispatch below.
+    if (atForEach && envelope.branchId !== undefined) continue;
+    if (envelope.threadId) state.scope = envelope.threadId;
 
     if (envelope.type === "input" && !started) {
       // The session's own starting fact: establishes the starting cursor at
@@ -534,17 +551,6 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     }
 
     if (envelope.type === "output") {
-      // A branch's own step outputs (committed on its deterministic branch
-      // scope, never the main line's) are replayed per-branch by
-      // `replayForEachBranch` — never here. They used to fall out of
-      // `applyOutputEvent`'s id search by accident (branch graphs once drew
-      // globally unique ids, so no level ever owned one); now that a branch
-      // graph is rebuilt as its own outermost build (see flow/graph.ts's
-      // nodeIdSequence), a branch node's id CAN coincide with a main-path
-      // node's, so they must be excluded by scope id instead of by an
-      // id-membership miss.
-      if (atForEach && envelope.threadId !== undefined && envelope.threadId !== state.scope)
-        continue;
       applyOutputEvent(envelope, path, state);
       continue;
     }

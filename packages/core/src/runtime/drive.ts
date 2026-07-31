@@ -76,8 +76,8 @@ export function findInterruptNodes(flow: Graph): InterruptNode[] {
  *
  * Carries a bare `StateTracker`, not a full `ExecutionScope`: an interrupt's
  * own step can't retry yet (see `driveWaitForMessage`'s "emitting anything
- * but `output` isn't supported yet" guard), so `attemptsByNode` has no
- * meaning here — bundling one would just be a dead field on every call site.
+ * but `output` isn't supported yet" guard), so nothing else from an
+ * `ExecutionScope` has meaning here.
  */
 export interface WaitContext {
   interrupts: InterruptNode[];
@@ -86,6 +86,8 @@ export interface WaitContext {
   runtime: Runtime;
   setScope: (scope: ScopeId) => void;
   stateTracker: StateTracker;
+  /** Set only inside a dynamic (`forEach`) branch — tags the consumed message with the branch that consumed it. See `Envelope.branchId`. */
+  branchId?: string;
 }
 
 /**
@@ -95,13 +97,11 @@ export interface WaitContext {
  * rather than a local snapshot, so a scope transition its own
  * `context.thread.start`/`fork` (or `context.modelCall()`) made is never
  * dropped — otherwise this node's own edge is followed. Shared by
- * `runWaitForNode` (the one waitFor implementation both `driveGraph` and
- * `tick()` drive through, parameterized by which `MessageSource` obtained the
- * message — blocking, for `driveGraph`; peeking, for `tick()`) and
- * fan-out.ts's `runBranchNode`, which resolves a branch's own waitFor message
- * itself (block or peek, by its own `waitMode`) and folds it through this
- * same function. All three differ only in how the message is obtained, never
- * in what happens once it's in hand. `ranInterruptStep` reports whether this
+ * `runWaitForNode` (the one waitFor implementation `tick()` drives every
+ * waitFor node through) and fan-out.ts's `runBranchNode`, which resolves a
+ * branch's own waitFor message itself and folds it through this same
+ * function. Both differ only in how the message is obtained, never in what
+ * happens once it's in hand. `ranInterruptStep` reports whether this
  * call actually ran a step (the interrupt) or just consumed a message for
  * free, so tick() can decide whether this counts toward its one-step-per-call
  * budget.
@@ -116,7 +116,14 @@ export async function driveWaitForMessage(
   // becomes a log event and joins the scope's own history, then whichever
   // node was actually armed for its kind — the interrupt, or this waitFor
   // itself — runs and takes over routing.
-  runtime.store.append({ message }, { type: "message", threadId: context.scope });
+  runtime.store.append(
+    { message },
+    {
+      type: "message",
+      threadId: context.scope,
+      ...(wait.branchId ? { branchId: wait.branchId } : {}),
+    },
+  );
 
   const interrupt = interrupts.find(
     (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,

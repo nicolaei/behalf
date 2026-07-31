@@ -68,12 +68,13 @@ export class ExecutionScope {
   }
 }
 
-/** Everything a step or branch needs to run against: the runtime it calls into, the graph it's routing through, the scope it's advancing, and the `ExecutionScope` (attempts + stateTracker) for this drive scope. The one bundle every drive-loop and fan-out-branch function threads through instead of separate positional parameters. */
+/** Everything a step or branch needs to run against: the runtime it calls into, the graph it's routing through, the scope it's advancing, and the `ExecutionScope` (stateTracker) for this drive scope. `branchId` is set only inside a dynamic (`forEach`) branch — see `Envelope.branchId`; it tags this branch's own committed events so replay can tell them from a sibling's while both run on the shared parent scope. */
 export interface ExecutionContext {
   runtime: Runtime;
   flow: Graph;
   scope: ScopeId;
   execScope: ExecutionScope;
+  branchId?: string;
 }
 
 /**

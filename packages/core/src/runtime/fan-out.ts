@@ -22,6 +22,7 @@ import { runModelCall } from "../ai/model-call.js";
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): see runModelCall's import note above; same reasoning for callTool.
 import { callTool } from "../ai/tool-executor.js";
 import {
+  commitInvalidation,
   findInterruptNodes,
   runWaitForNode,
   peekingMessageSource,
@@ -140,7 +141,11 @@ export async function runBranchNode(
         ...nodeIdentity,
       }),
     appendEvent: (payload, type) => {
-      runtime.store.append(payload, { type, threadId: scope });
+      runtime.store.append(payload, {
+        type,
+        threadId: scope,
+        ...(ctx.branchId ? { branchId: ctx.branchId } : {}),
+      });
     },
     modelCall: (profile) => runModelCall(profile, branchContext, runtime, setScope),
     callTool: (tool, toolInput) => callTool(tool, toolInput, scope, runtime, nodeIdentity),
@@ -166,6 +171,7 @@ export async function runBranchNode(
       runtime,
       setScope,
       stateTracker,
+      ...(ctx.branchId ? { branchId: ctx.branchId } : {}),
     };
     const outcome = await runWaitForNode(nodeDef, nodeId, wait, source);
     if (outcome.kind === "parked") {
@@ -189,7 +195,7 @@ export async function runBranchNode(
     if (!("output" in emit))
       unreachable(`emit "${Object.keys(emit).join(", ")}" in a fan-out branch`);
 
-    appendOutput(runtime, scope, emit.output, nodeIdentity);
+    appendOutput(runtime, scope, emit.output, nodeIdentity, ctx.branchId);
     stepOutput = emit.output;
     break;
   }
@@ -468,15 +474,26 @@ export async function advanceFanOutGroup(
       runtime,
       scope: branchScope,
       // Fresh per branch is correct here, not a stopgap: a fan-out branch
-      // forks its own scope (see advanceFanOutGroup's own forking
-      // above), so its state tracking is independent of any sibling's,
-      // same as driveStepEmit's fan-out handling in drive.ts. attemptsByNode
-      // stays shared — fork() never forks it (see ExecutionScope's own doc
-      // comment).
+      // forks its own scope (see advanceFanOutGroup's own forking above), so
+      // its state tracking is independent of any sibling's.
       execScope: execScope.fork(),
     });
     branch.scope = result.scope;
-    if (result.kind === "invalidate") notImplemented("tick: fan-out branch invalidate");
+    if (result.kind === "invalidate") {
+      // A branch that invalidated instead of joining abandons the whole
+      // fan-out: the invalidated node reruns, and the fan-out step downstream
+      // of it fans out again from scratch. Committed on the group's
+      // `mainScope` — the pre-fork line — so the rerun lands back on the
+      // shared line rather than on this one branch's forked copy, the same
+      // choice the fan-out fold itself makes. Replay recognizes it: an
+      // `invalidation` event arriving while the position is a live fan-out
+      // collapses the group back to single-line replay at the target (see
+      // `applyFanOutEvent`).
+      const outcome = commitInvalidation(runtime, group.mainScope, result.emit);
+      if (outcome.kind !== "advance")
+        unreachable("advanceFanOutGroup: commitInvalidation must advance");
+      return [{ node: outcome.to, status: "active" }];
+    }
 
     if (result.kind === "parked") {
       branch.waitingFor = result.waitingFor;

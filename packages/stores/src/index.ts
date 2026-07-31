@@ -45,7 +45,13 @@ class AsyncQueue<T> implements AsyncIterable<T> {
  * paths that turn an event into a logged, broadcast envelope, differing only in whether
  * the event was aborted. */
 function buildEnvelope(
-  meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ScopeId },
+  meta: {
+    type: EventType;
+    stepId?: string;
+    stepName?: string;
+    threadId?: ScopeId;
+    branchId?: string;
+  },
   event: Event[EventType],
   sequence: number,
   options?: { aborted?: boolean; form?: "committed" | "in-progress" },
@@ -56,6 +62,7 @@ function buildEnvelope(
     threadId: meta.threadId,
     stepId: meta.stepId,
     stepName: meta.stepName,
+    ...(meta.branchId ? { branchId: meta.branchId } : {}),
     type: meta.type,
     event,
     sequence,
@@ -118,7 +125,13 @@ export function memoryStore(): SessionStore {
 
     append(
       event: Event[EventType],
-      meta: { type: EventType; stepId?: string; stepName?: string; threadId?: ScopeId },
+      meta: {
+        type: EventType;
+        stepId?: string;
+        stepName?: string;
+        threadId?: ScopeId;
+        branchId?: string;
+      },
     ): void {
       sequence += 1;
       const envelope = buildEnvelope(meta, event, sequence);

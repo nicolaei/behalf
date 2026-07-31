@@ -58,46 +58,39 @@ describe("forEach runs N branches, each a multi-node graph (step -> waitFor -> u
     const items = Array.from({ length: count }, (_, i) => `item${String(i)}`);
     const flow = buildFlow(items);
 
-    // KNOWN GAP (tracked, deliberately skipped — not deleted, not weakened): the
-    // multi-branch cases race since the B2.8 thread extraction. Concurrent forEach
-    // branches deliberately share ONE scope id (see foreach-branch-finish-thread.test.ts,
-    // which still passes and protects the join-time result), but `context.thread` is now
-    // a live fold of that shared scope's committed log — pre-B2.8 each branch carried its
-    // own in-memory `Thread` value, so siblings' concurrent `say()` appends were mutually
-    // invisible until the join. Post-extraction, whichever sibling committed last is what
-    // every branch reads next, so each branch's `use` subgraph here may see a SIBLING's
-    // resume message instead of its own. Tracked as the reported problem "Concurrent
-    // forEach branches sharing one scope id race on live thread reads (post-B2.8 thread
-    // extraction)" — see also driveForEachNode's own doc comment (runtime/drive.ts).
-    // The single-branch case has no sibling to race and stays green.
-    it.skipIf(count > 1)(
-      "resolves every branch regardless of order and folds results in item order",
-      async () => {
-        const store = memoryStore();
-        const ready = await runtime({
-          store,
-          extensions: [ai({ models: neverCalled, bindings: [] })],
+    // Multi-branch cases used to race and were skipped: forEach branches share
+    // ONE scope, and post-B2.8 `context.thread` is a live fold of that scope's
+    // committed log, so two branches running concurrently each read whichever
+    // sibling committed last. Both halves of that are gone now. `tick()`
+    // advances at most one branch per call, so siblings never run concurrently
+    // in the first place — the interleaving that made the read ambiguous can't
+    // occur — and each branch's own events are attributed by `branchId`
+    // (see foreach.ts) rather than by scope.
+    it("resolves every branch regardless of order and folds results in item order", async () => {
+      const store = memoryStore();
+      const ready = await runtime({
+        store,
+        extensions: [ai({ models: neverCalled, bindings: [] })],
+      });
+
+      const done = runToCompletion(flow, userText("go"), ready);
+
+      // Resolve in reverse item order — proves folding isn't dependent on
+      // resolution order.
+      for (const item of [...items].reverse()) {
+        store.receive({
+          kind: "message",
+          message: {
+            role: "user",
+            intent: "standard",
+            kind: `resume-${item}`,
+            content: [{ type: "text", text: `signal-${item}` }],
+          },
         });
+      }
 
-        const done = runToCompletion(flow, userText("go"), ready);
-
-        // Resolve in reverse item order — proves folding isn't dependent on
-        // resolution order.
-        for (const item of [...items].reverse()) {
-          store.receive({
-            kind: "message",
-            message: {
-              role: "user",
-              intent: "standard",
-              kind: `resume-${item}`,
-              content: [{ type: "text", text: `signal-${item}` }],
-            },
-          });
-        }
-
-        const expected = items.map((item) => `${item}:${`signal-${item}`.toUpperCase()}`);
-        expect(await done).toEqual(expected);
-      },
-    );
+      const expected = items.map((item) => `${item}:${`signal-${item}`.toUpperCase()}`);
+      expect(await done).toEqual(expected);
+    });
   });
 });
