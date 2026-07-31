@@ -9,7 +9,12 @@ import type { StepContext } from "../graph/step.js";
 import type { Runtime } from "./runtime.js";
 import type { Event, EventType } from "../session/event.js";
 import { isCommittedEnvelope, type CommittedEnvelope } from "../session/envelope.js";
-import type { EngineExtension, ExecutionScope as ScopeHandle } from "./extension.js";
+import {
+  type EngineExtension,
+  type ExecutionScope as ScopeHandle,
+  type ScopeStateReducer,
+  foldExtensionState,
+} from "./extension.js";
 import { freshThreadId } from "./ids.js";
 
 export type Thread = StepContext["thread"];
@@ -126,19 +131,22 @@ export function route(
 /** The built-in `EdgeContext` field names — reserved so an extension's contributed key can never silently shadow one. Mirrors `step-runner.ts`'s `BUILT_IN_STEP_CONTEXT_KEYS`. */
 const BUILT_IN_EDGE_CONTEXT_KEYS = ["scope", "appendEvent"];
 
-/** Builds the `ExecutionScope` handle passed to an extension's `edgeContext(scope)` — same shape `step-runner.ts`'s `makeExecutionScope` builds for `stepContext`, scoped to `threadId` instead of a live-updating getter (an edge fn runs once, against one fixed thread id, never a moving one). `state()` has no real backing yet, same documented stub as the step-context side — the per-extension scope-state slot doesn't exist until reducers land (B2 step 6). */
+/** Builds the `ExecutionScope` handle passed to an extension's `edgeContext(scope)` — same shape `step-runner.ts`'s `makeExecutionScope` builds for `stepContext`, scoped to `threadId` instead of a live-updating getter (an edge fn runs once, against one fixed thread id, never a moving one). `state(name)` folds this scope's events through `name`'s own registered `reducers` (see `foldExtensionState`), same as the step-context side. */
 function makeEdgeExecutionScope(runtime: Runtime, threadId: ThreadId): ScopeHandle {
+  const events = (): readonly CommittedEnvelope[] =>
+    runtime.store
+      .events()
+      .filter(isCommittedEnvelope)
+      .filter((envelope) => envelope.threadId === threadId);
   return {
     scope: threadId,
-    events(): readonly CommittedEnvelope[] {
-      return runtime.store
-        .events()
-        .filter(isCommittedEnvelope)
-        .filter((envelope) => envelope.threadId === threadId);
-    },
-    state(): unknown {
-      // TODO(B2 step 6): wire to the real per-extension replay state once reducers land.
-      return undefined;
+    events,
+    state(extension: string): unknown {
+      return foldExtensionState(
+        events(),
+        runtime.extensions.find((candidate) => candidate.name === extension),
+        threadId,
+      );
     },
     appendEvent<T extends EventType>(payload: Event[T], type: T): void {
       runtime.store.append(payload, { type, threadId });
@@ -263,6 +271,28 @@ export function deriveCompactedMessages(
 export function withCompaction(thread: Thread, compaction: Event["compaction"]): Thread {
   return { ...thread, messages: deriveCompactedMessages(thread.history, compaction) };
 }
+
+/**
+ * The ai extension's own reducers — still physically defined here in runtime/ (full
+ * relocation of ai's runtime logic to `ai/` is B2.7), registered through the
+ * `EngineExtension.reducers` seam by `runtime()`'s built-in ai registration (see
+ * `runtime.ts`). `tick.ts`'s replay switch calls these through that registration instead
+ * of calling `withMessage`/`withCompaction` directly — one source of truth for "how these
+ * two event types fold", reached both by `tick`'s own inline routing (which still needs to
+ * fold-then-route in one step for a `waitFor`/`use` node consuming a message) and by any
+ * caller of the generic `ExecutionScope.state("ai")` slot. Each assumes `state` is already
+ * a `Thread` — true for every call site today; a cold `state()` fold starting from
+ * `undefined` is not yet a supported entry point for these two (that's B2.8's job, when
+ * Thread itself becomes ai's own scope state).
+ */
+export const messageReducer: ScopeStateReducer = (state, event) => {
+  const { message } = event.event as Event["message"];
+  return withMessage(state as Thread, message);
+};
+
+export const compactionReducer: ScopeStateReducer = (state, event) => {
+  return withCompaction(state as Thread, event.event as Event["compaction"]);
+};
 
 /**
  * Resolves the thread an invalidated node reruns on, per its `threadAction`:

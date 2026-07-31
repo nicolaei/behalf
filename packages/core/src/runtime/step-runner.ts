@@ -15,7 +15,11 @@ import type { Profile } from "../ai/profile.js";
 import type { Stream, CommittedEnvelope } from "../session/envelope.js";
 import type { Event, EventType } from "../session/event.js";
 import type { Runtime } from "./runtime.js";
-import type { EngineExtension, ExecutionScope as ScopeHandle } from "./extension.js";
+import {
+  type EngineExtension,
+  type ExecutionScope as ScopeHandle,
+  foldExtensionState,
+} from "./extension.js";
 import { type ErrorContext, type ErrorDecision, unreachable } from "./errors.js";
 import { RetryableError } from "./errors.js";
 import { type Thread, StateTracker, withCompaction } from "./routing.js";
@@ -200,16 +204,19 @@ const BUILT_IN_STEP_CONTEXT_KEYS = [
   "fail",
 ];
 
-/** Builds the `ExecutionScope` handle passed to each extension's `stepContext(scope)`. `state()` has no real backing yet — the per-extension scope-state slot doesn't exist until reducers land (B2 step 6) — so it's a documented stub. */
+/** Builds the `ExecutionScope` handle passed to each extension's `stepContext(scope)` — `state(name)` folds this scope's events through `name`'s own registered `reducers` (see `foldExtensionState`), independently for every extension name a caller asks for. */
 function makeExecutionScope(config: StepContextConfig): ScopeHandle {
   return {
     get scope() {
       return config.getThread().id;
     },
     events: config.getEvents,
-    state(): unknown {
-      // TODO(B2 step 6): wire to the real per-extension replay state once reducers land.
-      return undefined;
+    state(extension: string): unknown {
+      return foldExtensionState(
+        config.getEvents(),
+        config.extensions.find((candidate) => candidate.name === extension),
+        config.getThread().id,
+      );
     },
     appendEvent: config.appendEvent,
   };

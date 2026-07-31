@@ -9,9 +9,10 @@ import type { Message, MessageKind } from "../ai/message.js";
 import { tryMessageKindOf } from "../graph/waitable.js";
 import type { StepContext, WaitForResult } from "../graph/step.js";
 import { ModelCallAbortedError } from "../graph/step.js";
-import type { Event } from "../session/event.js";
+import type { Event, EventType } from "../session/event.js";
 import type { CommittedEnvelope, Envelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
+import type { ScopeStateReducer } from "./extension.js";
 import { freshThreadId } from "./ids.js";
 import { notImplemented, unreachable } from "./errors.js";
 import {
@@ -23,7 +24,6 @@ import {
   withMessage,
   thenEdges,
   StateTracker,
-  withCompaction,
   applyThreadAction,
 } from "./routing.js";
 import { runStep, assertJoinTagging, withInputs, ExecutionScope } from "./step-runner.js";
@@ -311,7 +311,23 @@ function applyOutputEvent(
   });
 }
 
-/** `replayPosition`'s handling of a committed `message` event: a `waitFor` node that consumed it routes off the message, same as `advance`; a `use` node being seeded descends a level into its subgraph; any other current node folds the message's content onto `state.thread` (same as `applyCompactionEvent`/`applyInvalidationEvent` already do for their own event types) without moving any level's position — content-folding is orthogonal to position tracking, which is all the waitFor/use special-casing above ever protected. */
+/** The first registered extension's reducer for `type`, or `undefined` if nothing registered one — what lets `tick.ts`'s replay switch delegate a non-core event type to whichever extension owns it (see `EngineExtension.reducers`) instead of hardcoding a case for it. Core's own six event types (input/output/signal/stateChange/invalidation/error) never call this; they're handled inline above/below, unconditionally. */
+function delegatedReducer(runtime: Runtime, type: EventType): ScopeStateReducer | undefined {
+  for (const extension of runtime.extensions) {
+    const reducer = extension.reducers?.[type];
+    if (reducer) return reducer;
+  }
+  return undefined;
+}
+
+/** Folds a committed `message` event onto `thread` through whichever extension registered a `message` reducer (today, ai's `messageReducer` — see `routing.ts`) — the one place `applyMessageEvent`'s three branches share "how a message folds," instead of each calling `withMessage` directly. Falls back to `withMessage` itself only if nothing is registered (never happens through `runtime()`, which always registers ai's reducers — see `runtime.ts`; kept so a `Runtime` built some other way still folds correctly). */
+function foldMessage(runtime: Runtime, thread: Thread, envelope: CommittedEnvelope): Thread {
+  const reducer = delegatedReducer(runtime, "message");
+  if (!reducer) return withMessage(thread, (envelope.event as Event["message"]).message);
+  return reducer(thread, envelope, thread.id) as Thread;
+}
+
+/** `replayPosition`'s handling of a committed `message` event: a `waitFor` node that consumed it routes off the message, same as `advance`; a `use` node being seeded descends a level into its subgraph; any other current node folds the message's content onto `state.thread` (same as `applyInvalidationEvent` already does for its own event type) without moving any level's position — content-folding is orthogonal to position tracking, which is all the waitFor/use special-casing above ever protected. The fold itself goes through `foldMessage` (delegated to whichever extension registered a `message` reducer — today, ai's `messageReducer`) rather than calling `withMessage` directly: one source of truth for "how a message folds," reached from all three branches below. */
 function applyMessageEvent(
   envelope: CommittedEnvelope,
   path: PathLevel<ReplayFrame>[],
@@ -325,7 +341,7 @@ function applyMessageEvent(
   const node = leaf.flow.nodes.get(topFrame.current);
 
   if (node?.kind === "waitFor") {
-    state.thread = withMessage(state.thread, message);
+    state.thread = foldMessage(runtime, state.thread, envelope);
     const routed = route(leaf.flow.edges, topFrame.current, message, state.thread, runtime);
     state.thread = routed.thread;
     state.tree = rebuildFromPath(path, path.length - 1, {
@@ -347,7 +363,7 @@ function applyMessageEvent(
     // and descends a level at the subgraph's own entry, seeded with this
     // exact message — the same value `driveGraph`'s own `input`
     // parameter would carry.
-    if (!topFrame.reason) state.thread = withMessage(state.thread, message);
+    if (!topFrame.reason) state.thread = foldMessage(runtime, state.thread, envelope);
     state.tree = rebuildFromPath(path, path.length - 1, {
       kind: "use-descent",
       outerNode: topFrame.current,
@@ -364,7 +380,7 @@ function applyMessageEvent(
   // own reply, `fold`'s combined tool-result message, `appendEvent` calls in
   // general) is exactly this case, and skipping the fold here would silently
   // drop it from `thread.messages` on every replay that lands past it.
-  state.thread = withMessage(state.thread, message);
+  state.thread = foldMessage(runtime, state.thread, envelope);
 }
 
 /** `replayPosition`'s handling of a committed `signal` event: only ever moves the position when the innermost node is a non-message `waitFor` whose `Waitable` now matches the log up to and including this event — mirrors `applyMessageEvent`'s `waitFor` case, but the value routed downstream is `match()`'s own result rather than the raw event. */
@@ -399,12 +415,6 @@ function applySignalEvent(
       reason: routed.reason,
     },
   });
-}
-
-/** `replayPosition`'s handling of a committed `compaction` event: folds it into `state.thread` via `withCompaction`, the same derivation the live drive applies when `compact()` actually runs (see `commitCompaction`). Never moves the position tree — a compaction is always logged alongside its step's own `output` event, which is what advances the position; this only has to keep `thread.messages` correct for whatever runs next. */
-function applyCompactionEvent(envelope: CommittedEnvelope, state: ReplayState): void {
-  const compaction = envelope.event as Event["compaction"];
-  state.thread = withCompaction(state.thread, compaction);
 }
 
 /**
@@ -599,17 +609,21 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
       continue;
     }
 
-    if (envelope.type === "compaction") {
-      applyCompactionEvent(envelope, state);
-      continue;
-    }
-
     if (envelope.type === "invalidation") {
       applyInvalidationEvent(envelope, path, runtime, state);
       continue;
     }
-    // toolCall/toolResult/error don't move the main position on their own
-    // — out of scope for this slice's replay.
+
+    // Any event type that isn't one of core's own six (input/output/signal/stateChange/
+    // invalidation/error — every one handled inline above) and isn't `message` (handled
+    // inline above too, since a waitFor/use node consuming one also moves position) is
+    // never structural to replay's own position tracking — delegate to whichever
+    // extension registered a reducer for it (see `EngineExtension.reducers`). Today that's
+    // `compaction` (ai's `compactionReducer`, folded onto `state.thread` the same way
+    // `foldMessage` folds a message); `toolCall`/`toolResult`/`error` remain no-ops, same
+    // as before this generalized, since nothing registers a reducer for them.
+    const reducer = delegatedReducer(runtime, envelope.type);
+    if (reducer) state.thread = reducer(state.thread, envelope, state.thread.id) as Thread;
   }
 
   // A `waitFor` entry already parks safely with `currentInput: undefined`

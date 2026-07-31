@@ -25,8 +25,8 @@ describe("EngineExtension.reducers fold events into the extension's own scope-st
         };
       },
       reducers: {
-        note: (state, envelope) => [
-          ...(Array.isArray(state) ? state : []),
+        note: (state, envelope): string[] => [
+          ...(Array.isArray(state) ? (state as string[]) : []),
           (envelope.event as { text: string }).text,
         ],
       },

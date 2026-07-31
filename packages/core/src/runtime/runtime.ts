@@ -20,6 +20,7 @@ import type { SessionStore } from "../session/session-store.js";
 import type { EngineExtension } from "./extension.js";
 import { defaultErrorHandler, type ErrorHandler } from "./errors.js";
 import type { Thread } from "./routing.js";
+import { messageReducer, compactionReducer } from "./routing.js";
 export type { Thread } from "./routing.js";
 export { withMessage, withCompaction, deriveCompactedMessages } from "./routing.js";
 import { driveGraph } from "./drive.js";
@@ -70,16 +71,26 @@ export async function runtime(config: {
   errorHandlers?: ErrorHandler[]; // consulted on a step error; a default retry handler runs last
   idFactory?: () => string; // generates every fresh correlation/thread id; omit for the default counters
 }): Promise<Runtime> {
+  // The ai extension's own reducers, registered through the seam alongside whatever the
+  // caller passed — `ai()` doesn't exist as a standalone extension builder until B2.7,
+  // but `EngineExtension.reducers` does, and message/compaction folding shouldn't wait on
+  // that split to be reachable through it (see `routing.ts`'s `messageReducer`/
+  // `compactionReducer` doc comment).
+  const builtInAi: EngineExtension = {
+    name: "ai",
+    reducers: { message: messageReducer, compaction: compactionReducer },
+  };
+  const extensions = [builtInAi, ...(config.extensions ?? [])];
   const ready: Runtime = {
     models: config.models,
     bindings: config.bindings,
     store: config.store,
     errorHandlers: [...(config.errorHandlers ?? []), defaultErrorHandler],
-    extensions: config.extensions ?? [],
+    extensions,
   };
   resolvedTools.set(ready, await expandToolsets(config.bindings));
   startToolExecutor(ready);
-  for (const extension of config.extensions ?? []) {
+  for (const extension of extensions) {
     for (const source of extension.waitables ?? []) source.start(config.store);
   }
   if (config.idFactory) idFactories.set(ready, config.idFactory);

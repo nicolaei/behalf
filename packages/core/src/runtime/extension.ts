@@ -19,9 +19,11 @@ export interface ExecutionScope {
   /** This scope's slice of the committed log, in log order. */
   events(): readonly CommittedEnvelope[];
   /**
-   * This extension's replayed state for the scope.
-   * TODO(B2 step 6): wire to the real per-extension replay state once reducers land.
-   * Always returns `undefined` until then — no per-extension scope-state slot exists yet.
+   * This extension's replayed state for the scope — folds `events()` through
+   * `extension`'s own registered `reducers`, in log order, from scratch every
+   * call (no caching: the log is the only thing that may survive between
+   * calls). `undefined` when the named extension isn't registered, or declares
+   * no `reducers` — an extension with none simply has no scope state.
    */
   state(extension: string): unknown;
   /** Commits a standalone event to this scope's thread — the same append path every step uses. */
@@ -55,7 +57,52 @@ export interface EngineExtension {
    * another extension's contribution, throws rather than silently picking a winner.
    */
   edgeContext?(scope: ExecutionScope): Record<string, unknown>;
+  /**
+   * Replay folds: how this extension's own events rebuild its scope state, one event
+   * type at a time. Called in log order, only for the event types this extension itself
+   * declares a reducer for — never for another extension's, and never for core's own
+   * six event types (input/output/signal/stateChange/invalidation/error), which `tick`
+   * always handles inline. Backs `ExecutionScope.state(this.name)`.
+   */
+  reducers?: Partial<Record<EventType, ScopeStateReducer>>;
   /** Park conditions this extension can satisfy — each is started the same way `runtime()`
    * already auto-starts the tool executor, with no separate setup required by any caller. */
   waitables?: WaitableSource[];
+}
+
+/**
+ * A pure fold, called during replay in log order: given this extension's own state so far
+ * (`undefined` until its first matching event) and the next committed event of a type it
+ * declared a reducer for, returns the next state. Never touches cursor position — that stays
+ * core/edge-function territory (see `EngineExtension.reducers`'s own doc comment); a reducer
+ * only ever reconstructs a value, the same way every replay in this engine reconstructs
+ * everything else purely from the log.
+ * @public
+ */
+export type ScopeStateReducer = (
+  state: unknown,
+  event: CommittedEnvelope,
+  scope: ThreadId,
+) => unknown;
+
+/**
+ * Backs `ExecutionScope.state(extension)`: folds `events` through `extension`'s own
+ * registered `reducers`, in log order, from scratch — no state survives between calls,
+ * same discipline every other replay reconstruction in this engine follows. `undefined`
+ * when `extension` isn't registered, or declares no `reducers` of its own; an event whose
+ * type isn't in its `reducers` map is skipped, not folded.
+ */
+export function foldExtensionState(
+  events: readonly CommittedEnvelope[],
+  extension: EngineExtension | undefined,
+  scope: ThreadId,
+): unknown {
+  if (!extension?.reducers) return undefined;
+  let state: unknown;
+  for (const event of events) {
+    const reducer = extension.reducers[event.type];
+    if (!reducer) continue;
+    state = reducer(state, event, scope);
+  }
+  return state;
 }
