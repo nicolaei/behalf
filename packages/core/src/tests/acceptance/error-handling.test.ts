@@ -51,7 +51,7 @@ describe("a step error and its retry handler", () => {
 
     await runFlow(graph, userText("go"), ready);
 
-    expect(loggedEventTypes(store)).toEqual(["message", "error", "output"]);
+    expect(loggedEventTypes(store)).toEqual(["input", "error", "output"]);
   });
 
   it("rejects runFlow when nothing recovers the error", async () => {

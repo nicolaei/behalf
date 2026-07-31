@@ -38,13 +38,13 @@ describe("a step that calls the model", () => {
     expect(reply?.role).toBe("assistant");
   });
 
-  it("appends the initial message, the model's reply, then the step's output", async () => {
+  it("appends the initial input, the model's reply, then the step's output", async () => {
     const store = memoryStore();
     const ready = await runtime({ models: () => fakePort, bindings: [], store });
 
     await runFlow(respondOnceGraph(), userText("hi"), ready);
 
-    expect(loggedEventTypes(store)).toEqual(["message", "message", "output"]);
+    expect(loggedEventTypes(store)).toEqual(["input", "message", "output"]);
     expect(loggedEventAt(store, 1).event).toMatchObject({ message: { role: "assistant" } });
   });
 });

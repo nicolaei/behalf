@@ -24,9 +24,9 @@ describe("a step can open its own stream", () => {
 
     await runFlow(graph, userText("go"), ready);
 
-    // then the log holds the initial message, the step's own committed stream,
+    // then the log holds the initial input, the step's own committed stream,
     // and the step's routed output — three distinct committed events
-    expect(loggedEventTypes(store)).toEqual(["message", "output", "output"]);
+    expect(loggedEventTypes(store)).toEqual(["input", "output", "output"]);
   });
 
   it("broadcasts a delta from the opened stream to changes() subscribers, without persisting it", async () => {
@@ -46,7 +46,7 @@ describe("a step can open its own stream", () => {
 
     const received = (async () => {
       // filter to the delta form: a changes() subscriber attached before runFlow
-      // also sees the run's own initial "message" commit broadcast first, which
+      // also sees the run's own initial "input" commit broadcast first, which
       // isn't what this scenario is about.
       for await (const envelope of store.changes()) {
         if (envelope.form === "delta") return envelope;

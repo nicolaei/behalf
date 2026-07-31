@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tickUntilSuspended } from "../../runtime/runtime.js";
+import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, textOf, submitApproval } from "../acceptance/support.js";
@@ -34,6 +34,7 @@ describe("ticking a flow through a used subgraph that itself waits", () => {
   it("reports the used subgraph's own waitFor as a parked cursor, resumable across tick calls", async () => {
     const store = memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
+    seed(outer, undefined, ready);
 
     const parked = await tickUntilSuspended(outer, ready);
     expect(parked).toHaveLength(1);

@@ -14,7 +14,7 @@
 //    single source of truth tick() rebuilds from.
 
 import { describe, it, expect } from "vitest";
-import { defineGraph, runtime, driveFlow, outputs } from "../../index.js";
+import { defineGraph, runtime, driveFlow, outputs, seed } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { EdgeContext, EdgeFn, Graph } from "../../index.js";
 import { neverCalled } from "./support.js";
@@ -45,6 +45,7 @@ describe("edge functions: run once, at routing commit", () => {
     const store = memoryStore();
     const runtime1 = await runtime({ models: neverCalled, bindings: [], store });
     const graph1 = edgeFnFlow(countingEdge);
+    seed(graph1, undefined, runtime1);
     const result1 = await driveFlow(graph1, runtime1);
     expect(result1).toBe("start-value");
     expect(calls).toBe(1);
@@ -79,7 +80,9 @@ describe("edge functions: emit, don't mutate", () => {
 
     const store = memoryStore();
     const runtime1 = await runtime({ models: neverCalled, bindings: [], store });
-    await driveFlow(edgeFnFlow(liveEdge), runtime1);
+    const seededFlow = edgeFnFlow(liveEdge);
+    seed(seededFlow, undefined, runtime1);
+    await driveFlow(seededFlow, runtime1);
     expect(captured1.value).toBe("mutated-start-value"); // real during the live run
 
     // Simulated restart: a fresh process has fresh memory — model that with

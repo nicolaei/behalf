@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tickUntilSuspended } from "../../runtime/runtime.js";
+import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import { defineGraph, runtime, join, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, submitApproval } from "../acceptance/support.js";
@@ -33,6 +33,7 @@ describe("ticking a fan-out group whose parked branch is declared before its liv
   it("advances the live sibling instead of retrying the parked branch forever", async () => {
     const store = memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
+    seed(flow, undefined, ready);
 
     // If advanceFanOutGroup starves `a`, this call never returns (every
     // cursor stays "active" forever) and the test times out instead of

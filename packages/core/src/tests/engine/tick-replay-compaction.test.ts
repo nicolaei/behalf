@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tick } from "../../runtime/runtime.js";
+import { tick, seed } from "../../runtime/runtime.js";
 import type { TickOutcome, Runtime } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userInput, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
@@ -59,6 +59,8 @@ describe("replay reconstructs thread.messages across a compaction, from the log 
       const ready: Runtime = await runtime({ models: neverCalled, bindings: [], store });
       return tick(graph, ready);
     }
+
+    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
 
     await freshTick(); // runs start, reports active at gate1
     await freshTick(); // peeks gate1, parks — nothing in the inbox yet

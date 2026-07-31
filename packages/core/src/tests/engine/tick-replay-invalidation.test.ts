@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tick } from "../../runtime/runtime.js";
+import { tick, seed } from "../../runtime/runtime.js";
 import type { TickOutcome, Runtime } from "../../runtime/runtime.js";
 import { defineGraph, runtime, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
@@ -55,6 +55,8 @@ describe("replay recognizes an invalidating step as already-completed", () => {
       const ready: Runtime = await runtime({ models: neverCalled, bindings: [], store });
       return tick(graph, ready);
     }
+
+    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
 
     await freshTick(); // runs plan (draft-1), reports active at implement
     await freshTick(); // runs implement: draft-1 -> invalidates plan (fork), reports active at plan

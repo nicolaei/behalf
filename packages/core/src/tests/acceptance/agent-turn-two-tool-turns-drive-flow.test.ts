@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { agentTurn, driveFlow, runtime, provide, tool } from "../../index.js";
+import { agentTurn, driveFlow, runtime, provide, tool, seed, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { AssistantMessage, Message, Model, ModelPort, Profile, Tool } from "../../index.js";
 import { assistantText, orphanedToolCallIds } from "./support.js";
@@ -100,7 +100,10 @@ describe("agentTurn + driveFlow: two separate tool-calling turns in one thread",
       store,
     });
 
-    const result = await driveFlow(agentTurn(profile), ready);
+    const flow = agentTurn(profile);
+    seed(flow, userText("go"), ready);
+
+    const result = await driveFlow(flow, ready);
 
     expect(result).toEqual({ finishedBy: "finalMessage", text: "done" });
     expect(call).toBe(3); // turn 1, turn 2, then the final no-tools reply

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tick } from "../../runtime/runtime.js";
+import { tick, seed } from "../../runtime/runtime.js";
 import type { TickOutcome } from "../../runtime/runtime.js";
 import { defineGraph, runtime, join, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
@@ -30,6 +30,7 @@ describe("ticking a fan-out flow", () => {
       bindings: [],
       store: memoryStore(),
     });
+    seed(fanOut, undefined, ready);
 
     const seen: TickOutcome[] = [];
     let outcome = await tick(fanOut, ready);
@@ -70,6 +71,8 @@ describe("ticking a fan-out flow", () => {
       const ready = await runtime({ models: neverCalled, bindings: [], store });
       return tick(fanOut, ready);
     }
+
+    seed(fanOut, undefined, await runtime({ models: neverCalled, bindings: [], store }));
 
     const seen: TickOutcome[] = [];
     let outcome = await freshTick();

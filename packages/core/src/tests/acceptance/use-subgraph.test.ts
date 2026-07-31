@@ -35,7 +35,7 @@ describe("composing a graph as a node with `use`", () => {
     // loose on exact shape — confirm against reference.md's `use`/prompt behaviour
     // when this slice is active
     const types = loggedEventTypes(store);
-    expect(types.filter((type) => type === "message").length).toBeGreaterThanOrEqual(2);
+    expect(types.filter((type) => type === "message").length).toBeGreaterThanOrEqual(1);
     expect(types.filter((type) => type === "output").length).toBeGreaterThanOrEqual(2);
   });
 });

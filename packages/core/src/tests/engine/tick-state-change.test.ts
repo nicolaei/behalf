@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tickUntilSuspended } from "../../runtime/runtime.js";
+import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userInput, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Runtime, SessionStore } from "../../index.js";
@@ -49,6 +49,7 @@ describe("stateChange survives across separate tick() calls, not just within one
     });
     const store = memoryStore();
 
+    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
     await freshTick(graph, store); // runs `start`, parks at `gate`
     store.receive(followUp("go-ahead"));
     await freshTick(graph, store); // resumes, runs `after` — same declared state
@@ -74,6 +75,7 @@ describe("stateChange survives across separate tick() calls, not just within one
     });
     const store = memoryStore();
 
+    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
     await freshTick(graph, store); // runs `start`, parks at `gate`
     store.receive(followUp("go-ahead"));
     await freshTick(graph, store); // resumes, runs `after` — a real transition

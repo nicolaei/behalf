@@ -66,11 +66,22 @@ describe("forEach tool-call branch completion stays on the flow's own thread", (
 
     await runFlow(flow, userText("find x"), ready);
 
-    // Every committed envelope belongs to the one real conversation thread —
+    // Every committed envelope that carries a threadId belongs to the one
+    // real conversation thread — no stray thread id should appear anywhere in
+    // the log, including the "output" event the forEach branch's own
+    // internal finish folds back with once it completes. The leading
+    // "input" event legitimately carries none (see `Event["input"]`'s doc
+    // comment: no thread exists yet at that point), so this only checks
+    // agreement among envelopes that DO carry one — same pattern
+    // envelope-metadata.test.ts's own threadId test uses.
     // no stray thread id should appear anywhere in the log, including the
     // "output" event the forEach branch's own internal finish folds back
     // with once it completes.
-    const threadIds = new Set(loggedEnvelopes(store).map((envelope) => envelope.threadId));
+    const threadIds = new Set(
+      loggedEnvelopes(store)
+        .map((envelope) => envelope.threadId)
+        .filter((id): id is NonNullable<typeof id> => Boolean(id)),
+    );
     expect(threadIds.size).toBe(1);
   });
 });

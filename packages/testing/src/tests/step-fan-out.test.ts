@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { stepOnce, stepUntilBlocked } from "../index.js";
-import { defineGraph, runtime, join, outputs } from "@behalf-js/core";
+import { defineGraph, runtime, join, outputs, seed } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled } from "./support.js";
 
@@ -26,6 +26,7 @@ describe("the testing module driving a fan-out flow", () => {
       bindings: [],
       store: memoryStore(),
     });
+    seed(fanOut, undefined, ready);
 
     await stepOnce(fanOut, ready); // runs `start`
     const afterFanOut = await stepOnce(fanOut, ready); // spawns branch lanes
@@ -39,6 +40,7 @@ describe("the testing module driving a fan-out flow", () => {
       bindings: [],
       store: memoryStore(),
     });
+    seed(fanOut, undefined, ready);
 
     const result = await stepUntilBlocked(fanOut, ready);
 

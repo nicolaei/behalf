@@ -11,6 +11,7 @@ import {
   join,
   userInput,
   runtime,
+  seed,
   type Graph,
   type Handle,
 } from "@behalf-js/core";
@@ -50,6 +51,7 @@ export const pipeline: Graph = defineGraph("step-through", (flow) => {
 
 export async function stepOnceDemo() {
   const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
+  seed(pipeline, undefined, ready);
   return stepOnce(pipeline, ready);
 }
 // #endregion step-once
@@ -57,6 +59,7 @@ export async function stepOnceDemo() {
 // #region until-blocked
 export async function untilBlockedDemo() {
   const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
+  seed(pipeline, undefined, ready);
   return stepUntilBlocked(pipeline, ready);
 }
 // #endregion until-blocked
@@ -64,6 +67,7 @@ export async function untilBlockedDemo() {
 // #region step-until
 export async function stepUntilFastDemo() {
   const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
+  seed(pipeline, undefined, ready);
   return stepUntil(pipeline, ready, atNode(fastNode));
 }
 
@@ -73,6 +77,7 @@ export async function stepUntilFastDemo() {
 // instead of stepping forever.
 export async function stepUntilStalledDemo() {
   const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
+  seed(pipeline, undefined, ready);
   return stepUntil(pipeline, ready, atNode(mergeNode));
 }
 
@@ -95,6 +100,7 @@ export const infiniteLoop: Graph = defineGraph("infinite-loop", (flow) => {
 
 export async function stepUntilBudgetExceededDemo() {
   const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
+  seed(infiniteLoop, undefined, ready);
   return stepUntil(infiniteLoop, ready, () => false, { maxSteps: 5 });
 }
 // #endregion step-until

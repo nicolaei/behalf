@@ -18,7 +18,7 @@ describe("a late reader replays the full committed log", () => {
 
     // a "late reader" — connects only now, after the flow has already finished
     const replay = loggedEnvelopes(store);
-    expect(replay).toHaveLength(2); // message, output
+    expect(replay).toHaveLength(2); // input, output
 
     // the spec calls `sequence` a "per-session ordinal" without pinning down a
     // starting value — only strict ordering is certain

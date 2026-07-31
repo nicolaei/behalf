@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tick } from "../../runtime/runtime.js";
+import { tick, seed } from "../../runtime/runtime.js";
 import type { TickOutcome } from "../../runtime/runtime.js";
 import { defineGraph, runtime, provide, tool, outputs, toolCall } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
@@ -70,6 +70,15 @@ describe("tick() resumes mid-forEach after a simulated restart", () => {
       return tick(outer, ready);
     }
 
+    seed(
+      outer,
+      undefined,
+      await runtime({
+        models: () => scriptedPort,
+        bindings: [provide(alpha, () => Promise.resolve({ n: 10 }))],
+        store,
+      }),
+    );
     let outcome = await freshTick();
     const maxIterations = 20;
     for (

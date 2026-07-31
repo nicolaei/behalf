@@ -34,9 +34,9 @@ describe("fan-out and fan-in", () => {
 
     await runFlow(fanOut, userText("go"), ready);
 
-    // then the log holds the initial message and five outputs (start, 3 branches, join)
+    // then the log holds the initial input and five outputs (start, 3 branches, join)
     const types = loggedEventTypes(store);
-    expect(types[0]).toBe("message");
+    expect(types[0]).toBe("input");
     expect(types.filter((type) => type === "output")).toHaveLength(5);
   });
 });

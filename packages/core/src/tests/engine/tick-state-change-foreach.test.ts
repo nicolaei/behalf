@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tickUntilSuspended } from "../../runtime/runtime.js";
+import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userInput, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Runtime, SessionStore } from "../../index.js";
@@ -59,6 +59,7 @@ describe("stateChange dedupes across a paused forEach branch, resumed on a later
 
   it("emits one stateChange, not two, for a branch that repeats its own state after pausing", async () => {
     const store = memoryStore();
+    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
 
     await freshTick(store); // runs produce + the branch's `before`, parks at its own waitFor
     store.receive(resume("a", "go-ahead"));

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tickUntilSuspended } from "../../runtime/runtime.js";
+import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import { defineGraph, runtime, join, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, submitApproval } from "../acceptance/support.js";
@@ -26,6 +26,7 @@ describe("ticking a fan-out branch that waits for a message", () => {
   it("reports the waiting branch as parked with waitingFor, resumable across tick calls", async () => {
     const store = memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
+    seed(flow, undefined, ready);
 
     const parked = await tickUntilSuspended(flow, ready);
 

@@ -30,12 +30,12 @@ describe("compacting the thread replaces the assembled view", () => {
     expect(result).toEqual({ assembled: 2, keepsOriginal: true });
   });
 
-  it("appends the initial message, the compaction, the compact step's own output, then the read step's output", async () => {
+  it("appends the initial input, the compaction, the compact step's own output, then the read step's output", async () => {
     const store = memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
     await runFlow(compactThenRead, userText("hi"), ready);
 
-    expect(loggedEventTypes(store)).toEqual(["message", "compaction", "output", "output"]);
+    expect(loggedEventTypes(store)).toEqual(["input", "compaction", "output", "output"]);
   });
 });

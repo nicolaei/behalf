@@ -55,7 +55,7 @@ describe("a graph that waits for the next prompt", () => {
     // loose on exact interleaving — confirm against reference.md's inbox-drain behaviour
     // when this slice is active
     const types = loggedEventTypes(store);
-    expect(types.filter((type) => type === "message")).toHaveLength(2);
+    expect(types.filter((type) => type === "message")).toHaveLength(1); // just the follow-up — the initial prompt is now an "input" event
     expect(types.filter((type) => type === "output")).toHaveLength(2);
   });
 });

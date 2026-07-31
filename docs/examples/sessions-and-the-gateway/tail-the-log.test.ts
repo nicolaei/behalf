@@ -37,9 +37,9 @@ describe("Event and Envelope", () => {
 
     const [message] = store.events();
     expect(message?.form).toBe("committed");
-    expect(message && "type" in message ? message.type : undefined).toBe("message");
+    expect(message && "type" in message ? message.type : undefined).toBe("input");
     expect(message && "event" in message ? message.event : undefined).not.toHaveProperty("type");
-    expect(message && describeEnvelope(message)).toMatch(/^committed message:/);
+    expect(message && describeEnvelope(message)).toMatch(/^committed input:/);
   });
 });
 
@@ -62,7 +62,7 @@ describe("tailing the log", () => {
 
     expect(
       seen.map((envelope) => (envelope.form === "committed" ? envelope.type : undefined)),
-    ).toEqual(["message", "output"]);
+    ).toEqual(["input", "output"]);
     expect(seen.every((envelope) => envelope.form === "committed")).toBe(true);
   });
 });
@@ -88,13 +88,13 @@ describe("reconnecting", () => {
     // The replay is the settled history from the first turn: nothing live yet.
     expect(
       replayed.map((envelope) => (envelope.form === "committed" ? envelope.type : undefined)),
-    ).toEqual(["message", "output"]);
+    ).toEqual(["input", "output"]);
 
     // Second turn, same store: this is what a reconnected client watches arrive live.
     await Promise.all([liveDone, runFlow(announce, userText("go"), ready)]);
 
     // the replayed history arrives first, then the second turn's own
-    // sequence: a committed message, an in-progress stream, one delta, the
+    // sequence: a committed input, an in-progress stream, one delta, the
     // stream's own commit, and the step's routed final output
     const liveOnly = live.slice(replayed.length);
     expect(liveOnly.map((envelope) => envelope.form)).toEqual([
@@ -105,7 +105,7 @@ describe("reconnecting", () => {
       "committed",
     ]);
     const [messageCommit, inProgress, delta, streamCommit, outputCommit] = liveOnly;
-    expect(messageCommit?.form === "committed" && messageCommit.type).toBe("message");
+    expect(messageCommit?.form === "committed" && messageCommit.type).toBe("input");
     expect(inProgress?.form === "in-progress" && inProgress.type).toBe("output");
     expect(delta?.form === "delta" && "text" in delta.delta && delta.delta.text).toBe("working");
     expect(streamCommit?.form === "committed" && streamCommit.type).toBe("output");
@@ -135,7 +135,7 @@ describe("Gateway", () => {
     });
 
     expect(sent).toHaveLength(2);
-    expect((JSON.parse(sent[0] ?? "{}") as { type?: string }).type).toBe("message");
+    expect((JSON.parse(sent[0] ?? "{}") as { type?: string }).type).toBe("input");
 
     // A second turn on the same session: connect's live tail delivers these
     // without a fresh connect() call.

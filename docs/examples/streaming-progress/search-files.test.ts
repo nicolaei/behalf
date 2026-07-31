@@ -72,7 +72,7 @@ describe("search_files streams progress while it works", () => {
     expect(deltas[1]).toBe("scanned 2/2 files (1 hits so far)");
 
     const committed = store.events().filter(isCommitted);
-    expect(committed.map((envelope) => envelope.type)).toEqual(["message", "output", "output"]);
+    expect(committed.map((envelope) => envelope.type)).toEqual(["input", "output", "output"]);
     const [, streamed] = committed;
     expect(streamed?.event).toEqual({
       value: { matches: [{ file: path.join(dir, "a.txt"), line: 1 }] },

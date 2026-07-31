@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tick } from "../../runtime/runtime.js";
+import { tick, seed } from "../../runtime/runtime.js";
 import type { TickOutcome, Runtime } from "../../runtime/runtime.js";
 import { defineGraph, runtime, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
@@ -49,6 +49,8 @@ describe("replay folds a bare message event's content, not just its position", (
       const ready: Runtime = await runtime({ models: neverCalled, bindings: [], store });
       return tick(graph, ready);
     }
+
+    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
 
     await freshTick(); // runs announce: logs the message, reports active at read
 

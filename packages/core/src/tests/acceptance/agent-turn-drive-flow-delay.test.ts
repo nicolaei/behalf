@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { agentTurn, driveFlow, runtime, provide, tool } from "../../index.js";
+import { agentTurn, driveFlow, runtime, provide, tool, seed, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Message, Model, ModelPort, Profile, Tool } from "../../index.js";
 import { assistantText, assistantToolCall, loggedEnvelopes } from "./support.js";
@@ -18,8 +18,10 @@ import { assistantText, assistantToolCall, loggedEnvelopes } from "./support.js"
 // `agentTurn(profile)`, a real `driveFlow`, and a tool handler that only
 // resolves after a genuine `setTimeout`.
 //
-// `driveFlow` needs a flow whose entry can run with no seed — `agentTurn`'s
-// own entry (`respond`, an immediate modelCall) qualifies: the scripted
+// `driveFlow` needs a session that's actually started: `seed()` appends the
+// durable `input` event agentTurn's entry (`respond`, an immediate
+// modelCall) runs against — the scripted
+// ModelPort doesn't care what `context.thread.messages` starts with, and
 // ModelPort doesn't care that `context.thread.messages` starts empty, and
 // the tool call's own `waitFor(toolCall(id))` is what naturally parks the
 // flow through the real async delay, no outer wrapping required.
@@ -71,7 +73,10 @@ describe("agentTurn + driveFlow survive a real async tool-call delay", () => {
       store,
     });
 
-    const result = await driveFlow(agentTurn(profile), ready);
+    const flow = agentTurn(profile);
+    seed(flow, userText("go"), ready);
+
+    const result = await driveFlow(flow, ready);
 
     expect(result).toEqual({ finishedBy: "finalMessage", text: "done" });
     expect(call).toBe(2); // model called once per turn — no redundant replay re-calls

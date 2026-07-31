@@ -23,9 +23,9 @@ describe("a step or tool can append a standalone event", () => {
 
     await runFlow(graph, userText("go"), ready);
 
-    // the log holds the initial message, the appended toolCall, and the
+    // the log holds the initial input, the appended toolCall, and the
     // step's routed output — three distinct committed events, in order
-    expect(loggedEventTypes(store)).toEqual(["message", "toolCall", "output"]);
+    expect(loggedEventTypes(store)).toEqual(["input", "toolCall", "output"]);
     const toolCall = loggedEnvelopes(store).find((envelope) => envelope.type === "toolCall");
     expect(toolCall?.event).toEqual({ correlationId: "1", name: "search", input: { q: "hi" } });
   });

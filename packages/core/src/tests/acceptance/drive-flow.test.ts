@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   defineGraph,
   driveFlow,
+  seed,
   runtime,
   provide,
   tool,
@@ -123,6 +124,7 @@ describe("driveFlow", () => {
       ],
       store: memoryStore(),
     });
+    seed(flow, undefined, ready);
 
     const result = await driveFlow(flow, ready);
 
@@ -185,6 +187,7 @@ describe("driveFlow", () => {
     });
 
     const ready = await runtime({ models: neverCalled, bindings: [], store: memoryStore() });
+    seed(flow, undefined, ready);
 
     const result = await driveFlow(flow, ready);
 

@@ -16,13 +16,13 @@ describe("a graph with a single step", () => {
     expect(result).toBe("done");
   });
 
-  it("appends the initial message, then the step's output", async () => {
+  it("appends the initial input, then the step's output", async () => {
     const store = memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
 
     await runFlow(echo, userText("hi"), ready);
 
-    expect(loggedEventTypes(store)).toEqual(["message", "output"]);
+    expect(loggedEventTypes(store)).toEqual(["input", "output"]);
     expect(loggedEventAt(store, 1).event).toEqual({ value: "done" });
   });
 });

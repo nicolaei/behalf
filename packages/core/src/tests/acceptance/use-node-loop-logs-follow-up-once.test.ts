@@ -49,6 +49,6 @@ describe("a use node looped back through a waitFor", () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
 
     const messageEvents = loggedEnvelopes(store).filter((e) => e.type === "message");
-    expect(messageEvents).toHaveLength(2); // the initial prompt + one follow-up
+    expect(messageEvents).toHaveLength(1); // just the one follow-up (the initial prompt is now an "input" event, not "message")
   });
 });

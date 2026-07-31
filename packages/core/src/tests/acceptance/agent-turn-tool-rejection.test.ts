@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { agentTurn, driveFlow, runtime, provide, tool } from "../../index.js";
+import { agentTurn, driveFlow, runtime, provide, tool, seed, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Model, ModelPort, Profile, Tool } from "../../index.js";
 import { assistantText, assistantToolCall, loggedEnvelopes } from "./support.js";
@@ -54,7 +54,10 @@ describe("agentTurn survives a rejecting tool handler", () => {
       store,
     });
 
-    const result = await driveFlow(agentTurn(profile), ready);
+    const flow = agentTurn(profile);
+    seed(flow, userText("go"), ready);
+
+    const result = await driveFlow(flow, ready);
 
     expect(result).toEqual({ finishedBy: "finalMessage", text: "done" });
     expect(call).toBe(2); // the turn looped back to the model after the failed tool call resolved

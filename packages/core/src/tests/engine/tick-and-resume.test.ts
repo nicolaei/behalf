@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tick, tickUntilSuspended } from "../../runtime/runtime.js";
+import { tick, tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import type { TickOutcome } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
@@ -42,6 +42,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
     const graph = fixture("tick-advances");
     const store = memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
+    seed(graph, undefined, ready);
 
     const first = await tick(graph, ready); // runs `start`
     expect(first).toHaveLength(1);
@@ -56,6 +57,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
     const graph = fixture("tick-resumes-same-runtime");
     const store = memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
+    seed(graph, undefined, ready);
 
     const parked = await tickUntilSuspended(graph, ready); // start, then suspend at gate
     expect(parked).toHaveLength(1);
@@ -73,6 +75,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
   it("resumes correctly even with a brand new Runtime object per tick — only the store persists", async () => {
     const graph = fixture("tick-resumes-fresh-runtime");
     const store = memoryStore();
+    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
 
     // every tick gets its own fresh runtime() call — the only thing carried
     // between them is the store itself, nothing cached on a shared Runtime
@@ -116,6 +119,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
     });
     const store = memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
+    seed(graph, undefined, ready);
 
     await tickUntilSuspended(graph, ready); // suspends at gate
     store.receive(followUp("approved"));

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tick, tickUntilSuspended } from "../../runtime/runtime.js";
+import { tick, tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import type { TickOutcome } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userText, join, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
@@ -39,6 +39,7 @@ describe("ticking a flow through a used subgraph that itself fans out", () => {
       bindings: [],
       store: memoryStore(),
     });
+    seed(outer, undefined, ready);
 
     const outcome = await tickUntilSuspended(outer, ready);
 
@@ -53,6 +54,7 @@ describe("ticking a flow through a used subgraph that itself fans out", () => {
       bindings: [],
       store: memoryStore(),
     });
+    seed(outer, undefined, ready);
 
     const seen: TickOutcome[] = [];
     let outcome = await tick(outer, ready);
@@ -81,6 +83,8 @@ describe("ticking a flow through a used subgraph that itself fans out", () => {
       const ready = await runtime({ models: neverCalled, bindings: [], store });
       return tick(outer, ready);
     }
+
+    seed(outer, undefined, await runtime({ models: neverCalled, bindings: [], store }));
 
     let outcome = await freshTick();
     const maxIterations = 20;

@@ -49,7 +49,7 @@ describe("waitFor(userInput(kind)) behaves identically to today's waitFor(kind)"
     await done;
 
     const types = loggedEventTypes(store);
-    expect(types.filter((type) => type === "message")).toHaveLength(2);
+    expect(types.filter((type) => type === "message")).toHaveLength(1); // just the follow-up — the initial prompt is now an "input" event
     expect(types.filter((type) => type === "output")).toHaveLength(2);
   });
 });

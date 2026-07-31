@@ -56,7 +56,10 @@ describe("audit", () => {
       .events()
       .filter((e) => e.form === "committed" && e.type === "message");
     const threadIds = new Set(messageEnvelopes.map((e) => e.threadId));
-    // the initial prompt's thread, plus one forked thread per reviewer
-    expect(threadIds.size).toBeGreaterThanOrEqual(4);
+    // one forked thread per reviewer — the run's own top-level thread no
+    // longer shows up here: its one committed "message"-shaped fact (the
+    // initial prompt) is now the top-level "input" event instead (see
+    // `Event["input"]"), which carries no threadId of its own.
+    expect(threadIds.size).toBeGreaterThanOrEqual(3);
   });
 });

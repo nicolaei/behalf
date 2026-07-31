@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tickUntilSuspended } from "../../runtime/runtime.js";
+import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, textOf, loggedEventTypes } from "../acceptance/support.js";
@@ -31,6 +31,7 @@ describe("ticking a flow through a used subgraph", () => {
       bindings: [],
       store: memoryStore(),
     });
+    seed(outer, undefined, ready);
 
     const outcome = await tickUntilSuspended(outer, ready);
 
@@ -41,6 +42,7 @@ describe("ticking a flow through a used subgraph", () => {
   it("appends the subgraph's messages and output to the same session log", async () => {
     const store = memoryStore();
     const ready = await runtime({ models: neverCalled, bindings: [], store });
+    seed(outer, undefined, ready);
 
     await tickUntilSuspended(outer, ready);
 

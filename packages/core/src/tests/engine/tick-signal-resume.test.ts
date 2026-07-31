@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { tick, tickUntilSuspended } from "../../runtime/runtime.js";
+import { tick, tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import type { TickOutcome, Runtime } from "../../runtime/runtime.js";
 import { defineGraph, runtime, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
@@ -50,6 +50,8 @@ describe("a signal-based wait survives a restart via tick()", () => {
       return runtime({ models: neverCalled, bindings: [], store });
     }
 
+    seed(graph, undefined, await freshRuntime());
+
     const first = await tick(graph, await freshRuntime()); // runs `start`
     expect(first).toHaveLength(1);
     expect(first).toMatchObject([{ status: "active" }]);
@@ -68,6 +70,8 @@ describe("a signal-based wait survives a restart via tick()", () => {
       return tick(graph, ready);
     }
 
+    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
+
     await freshTick(); // runs `start`
     const parked = await freshTick(); // reaches `gate`, no signal yet
     expect(parked).toMatchObject([{ status: "parked", waitingFor: ["ping"] }]);
@@ -85,6 +89,8 @@ describe("a signal-based wait survives a restart via tick()", () => {
     async function freshRuntime(): Promise<Runtime> {
       return runtime({ models: neverCalled, bindings: [], store });
     }
+
+    seed(graph, undefined, await freshRuntime());
 
     const parked = await tickUntilSuspended(graph, await freshRuntime());
     expect(parked).toMatchObject([{ status: "parked", waitingFor: ["ping"] }]);

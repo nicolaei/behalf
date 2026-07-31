@@ -38,6 +38,6 @@ describe("branching on a step's output", () => {
     await runFlow(branchOn(true), userText("hi"), ready);
 
     // only `classify` and `onTrue` run — `onFalse` never fires
-    expect(loggedEventTypes(store)).toEqual(["message", "output", "output"]);
+    expect(loggedEventTypes(store)).toEqual(["input", "output", "output"]);
   });
 });

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { stepOnce, stepUntilBlocked, stepUntil, atNode } from "../index.js";
 import { StepUntilError } from "../errors.js";
-import { defineGraph, runtime, outputs, userInput } from "@behalf-js/core";
+import { defineGraph, runtime, outputs, userInput, seed } from "@behalf-js/core";
 import type { Handle } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, textOf } from "./support.js";
@@ -21,6 +21,7 @@ describe("stepOnce", () => {
       bindings: [],
       store: memoryStore(),
     });
+    seed(flow, undefined, ready);
 
     const first = await stepOnce(flow, ready);
     expect(first).toHaveLength(1);
@@ -49,6 +50,7 @@ describe("stepUntilBlocked", () => {
       bindings: [],
       store: memoryStore(),
     });
+    seed(flow, undefined, ready);
 
     const parked = await stepUntilBlocked(flow, ready);
     expect(parked).toHaveLength(1);
@@ -76,6 +78,7 @@ describe("stepUntil", () => {
       bindings: [],
       store: memoryStore(),
     });
+    seed(flow, undefined, ready);
 
     const state = await stepUntil(flow, ready, atNode(target));
 
@@ -95,6 +98,7 @@ describe("stepUntil", () => {
       bindings: [],
       store: memoryStore(),
     });
+    seed(flow, undefined, ready);
 
     const error: unknown = await stepUntil(flow, ready, () => false).catch(
       (caught: unknown) => caught,
@@ -120,6 +124,7 @@ describe("stepUntil", () => {
       bindings: [],
       store: memoryStore(),
     });
+    seed(flow, undefined, ready);
 
     const error: unknown = await stepUntil(flow, ready, () => false, { maxSteps: 5 }).catch(
       (caught: unknown) => caught,
