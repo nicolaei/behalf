@@ -26,7 +26,9 @@ describe("toolset groups multiple tool handlers behind one binding", () => {
       appendEvent: () => {
         throw new Error("unused");
       },
-      runFlow: () => Promise.resolve(undefined),
+      spawnAgent: () => {
+        throw new Error("unused");
+      },
     });
 
     expect(result).toEqual({ hits: ["x"] });

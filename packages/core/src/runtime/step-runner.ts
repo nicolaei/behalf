@@ -193,7 +193,6 @@ export interface StepContextConfig {
   getScope: () => ScopeId;
   setScope: (scope: ScopeId) => void;
   getLabel?: () => string | undefined;
-  parentScope?: ScopeId; // this scope's owner, if it's a spawned child (see ExecutionScope.parentScope)
   inputs: unknown[];
   openStream: (type: EventType) => Stream; // on-demand stream factory model calls and steps use to create a logged event
   appendEvent: <T extends EventType>(payload: Event[T], type: T) => void; // commits a standalone event to this scope
@@ -235,7 +234,6 @@ function makeExecutionScope(config: StepContextConfig): ScopeHandle {
     appendEvent: config.appendEvent,
     deriveScope: makeDeriveScope(config.runtime, config.getScope, config.setScope),
     ...(config.getLabel ? { label: config.getLabel } : {}),
-    ...(config.parentScope ? { parentScope: config.parentScope } : {}),
   };
 }
 

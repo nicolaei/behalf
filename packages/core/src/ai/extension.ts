@@ -8,6 +8,7 @@ import type { EngineExtension, ExecutionScope } from "../runtime/index.js";
 import type { Model } from "./model.js";
 import type { ModelPort } from "./model-port.js";
 import type { Binding } from "./tool.js";
+import type { AgentSpawner } from "./agent-spawner.js";
 import type { Message } from "./message.js";
 import { createAiWorkers } from "./tool-executor.js";
 import {
@@ -18,10 +19,12 @@ import {
   buildThreadContext,
 } from "./thread.js";
 
-/** `ai()`'s own config — a model resolver plus every tool/toolset binding. @public */
+/** `ai()`'s own config — a model resolver, every tool/toolset binding, and optionally the `AgentSpawner` backing `ToolContext.spawnAgent`. @public */
 export interface AiConfig {
   readonly models: (model: Model) => ModelPort;
   readonly bindings: Binding[];
+  /** Required only by a flow whose tools call `context.spawnAgent`; omitting it makes that call fail loudly rather than silently. */
+  readonly spawner?: AgentSpawner;
 }
 
 /** The shape ai interprets `context.invalidate`'s generic `payload` as, when it carries one — a rerun's own reason message, folded onto whichever scope resulted the same way `ctx.thread.start`/`say` would. */

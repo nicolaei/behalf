@@ -453,12 +453,11 @@ function currentNodeIdentity(
 }
 
 /**
- * Builds the drive-loop `StepContext` shared by `driveGraph` and `tick`:
- * `openStream`/`modelCall`/`callTool` all resolve the currently running
- * node's identity via `currentNodeIdentity`, reading the running node and
- * its scope through getters — `driveGraph` closes over its `current`/
- * `currentScope` outer variables, `tick` closes over its own same-named
- * loop variables, and either way this sees the live value on each call.
+ * Builds the `StepContext` every node `tick()` runs executes against:
+ * `openStream`/`modelCall`/`callTool` all resolve the currently running node's
+ * identity via `currentNodeIdentity`, reading the running node and its scope
+ * through getters — `tick` closes over its own loop variables, so this sees
+ * the live value on each call.
  */
 export function buildDriveContext(
   flow: Graph,
@@ -466,13 +465,11 @@ export function buildDriveContext(
   getCurrent: () => NodeId | undefined,
   getScope: () => ScopeId,
   setScope: (scope: ScopeId) => void,
-  parentScope?: ScopeId,
 ): StepContext {
   const context = makeStepContext({
     runtime,
     getScope,
     setScope,
-    ...(parentScope ? { parentScope } : {}),
     getLabel: () => {
       const current = getCurrent();
       const node = current ? flow.nodes.get(current) : undefined;

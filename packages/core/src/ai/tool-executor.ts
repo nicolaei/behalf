@@ -7,7 +7,8 @@
 import type { NodeId } from "../graph/graph.js";
 import type { ScopeId } from "../graph/thread.js";
 import type { Runtime, StepIdentity } from "../runtime/index.js";
-import { seed, driveFlow, stepIdentity, freshCorrelationId } from "../runtime/index.js";
+import { stepIdentity, freshCorrelationId } from "../runtime/index.js";
+import type { AgentSpawner } from "./agent-spawner.js";
 import type { Tool, ToolContext, ToolHandler, Binding } from "./tool.js";
 import type { Model } from "./model.js";
 import type { ModelPort } from "./model-port.js";
@@ -33,6 +34,9 @@ export const resolvedTools = new WeakMap<Runtime, Map<string, ToolHandler>>();
 
 /** The model resolver `ai({ models })` was given for a given Runtime — same WeakMap-keyed-by-Runtime shape as `resolvedTools`, populated alongside it. */
 export const modelResolvers = new WeakMap<Runtime, (model: Model) => ModelPort>();
+
+/** The `AgentSpawner` `ai({ spawner })` was given for a given Runtime, if any — same WeakMap-keyed-by-Runtime shape as `resolvedTools`. Absent when the host registered none, which is what makes `context.spawnAgent` fail loudly rather than silently doing something else. */
+export const agentSpawners = new WeakMap<Runtime, AgentSpawner>();
 
 /** Finds the resolved handler for a named tool — direct or a toolset member — or throws if the runtime has none. */
 export function findToolBinding(runtime: Runtime, name: string): ToolHandler {
@@ -61,10 +65,16 @@ export function buildToolContext(
     appendEvent: (payload, type) => {
       runtime.store.append(payload, { type, threadId: scope });
     },
-    // TODO(B2.10): replaced by spawnAgent behind the AgentSpawner port.
-    runFlow: (flow, initialPrompt) => {
-      seed(flow, initialPrompt, runtime);
-      return driveFlow(flow, runtime);
+    spawnAgent: (flow, brief) => {
+      const spawner = agentSpawners.get(runtime);
+      if (!spawner) {
+        throw new Error(
+          "context.spawnAgent requires an AgentSpawner — pass one as ai({ ..., spawner })",
+        );
+      }
+      // Keyed by THIS tool call's own correlationId: that is what makes a
+      // re-dispatch of the same pending call attach to the existing child.
+      return spawner.spawn(correlationId, flow, brief);
     },
   };
 }
@@ -204,9 +214,11 @@ export async function callTool<Input, Output>(
 export function createAiWorkers(config: {
   models: (model: Model) => ModelPort;
   bindings: Binding[];
+  spawner?: AgentSpawner;
 }): (runtime: Runtime, signal: AbortSignal) => (() => Promise<void>)[] {
   return (runtime, signal) => {
     modelResolvers.set(runtime, config.models);
+    if (config.spawner) agentSpawners.set(runtime, config.spawner);
     void expandToolsets(config.bindings).then((tools) => {
       resolvedTools.set(runtime, tools);
     });

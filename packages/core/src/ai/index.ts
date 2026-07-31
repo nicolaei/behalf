@@ -29,6 +29,13 @@ export type {
 export type { ModelPort } from "./model-port.js";
 export type { AiConfig } from "./extension.js";
 export { ai } from "./extension.js";
+export type {
+  AgentHandle,
+  AgentSpawner,
+  FinishResult,
+  LocalAgentSpawnerConfig,
+} from "./agent-spawner.js";
+export { localAgentSpawner } from "./agent-spawner.js";
 export { userInput, toolCall } from "./waitable.js";
 export type { Thread, ThreadApi, ThreadContext } from "./thread.js";
 export { startThread, forkThread } from "./thread.js";

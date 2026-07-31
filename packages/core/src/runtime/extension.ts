@@ -14,12 +14,6 @@ import { freshScopeId } from "./ids.js";
  */
 export interface ExecutionScope {
   readonly scope: ScopeId;
-  /** The scope that spawned this one as a child (a tool's own `runFlow` call), if any —
-   * ownership, not ancestry (see `graph/thread.ts`'s own doc comment on the distinction).
-   * Live/in-memory only, exactly like before this scope's own extraction: never durably
-   * logged, so a later replay of the same session never reconstructs it — only the same
-   * process's own live `runFlow` call sees it. Backs ai's `ctx.thread.parentThreadId`. */
-  readonly parentScope?: ScopeId;
   /** This scope's slice of the committed log, in log order. */
   events(): readonly CommittedEnvelope[];
   /**

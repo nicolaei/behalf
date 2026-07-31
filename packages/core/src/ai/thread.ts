@@ -122,17 +122,15 @@ export interface ThreadApi {
   end(): void;
 }
 
-/** `ThreadApi`'s action methods, the same readable properties `context.thread` has always
- * exposed, plus `parentThreadId` — the scope that spawned this one as a child (a tool's own
- * `runFlow` call), if any. Ownership, not ancestry (distinct from `forkedFrom`; see
- * `graph/thread.ts`'s own doc comment). Live/in-memory only — sourced from
- * `ExecutionScope.parentScope`, never durably logged, exactly as before this scope's own
- * extraction: a later replay of the same session never reconstructs it. One object, per
- * fork-3's resolution (ai/'s own latitude on this shape; see task notes). */
+/** `ThreadApi`'s action methods plus the same readable properties `context.thread` has always
+ * exposed. One object, per fork-3's resolution (ai/'s own latitude on this shape; see task
+ * notes).
+ *
+ * `parentThreadId` is gone with `ToolContext.runFlow`: a tool's child is now a child SESSION
+ * with its own log (see `spawnAgent`/`AgentSpawner`), not a second scope inside the parent's,
+ * so there is no in-log parent to point at. */
 export type ThreadContext = ThreadApi &
-  Pick<Thread, "id" | "label" | "forkedFrom" | "messages" | "history"> & {
-    readonly parentThreadId?: ScopeId | undefined;
-  };
+  Pick<Thread, "id" | "label" | "forkedFrom" | "messages" | "history">;
 
 /** Builds the `ctx.thread` value contributed to a `StepContext`/`EdgeContext` — shared by
  * `ai/extension.ts`'s `stepContext`/`edgeContext` hooks, since both merge in the identical
@@ -180,9 +178,6 @@ export function buildThreadContext(
     },
     get history() {
       return currentThread(scope).history;
-    },
-    get parentThreadId() {
-      return scope.parentScope;
     },
   };
 }

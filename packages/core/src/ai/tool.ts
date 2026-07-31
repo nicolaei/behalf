@@ -3,6 +3,7 @@
 import type { ScopeId } from "../graph/thread.js";
 import { z } from "zod";
 import type { Message } from "./message.js";
+import type { AgentHandle } from "./agent-spawner.js";
 import type { Graph } from "../graph/graph.js";
 import type { Stream } from "../session/envelope.js";
 import type { Event, EventType } from "../session/event.js";
@@ -42,7 +43,15 @@ export interface ToolContext {
   readonly correlationId: string; // this call's own correlationId, shared by its toolCall/toolResult pair
   openStream(type: EventType): Stream; // open a fresh, logged stream scoped to this thread
   appendEvent<T extends EventType>(payload: Event[T], type: T): void; // commit a standalone event scoped to this thread
-  runFlow: (flow: Graph, initialPrompt: Message) => Promise<unknown>;
+  /**
+   * Spawns a child agent — a session of its own, with its own log — and hands
+   * back a durable handle to its result. Idempotent by THIS call's own
+   * `correlationId`: a tool executor re-dispatching a still-pending call after
+   * a restart attaches to the child already running instead of starting a
+   * second one. Requires an `AgentSpawner` on the ai extension
+   * (`ai({ ..., spawner })`).
+   */
+  spawnAgent: (flow: Graph, brief: Message) => AgentHandle;
 }
 
 /** The implementation behind a tool, written by the flow author. @public */
