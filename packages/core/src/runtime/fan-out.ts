@@ -2,14 +2,15 @@
 // to its join (runFlow's own fan-out path), and reconstructing/advancing an
 // in-flight fan-out group one branch-step at a time (tick's own path).
 
-import type { Graph, NodeId, EdgeDefinition } from "../../flow/graph.js";
-import type { ThreadId } from "../../flow/thread.js";
-import type { Message, MessageKind } from "../../flow/message.js";
-import { tryMessageKindOf } from "../../flow/waitable.js";
-import type { Emit, StepContext, WaitForResult } from "../../flow/step.js";
-import type { Runtime } from "../runtime.js";
+import type { Graph, NodeId, EdgeDefinition } from "../graph/graph.js";
+import type { ThreadId } from "../graph/thread.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) branch replay folds ai-shaped Message/MessageKind; removed when message folding moves to ai's reducers.
+import type { Message, MessageKind } from "../ai/message.js";
+import { tryMessageKindOf } from "../graph/waitable.js";
+import type { Emit, StepContext, WaitForResult } from "../graph/step.js";
+import type { Runtime } from "./runtime.js";
 import { freshCorrelationId } from "./ids.js";
-import { notImplemented, unreachable } from "../errors.js";
+import { notImplemented, unreachable } from "./errors.js";
 import {
   type Thread,
   stepIdentity,

@@ -1,6 +1,7 @@
 // Flow authoring — Waitable / userInput / toolCall. See docs/reference.md.
 
-import type { MessageKind, UserMessage } from "./message.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) userInput()/toolCall() are ai waitables riding in graph/waitable.ts's plain B1 move; removed when they relocate to ai/ proper.
+import type { MessageKind, UserMessage } from "../ai/message.js";
 import type { Envelope } from "../session/index.js";
 
 /**

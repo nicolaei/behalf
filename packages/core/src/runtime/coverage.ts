@@ -1,11 +1,15 @@
 // Systems running flows — satisfiesPersonas / satisfiesFlows. See docs/reference.md.
 
-import type { Profile } from "../flow/profile.js";
-import type { Model, ReasoningLevel } from "../flow/model.js";
-import type { Graph, NodeKind } from "../flow/graph.js";
-import type { Binding, Tool, Toolset } from "../flow/tool.js";
-import type { ModelPort } from "./model-port.js";
-import type { PersonaStep } from "../flow/step.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) satisfiesPersonas checks ai Profile/Model/Binding coverage; removed when persona coverage splits out to ai's own satisfiesPersonas.
+import type { Profile } from "../ai/profile.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai())
+import type { Model, ReasoningLevel } from "../ai/model.js";
+import type { Graph, NodeKind } from "../graph/graph.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai())
+import type { Binding, Tool, Toolset } from "../ai/tool.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) ModelPort is an ai concern; removed when persona coverage moves to ai's own satisfiesPersonas.
+import type { ModelPort } from "../ai/model-port.js";
+import type { PersonaStep } from "../graph/step.js";
 import type { WaitableSource } from "./waitable-source.js";
 
 /** Everything a persona needs that is not provided. Empty means ready. @public */

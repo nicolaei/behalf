@@ -1,7 +1,7 @@
 // Systems running flows — Errors. See docs/reference.md § "Errors".
 
-import type { ThreadId } from "../flow/thread.js";
-import type { StepError } from "../flow/step.js";
+import type { ThreadId } from "../graph/thread.js";
+import type { StepError } from "../graph/step.js";
 import type { Envelope } from "../session/index.js";
 
 // #region error-context

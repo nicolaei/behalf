@@ -16,7 +16,7 @@
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { Graph } from "../packages/core/src/flow/graph.js";
+import type { Graph } from "../packages/core/src/graph/graph.js";
 import { graphToMermaid } from "./graph-to-mermaid.js";
 import { findTopLevelFences } from "./markdown-fences.js";
 

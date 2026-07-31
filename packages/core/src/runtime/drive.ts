@@ -6,16 +6,18 @@
 // findInterruptNodes, driveStepEmit, seedUseNode, runWaitForNode,
 // commitInvalidation) to drive one node at a time instead of to completion.
 
-import { type Graph, type NodeId, type NodeKind, nodeOptionFields } from "../../flow/graph.js";
-import type { Message, MessageKind, UserMessage } from "../../flow/message.js";
-import type { Waitable } from "../../flow/waitable.js";
-import type { ThreadId } from "../../flow/thread.js";
-import { tryMessageKindOf, messageKindOf } from "../../flow/waitable.js";
-import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../../flow/step.js";
-import type { Tool } from "../../flow/tool.js";
-import type { Runtime } from "../runtime.js";
+import { type Graph, type NodeId, type NodeKind, nodeOptionFields } from "../graph/graph.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) driveWaitForMessage folds ai-shaped Message/MessageKind/UserMessage; removed when message folding moves to ai's reducers.
+import type { Message, MessageKind, UserMessage } from "../ai/message.js";
+import type { Waitable } from "../graph/waitable.js";
+import type { ThreadId } from "../graph/thread.js";
+import { tryMessageKindOf, messageKindOf } from "../graph/waitable.js";
+import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../graph/step.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) buildDriveContext.callTool takes a Tool; removed when callTool moves into ai's stepContext hook.
+import type { Tool } from "../ai/tool.js";
+import type { Runtime } from "./runtime.js";
 import { freshCorrelationId } from "./ids.js";
-import { notImplemented, unreachable } from "../errors.js";
+import { notImplemented, unreachable } from "./errors.js";
 import {
   type Thread,
   type StepIdentity,

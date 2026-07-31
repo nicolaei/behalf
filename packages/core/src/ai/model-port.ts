@@ -1,8 +1,8 @@
 // Systems running flows — ModelPort. See docs/reference.md § "ModelPort".
 
-import type { Model } from "../flow/model.js";
-import type { Profile } from "../flow/profile.js";
-import type { Message, AssistantMessage } from "../flow/message.js";
+import type { Model } from "./model.js";
+import type { Profile } from "./profile.js";
+import type { Message, AssistantMessage } from "./message.js";
 import type { DeltaSink } from "../session/envelope.js";
 
 /**
@@ -23,5 +23,10 @@ export interface ModelPort {
    * before, just without real cancellation — `runModelCall`'s caller-side
    * guard (Stream's settled check) still protects the log either way.
    * @public */
-  respond(profile: Profile, messages: Message[], stream: DeltaSink, signal?: AbortSignal): Promise<AssistantMessage>;
+  respond(
+    profile: Profile,
+    messages: Message[],
+    stream: DeltaSink,
+    signal?: AbortSignal,
+  ): Promise<AssistantMessage>;
 }

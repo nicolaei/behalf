@@ -2,3 +2,4 @@
 
 export type { Event, EventType } from "./event.js";
 export type { Envelope, Delta, DeltaSink, Stream, SessionId } from "./envelope.js";
+export type { SessionStore, PendingEntry } from "./session-store.js";

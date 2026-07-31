@@ -1,6 +1,6 @@
 // Systems running flows — WaitableSource. See docs/reference.md.
 
-import type { SessionStore } from "./session-store.js";
+import type { SessionStore } from "../session/session-store.js";
 
 /**
  * The impure side of a non-`userInput` `Waitable`: something that watches the

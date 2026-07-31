@@ -17,11 +17,11 @@
 // file's name predates this rename — it still calls its own local fixture
 // "agentLoop", a private variable, not this exported primitive).
 
-import { defineGraph } from "./graph.js";
-import type { Graph } from "./graph.js";
-import { outputs } from "./step.js";
-import type { ModelCallResult, WaitForResult } from "./step.js";
-import { toolCall } from "./waitable.js";
+import { defineGraph } from "../graph/graph.js";
+import type { Graph } from "../graph/graph.js";
+import { outputs } from "../graph/step.js";
+import type { ModelCallResult, WaitForResult } from "../graph/step.js";
+import { toolCall } from "../graph/waitable.js";
 import type { Profile } from "./profile.js";
 import type { Message, ContentBlock } from "./message.js";
 
@@ -251,7 +251,10 @@ export function agentTurn(profile: Profile, options?: AgentTurnOptions): Graph {
       if (shouldCompact) {
         const summarize = options?.compact?.summarize ?? defaultSummarize;
         const summary = await summarize(context.thread.messages);
-        await context.compact({ summary, keepLast: options?.compact?.keepLast ?? DEFAULT_KEEP_LAST });
+        await context.compact({
+          summary,
+          keepLast: options?.compact?.keepLast ?? DEFAULT_KEEP_LAST,
+        });
       }
       return context.output(shouldCompact);
     });

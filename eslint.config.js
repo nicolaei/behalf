@@ -87,10 +87,16 @@ export default defineConfig([
   // everything below it; the enforceable, at-risk direction is the reverse —
   // graph/session/gateway/runtime must never import from ai/. Pre-existing
   // violations (graph/{step,graph,waitable}.ts, gateway/gateway.ts,
-  // runtime/{drive,tick,execution}.ts importing ai-shaped Message/UserMessage
+  // runtime/{drive,tick,execution,…}.ts importing ai-shaped Message/UserMessage
   // types) are exempted line-by-line via eslint-disable-next-line, each
   // tagged with the specific B2 step that removes it — not carved out here,
   // so this rule still catches any NEW lower-layer → ai import.
+  //
+  // Combined in the SAME block as the runtime submodule barrel-lockdown
+  // (below) rather than a separate one: flat config replaces a rule's whole
+  // setting per matching block instead of merging pattern arrays across
+  // blocks, so a later block matching the same files would silently drop an
+  // earlier one's patterns.
   {
     files: [
       "packages/core/src/graph/**/*.ts",
@@ -104,9 +110,23 @@ export default defineConfig([
         {
           patterns: [
             {
-              group: ["**/ai/*"],
+              group: ["../ai/*"],
               message:
                 "graph/session/gateway/runtime must not import from ai/ — ai is the top layer and depends on them, never the reverse. A pre-existing violation here needs an eslint-disable-next-line with a TODO(B2 step N) comment, not a rule exception.",
+            },
+            {
+              group: [
+                "**/runtime/tick.js",
+                "**/runtime/drive.js",
+                "**/runtime/step-runner.js",
+                "**/runtime/routing.js",
+                "**/runtime/fan-out.js",
+                "**/runtime/foreach.js",
+                "**/runtime/ids.js",
+                "**/runtime/execution.js",
+              ],
+              message:
+                "Import from runtime/index.js (the barrel), not its internal sub-modules directly.",
             },
           ],
         },
@@ -117,12 +137,19 @@ export default defineConfig([
   // src/runtime/ sub-modules (tick.ts, drive.ts, step-runner.ts, routing.ts,
   // fan-out.ts, foreach.ts, ids.ts, execution.ts) are necessarily exported so
   // they can import each other, but that also makes them reachable directly
-  // from anywhere else in the codebase, bypassing the runtime/index.js barrel.
-  // This rule blocks that: only files inside src/runtime/ itself may import a
-  // sub-module directly.
+  // from anywhere else in the codebase, bypassing the runtime/index.js
+  // barrel. This rule blocks that for every OTHER file in the package (ai/,
+  // the top-level index.ts/internal.ts, tests/) — graph/session/gateway/
+  // runtime themselves are covered by the combined block above instead, to
+  // avoid two blocks setting the same rule for the same files.
   {
     files: ["packages/core/src/**/*.ts"],
-    ignores: ["packages/core/src/runtime/**"],
+    ignores: [
+      "packages/core/src/runtime/**",
+      "packages/core/src/graph/**",
+      "packages/core/src/session/**",
+      "packages/core/src/gateway/**",
+    ],
     rules: {
       "no-restricted-imports": [
         "error",

@@ -1,8 +1,11 @@
 // Flow authoring — Step, PersonaStep, StepContext, Emit. See docs/reference.md § "StepContext".
 
-import type { Message, Usage } from "./message.js";
-import type { Profile } from "./profile.js";
-import type { Tool } from "./tool.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) StepContext.thread/modelCall carry Message/Usage; removed when the ai extension supplies these via declaration merging.
+import type { Message, Usage } from "../ai/message.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) StepContext.modelCall(profile) takes a Profile; removed when modelCall moves to the ai extension's stepContext hook.
+import type { Profile } from "../ai/profile.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) StepContext.callTool(tool) takes a Tool; removed when callTool moves to the ai extension's stepContext hook.
+import type { Tool } from "../ai/tool.js";
 import type { ThreadId, ThreadAction } from "./thread.js";
 import type { NodeId } from "./graph.js";
 import type { Stream } from "../session/envelope.js";

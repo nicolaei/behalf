@@ -2,8 +2,8 @@
 // module reaches for, plus the injectable `idFactory` a `runtime()` config
 // may supply in place of the default counters.
 
-import type { ThreadId } from "../../flow/thread.js";
-import type { Runtime } from "../runtime.js";
+import type { ThreadId } from "../graph/thread.js";
+import type { Runtime } from "./runtime.js";
 
 /** A `runtime()` config's custom `idFactory`, if it supplied one — keyed off the returned `Runtime` in a module-scoped `WeakMap` rather than the public type, so this stays an implementation detail (see docs/reference.md's `Runtime` interface). Absent means the default counter-based ids (see `defaultCorrelationId`/`defaultThreadId`) apply, unchanged from before ids became injectable. */
 export const idFactories = new WeakMap<Runtime, () => string>();

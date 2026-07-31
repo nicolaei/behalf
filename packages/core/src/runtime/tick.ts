@@ -2,17 +2,18 @@
 // event log, advances it exactly one node, and the `tickUntilSuspended`
 // helper that repeats until every cursor is parked or done.
 
-import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
-import type { ThreadId } from "../../flow/thread.js";
-import type { Message, MessageKind } from "../../flow/message.js";
-import { tryMessageKindOf } from "../../flow/waitable.js";
-import type { StepContext, WaitForResult } from "../../flow/step.js";
-import { ModelCallAbortedError } from "../../flow/step.js";
-import type { Event } from "../../session/event.js";
-import type { CommittedEnvelope, Envelope } from "../../session/envelope.js";
-import type { Runtime } from "../runtime.js";
+import type { Graph, NodeId, NodeKind } from "../graph/graph.js";
+import type { ThreadId } from "../graph/thread.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) tick's replay folds ai-shaped Message/MessageKind; removed when message replay moves to ai's reducers.
+import type { Message, MessageKind } from "../ai/message.js";
+import { tryMessageKindOf } from "../graph/waitable.js";
+import type { StepContext, WaitForResult } from "../graph/step.js";
+import { ModelCallAbortedError } from "../graph/step.js";
+import type { Event } from "../session/event.js";
+import type { CommittedEnvelope, Envelope } from "../session/envelope.js";
+import type { Runtime } from "./runtime.js";
 import { freshThreadId } from "./ids.js";
-import { notImplemented, unreachable } from "../errors.js";
+import { notImplemented, unreachable } from "./errors.js";
 import {
   type Thread,
   stepIdentity,

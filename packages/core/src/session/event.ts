@@ -1,8 +1,9 @@
 // Session store — Event. See docs/reference.md § "Event".
 
-import type { Message } from "../flow/message.js";
-import type { ThreadAction } from "../flow/thread.js";
-import type { NodeId } from "../flow/graph.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 5: open Event registry) the `message` event key is an ai-shaped fact riding in core's Event registry; removed when Event opens to extension-registered types and ai adds this key by declaration merging.
+import type { Message } from "../ai/message.js";
+import type { ThreadAction } from "../graph/thread.js";
+import type { NodeId } from "../graph/graph.js";
 
 /** The payload of a durable fact. The envelope names which key applies. @public */
 export interface Event {

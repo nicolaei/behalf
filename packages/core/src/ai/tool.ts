@@ -1,9 +1,9 @@
 // Flow authoring — tool / toolset / ToolHandler / provide / expand. See docs/reference.md.
 
-import type { ThreadId } from "./thread.js";
+import type { ThreadId } from "../graph/thread.js";
 import { z } from "zod";
 import type { Message } from "./message.js";
-import type { Graph } from "./graph.js";
+import type { Graph } from "../graph/graph.js";
 import type { Stream } from "../session/envelope.js";
 import type { Event, EventType } from "../session/event.js";
 

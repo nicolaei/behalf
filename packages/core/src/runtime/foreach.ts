@@ -28,16 +28,17 @@
 // node, precisely because a branch node's id can no longer be relied on to
 // miss the main graph's id set (see tick.ts's replay loop).
 
-import type { Graph, NodeId, NodeKind } from "../../flow/graph.js";
-import type { ThreadId } from "../../flow/thread.js";
-import type { MessageKind } from "../../flow/message.js";
-import type { WaitForResult } from "../../flow/step.js";
-import type { Event } from "../../session/event.js";
-import type { CommittedEnvelope } from "../../session/envelope.js";
-import type { Runtime } from "../runtime.js";
-import { notImplemented, unreachable } from "../errors.js";
+import type { Graph, NodeId, NodeKind } from "../graph/graph.js";
+import type { ThreadId } from "../graph/thread.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) forEach branch replay reads ai-shaped MessageKind; removed when message replay moves to ai's reducers.
+import type { MessageKind } from "../ai/message.js";
+import type { WaitForResult } from "../graph/step.js";
+import type { Event } from "../session/event.js";
+import type { CommittedEnvelope } from "../session/envelope.js";
+import type { Runtime } from "./runtime.js";
+import { notImplemented, unreachable } from "./errors.js";
 import { type Thread, withMessage, route } from "./routing.js";
-import { tryMessageKindOf } from "../../flow/waitable.js";
+import { tryMessageKindOf } from "../graph/waitable.js";
 import { type ExecutionContext, ExecutionScope } from "./step-runner.js";
 import {
   runBranchNode,

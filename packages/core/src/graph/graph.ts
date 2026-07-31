@@ -1,7 +1,8 @@
 // Flow authoring — defineGraph. See docs/reference.md § "defineGraph".
 
 import type { Step } from "./step.js";
-import type { Message } from "./message.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) EdgeOptions.prompt carries a Message; removed when prompt/threadAction leave the graph DSL for the ai extension's ctx.thread.
+import type { Message } from "../ai/message.js";
 import type { Waitable } from "./waitable.js";
 import type { ThreadAction } from "./thread.js";
 

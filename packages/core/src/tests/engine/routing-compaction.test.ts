@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { withMessage, withCompaction, deriveCompactedMessages } from "../../engine/runtime.js";
-import type { Thread } from "../../engine/runtime.js";
-import type { Message } from "../../flow/message.js";
-import type { ThreadId } from "../../flow/thread.js";
+import { withMessage, withCompaction, deriveCompactedMessages } from "../../runtime/runtime.js";
+import type { Thread } from "../../runtime/runtime.js";
+import type { Message } from "../../ai/message.js";
+import type { ThreadId } from "../../graph/thread.js";
 
 // Direct unit tests against deriveCompactedMessages/withCompaction themselves —
 // these two pure functions are the ONE place `thread.messages` gets computed

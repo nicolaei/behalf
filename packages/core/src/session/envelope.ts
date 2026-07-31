@@ -1,6 +1,6 @@
 // Session store — Envelope. See docs/reference.md § "Envelope".
 
-import type { ThreadId } from "../flow/thread.js";
+import type { ThreadId } from "../graph/thread.js";
 import type { Event, EventType } from "./event.js";
 
 /** Opaque brand for session identifiers. @public */

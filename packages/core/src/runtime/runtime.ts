@@ -3,27 +3,31 @@
 // This file is the thin coordinator: the `Runtime` builder and `runFlow`'s
 // own seed-and-drive tail live here. Everything else — routing, fan-out,
 // tool/model execution, id generation, the drive loop, and tick/replay —
-// lives in src/engine/runtime/ and is re-exported below so
-// `import ... from "./engine/runtime.js"` keeps resolving exactly as before.
+// lives alongside this file in src/runtime/ and is re-exported below so
+// `import ... from "./runtime/runtime.js"` keeps resolving exactly as before.
 
-import type { Model } from "../flow/model.js";
-import type { Message } from "../flow/message.js";
-import type { Graph } from "../flow/graph.js";
-import type { Binding, ToolHandler } from "../flow/tool.js";
-import type { ThreadId } from "../flow/thread.js";
-import type { ModelPort } from "./model-port.js";
-import type { SessionStore } from "./session-store.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) runtime() config's `models` resolver is keyed by Model; removed when models/bindings leave the engine's own vocabulary for ai({ models, bindings }).
+import type { Model } from "../ai/model.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) runFlow's initialPrompt is a Message; removed when a session starts from its first event instead of runFlow seeding a prompt.
+import type { Message } from "../ai/message.js";
+import type { Graph } from "../graph/graph.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) runtime() config's `bindings` are ai Binding/ToolHandler; removed when bindings move into ai({ bindings }).
+import type { Binding, ToolHandler } from "../ai/tool.js";
+import type { ThreadId } from "../graph/thread.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) ModelPort is an ai concern; removed when runtime() stops taking `models` directly.
+import type { ModelPort } from "../ai/model-port.js";
+import type { SessionStore } from "../session/session-store.js";
 import { defaultErrorHandler, type ErrorHandler } from "./errors.js";
-import type { Thread } from "./runtime/routing.js";
-export type { Thread } from "./runtime/routing.js";
-export { withMessage, withCompaction, deriveCompactedMessages } from "./runtime/routing.js";
-import { driveGraph } from "./runtime/drive.js";
-import { resolvedTools, startToolExecutor } from "./runtime/execution.js";
-import { idFactories, freshThreadId } from "./runtime/ids.js";
-import { tickUntilSuspended } from "./runtime/tick.js";
+import type { Thread } from "./routing.js";
+export type { Thread } from "./routing.js";
+export { withMessage, withCompaction, deriveCompactedMessages } from "./routing.js";
+import { driveGraph } from "./drive.js";
+import { resolvedTools, startToolExecutor } from "./execution.js";
+import { idFactories, freshThreadId } from "./ids.js";
+import { tickUntilSuspended } from "./tick.js";
 
-export type { CursorState, TickOutcome } from "./runtime/tick.js";
-export { tick, tickUntilSuspended } from "./runtime/tick.js";
+export type { CursorState, TickOutcome } from "./tick.js";
+export { tick, tickUntilSuspended } from "./tick.js";
 
 /** What a flow runs against — model resolution, bindings, and store. @public */
 export interface Runtime {

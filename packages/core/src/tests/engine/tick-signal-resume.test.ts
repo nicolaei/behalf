@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { tick, tickUntilSuspended } from "../../engine/runtime.js";
-import type { TickOutcome, Runtime } from "../../engine/runtime.js";
+import { tick, tickUntilSuspended } from "../../runtime/runtime.js";
+import type { TickOutcome, Runtime } from "../../runtime/runtime.js";
 import { defineGraph, runtime, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Waitable, WaitForResult } from "../../index.js";

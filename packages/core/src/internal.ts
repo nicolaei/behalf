@@ -5,5 +5,5 @@
 // this directly. See docs/reference.md § "tick()" for why these stay out of
 // the main barrel.
 
-export type { CursorState, TickOutcome } from "./engine/runtime.js";
-export { tick, tickUntilSuspended } from "./engine/runtime.js";
+export type { CursorState, TickOutcome } from "./runtime/runtime.js";
+export { tick, tickUntilSuspended } from "./runtime/runtime.js";

@@ -1,7 +1,5 @@
 // Systems running flows — public barrel.
 
-export type { ModelPort } from "./model-port.js";
-export type { SessionStore, PendingEntry } from "./session-store.js"; // Stream is exported from session/index.js
 export type { Missing } from "./coverage.js";
 export { satisfiesPersonas, satisfiesFlows, FlowNotReadyError } from "./coverage.js";
 export type { WaitableSource } from "./waitable-source.js";

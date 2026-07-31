@@ -2,24 +2,22 @@
 // ToolContext handlers run with, running one tool call end to end, and
 // making one model request (with its own tool calls folded in).
 
-import type {
-  MessageKind,
-  UserMessage,
-  AssistantMessage,
-  ContentBlock,
-} from "../../flow/message.js";
-import type { Waitable } from "../../flow/waitable.js";
-import type { NodeId } from "../../flow/graph.js";
-import type { ThreadId } from "../../flow/thread.js";
-import type { Profile } from "../../flow/profile.js";
-import type { StepContext, ModelCallResult } from "../../flow/step.js";
-import { ModelCallAbortedError } from "../../flow/step.js";
-import type { Tool, ToolContext, ToolHandler } from "../../flow/tool.js";
-import type { SessionStore } from "../session-store.js";
-import type { Runtime } from "../runtime.js";
-import { runFlow } from "../runtime.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) message/tool-call shapes this file resolves are ai-owned; removed when execution.ts's ai half moves into ai/.
+import type { MessageKind, UserMessage, AssistantMessage, ContentBlock } from "../ai/message.js";
+import type { Waitable } from "../graph/waitable.js";
+import type { NodeId } from "../graph/graph.js";
+import type { ThreadId } from "../graph/thread.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) runModelCall takes a Profile; removed when model calls move into ai/.
+import type { Profile } from "../ai/profile.js";
+import type { StepContext, ModelCallResult } from "../graph/step.js";
+import { ModelCallAbortedError } from "../graph/step.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) the tool executor's Tool/ToolContext/ToolHandler are ai-owned; removed when the tool executor moves into ai/.
+import type { Tool, ToolContext, ToolHandler } from "../ai/tool.js";
+import type { SessionStore } from "../session/session-store.js";
+import type { Runtime } from "./runtime.js";
+import { runFlow } from "./runtime.js";
 import { freshCorrelationId } from "./ids.js";
-import { unreachable } from "../errors.js";
+import { unreachable } from "./errors.js";
 import { withMessage, type Thread, type StepIdentity } from "./routing.js";
 
 /**

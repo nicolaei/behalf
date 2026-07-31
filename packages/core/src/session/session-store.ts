@@ -1,8 +1,9 @@
 // Systems running flows / Session store — SessionStore. See docs/reference.md § "SessionStore".
 
-import type { UserMessage } from "../flow/message.js";
-import type { ThreadId } from "../flow/thread.js";
-import type { Envelope, Event, EventType, Stream } from "../session/index.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 6: reducers + replay slot) PendingEntry's message kind is ai-shaped; removed when a pending message becomes a generic ai-registered inbox kind.
+import type { UserMessage } from "../ai/message.js";
+import type { ThreadId } from "../graph/thread.js";
+import type { Envelope, Event, EventType, Stream } from "./index.js";
 
 /**
  * A pending, not-yet-committed entry — either a real conversational message or a

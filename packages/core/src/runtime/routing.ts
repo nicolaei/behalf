@@ -1,12 +1,13 @@
 // Routing — edge selection, thread-action application, and the shared
 // output/route-commit helpers every node kind's own routing goes through.
 
-import type { Message } from "../../flow/message.js";
-import type { NodeId, EdgeDefinition } from "../../flow/graph.js";
-import type { ThreadAction, ThreadId } from "../../flow/thread.js";
-import type { StepContext } from "../../flow/step.js";
-import type { Runtime } from "../runtime.js";
-import type { Event } from "../../session/event.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) withMessage/deriveCompactedMessages fold ai-shaped Message; removed when thread folding moves into ai's reducers.
+import type { Message } from "../ai/message.js";
+import type { NodeId, EdgeDefinition } from "../graph/graph.js";
+import type { ThreadAction, ThreadId } from "../graph/thread.js";
+import type { StepContext } from "../graph/step.js";
+import type { Runtime } from "./runtime.js";
+import type { Event } from "../session/event.js";
 import { freshThreadId } from "./ids.js";
 
 export type Thread = StepContext["thread"];

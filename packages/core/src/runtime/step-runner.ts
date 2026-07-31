@@ -3,16 +3,19 @@
 // tagging, and folding the compact/error emits every step-running path
 // handles the same way.
 
-import type { Message } from "../../flow/message.js";
-import type { NodeId, Graph } from "../../flow/graph.js";
-import type { Step, StepContext, Emit, ModelCallResult, StepError } from "../../flow/step.js";
-import type { Tool } from "../../flow/tool.js";
-import type { Profile } from "../../flow/profile.js";
-import type { Stream } from "../../session/envelope.js";
-import type { Event, EventType } from "../../session/event.js";
-import type { Runtime } from "../runtime.js";
-import { type ErrorContext, type ErrorDecision, unreachable } from "../errors.js";
-import { RetryableError } from "../errors.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) commitCompaction takes an ai-shaped Message; removed when compaction moves into ai/.
+import type { Message } from "../ai/message.js";
+import type { NodeId, Graph } from "../graph/graph.js";
+import type { Step, StepContext, Emit, ModelCallResult, StepError } from "../graph/step.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) StepContextConfig.callTool takes a Tool; removed when callTool moves into ai's stepContext hook.
+import type { Tool } from "../ai/tool.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) StepContextConfig.modelCall takes a Profile; removed when modelCall moves into ai's stepContext hook.
+import type { Profile } from "../ai/profile.js";
+import type { Stream } from "../session/envelope.js";
+import type { Event, EventType } from "../session/event.js";
+import type { Runtime } from "./runtime.js";
+import { type ErrorContext, type ErrorDecision, unreachable } from "./errors.js";
+import { RetryableError } from "./errors.js";
 import { type Thread, StateTracker, withCompaction } from "./routing.js";
 
 /**

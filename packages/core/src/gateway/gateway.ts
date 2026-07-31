@@ -1,7 +1,8 @@
 // Gateway — the only thing clients touch. See docs/reference.md § "Gateway".
 
 import type { SessionId } from "../session/envelope.js";
-import type { UserMessage } from "../flow/message.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 6: reducers + replay slot) Gateway.submit takes a UserMessage; removed when submit takes a generic PendingEntry instead.
+import type { UserMessage } from "../ai/message.js";
 
 /**
  * Minimal shape the gateway needs from a socket. Swap for the real `ws` or
