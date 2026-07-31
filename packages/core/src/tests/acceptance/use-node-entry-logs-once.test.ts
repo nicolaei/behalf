@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, loggedEnvelopes } from "./support.js";
+import { loggedEnvelopes } from "./support.js";
 
 // seedUseNode unconditionally re-commits a real Message input to the log.
 // When a `use` node is the graph's own entry, its input was already
@@ -22,7 +22,7 @@ describe("a use node as the graph's own entry", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await runFlow(outer, userText("hi"), ready);
 

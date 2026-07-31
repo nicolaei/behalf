@@ -1,28 +1,22 @@
-// Systems running flows — satisfiesPersonas / satisfiesFlows. See docs/reference.md.
+// Systems running flows — satisfiesFlows: flow-shape coverage (graph
+// structure, registered Waitable providers), no model/binding awareness.
+// Persona coverage moved to ai/coverage.ts's satisfiesPersonas (B2.7).
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) satisfiesPersonas checks ai Profile/Model/Binding coverage; removed when persona coverage splits out to ai's own satisfiesPersonas.
-import type { Profile } from "../ai/profile.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai())
-import type { Model, ReasoningLevel } from "../ai/model.js";
 import type { Graph, NodeKind } from "../graph/graph.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai())
-import type { Binding, Tool, Toolset } from "../ai/tool.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) ModelPort is an ai concern; removed when persona coverage moves to ai's own satisfiesPersonas.
-import type { ModelPort } from "../ai/model-port.js";
-import type { PersonaStep } from "../graph/step.js";
 import type { WaitableSource } from "./waitable-source.js";
 
-/** Everything a persona needs that is not provided. Empty means ready. @public */
+/** Everything a persona or flow needs that is not provided. Empty means ready. @public */
 export type Missing =
   | { kind: "model"; model: string }
   | { kind: "tool"; model: string; tool: string }
-  | { kind: "reasoning"; model: string; level: ReasoningLevel }
+  | { kind: "reasoning"; model: string; level: string }
   | { kind: "waitable"; provider: string };
 
 /**
- * Thrown by an app's own boot check when `satisfiesFlows`/`satisfiesPersonas` reports anything
- * missing — not thrown by those functions themselves, which stay pure reporters. Carries the
- * full `Missing[]` list so a caller can inspect exactly what's absent, not just that something is.
+ * Thrown by an app's own boot check when `satisfiesFlows`/ai's `satisfiesPersonas` reports
+ * anything missing — not thrown by those functions themselves, which stay pure reporters.
+ * Carries the full `Missing[]` list so a caller can inspect exactly what's absent, not just
+ * that something is.
  * @public
  */
 export class FlowNotReadyError extends Error {
@@ -35,47 +29,14 @@ export class FlowNotReadyError extends Error {
   }
 }
 
-/** Whether some binding backs a tool or toolset reference, by name. */
-function isBound(ref: Tool | Toolset, bindings: Binding[]): boolean {
-  return bindings.some(
-    (binding) =>
-      (binding.kind === "tool" && binding.tool.name === ref.name) ||
-      (binding.kind === "toolset" && binding.toolset.name === ref.name),
-  );
-}
-
-/** Checks each persona directly: does it have a model port, its tools, its reasoning level? @public */
-export function satisfiesPersonas(
-  personas: Profile[],
-  models: (model: Model) => ModelPort | undefined,
-  bindings: Binding[],
-): Missing[] {
-  const missing: Missing[] = [];
-
-  for (const persona of personas) {
-    const model = persona.model.identifier;
-
-    if (!models(persona.model)) missing.push({ kind: "model", model });
-
-    for (const ref of persona.tools) {
-      if (!isBound(ref, bindings)) missing.push({ kind: "tool", model, tool: ref.name });
-    }
-
-    if (persona.reasoning && !persona.model.reasoning.includes(persona.reasoning)) {
-      missing.push({ kind: "reasoning", model, level: persona.reasoning });
-    }
-  }
-
-  return missing;
-}
-
-/** Whether a step carries a `.persona` — i.e. is a `PersonaStep`. */
-function isPersonaStep(run: unknown): run is PersonaStep {
-  return typeof run === "function" && "persona" in run;
-}
-
-/** Generic recursive graph walker: visits every node reachable from `graph` — including through `use` subgraphs — calling `gatherFromNode` on each, and skipping any graph already in `seen`. Shared by every static-collection pass over a flow's structure so a subgraph reachable from more than one place is only ever walked once per `seen` set. */
-function walkGraph<T>(
+/**
+ * Generic recursive graph walker: visits every node reachable from `graph` — including through
+ * `use` subgraphs — calling `gatherFromNode` on each, and skipping any graph already in `seen`.
+ * Shared by every static-collection pass over a flow's structure (this file's own
+ * `satisfiesFlows`, and ai/coverage.ts's `satisfiesPersonas`) so a subgraph reachable from more
+ * than one place is only ever walked once per `seen` set. @public
+ */
+export function walkGraph<T>(
   graph: Graph,
   seen: Set<Graph>,
   gatherFromNode: (node: NodeKind, acc: T, seen: Set<Graph>) => void,
@@ -89,58 +50,42 @@ function walkGraph<T>(
   }
 }
 
-/** What `satisfiesFlows` collects from a single walk over a flow's structure: every reachable `Profile` and every distinct `Waitable` provider. */
+/** What `satisfiesFlows` collects from a single walk over a flow's structure: every distinct Waitable provider. */
 interface FlowCoverage {
-  profiles: Profile[];
   providers: Set<string>;
 }
 
-/**
- * Gathers one node's own contribution to a `FlowCoverage`, recursing into a `use` node's
- * subgraph via `walkGraph` — the single pass `satisfiesFlows` uses to collect both personas
- * and Waitable providers together, so a subgraph shared across flows (or reachable both as a
- * step's persona source and a waitFor's provider source) is only ever walked once.
- */
-function gatherCoverageFromNode(node: NodeKind, acc: FlowCoverage, seen: Set<Graph>): void {
-  if (node.kind === "step" || node.kind === "interrupt") {
-    if (isPersonaStep(node.run)) acc.profiles.push(node.run.persona);
-  }
+/** Gathers one node's own contribution to a `FlowCoverage`, recursing into a `use` node's subgraph via `walkGraph`. */
+function gatherProvidersFromNode(node: NodeKind, acc: FlowCoverage, seen: Set<Graph>): void {
   if (node.kind === "waitFor" || node.kind === "interrupt") {
     acc.providers.add(node.waitable.provider);
   }
   if (node.kind === "use") {
-    walkGraph(node.subgraph, seen, gatherCoverageFromNode, acc);
+    walkGraph(node.subgraph, seen, gatherProvidersFromNode, acc);
   }
 }
 
 /**
- * Finds every `Profile` and every `Waitable` provider a set of flows could use, by walking their
- * graphs’ structure statically — no execution involved. Each node of kind “step” or “interrupt”
- * carries a `run: Step`; if that step is a `PersonaStep` (it has a `.persona`), its profile is
- * collected. Each “waitFor” or “interrupt” node carries a `.waitable` directly, whose `.provider`
- * is collected. Each node of kind “use” embeds a whole subgraph, so its nodes are walked too,
- * recursively. The collected profiles are checked with `satisfiesPersonas`, which already knows
- * what “missing” means for a persona. The collected providers are checked against
- * `waitableSources`: `"userInput"` is always satisfied (no source is ever required for it — it's
- * resolved by whatever surfaces messages to a human, not a registered `WaitableSource`); every
- * other provider must resolve via `waitableSources(provider)` or it's reported missing.
+ * Finds every `Waitable` provider a set of flows could use, by walking their graphs' structure
+ * statically — no execution involved. `"userInput"` is always satisfied (no source is ever
+ * required for it — it's resolved by whatever surfaces messages to a human, not a registered
+ * `WaitableSource`); every other provider must resolve via `waitableSources(provider)` or it's
+ * reported missing. Graph-shape coverage only — no model/binding awareness; see ai/coverage.ts's
+ * `satisfiesPersonas` for that half.
  * @public
  */
 export function satisfiesFlows(
   flows: Graph[],
-  models: (model: Model) => ModelPort | undefined,
-  bindings: Binding[],
   waitableSources: (provider: string) => WaitableSource | undefined = () => undefined,
 ): Missing[] {
-  const acc: FlowCoverage = { profiles: [], providers: new Set<string>() };
+  const acc: FlowCoverage = { providers: new Set<string>() };
   const seen = new Set<Graph>();
 
   for (const flow of flows) {
-    walkGraph(flow, seen, gatherCoverageFromNode, acc);
+    walkGraph(flow, seen, gatherProvidersFromNode, acc);
   }
 
-  const missing = satisfiesPersonas(acc.profiles, models, bindings);
-
+  const missing: Missing[] = [];
   for (const provider of acc.providers) {
     if (provider === "userInput") continue;
     if (!waitableSources(provider)) missing.push({ kind: "waitable", provider });

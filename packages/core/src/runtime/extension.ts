@@ -4,6 +4,7 @@ import type { ThreadId } from "../graph/thread.js";
 import type { Event, EventType } from "../session/event.js";
 import type { CommittedEnvelope } from "../session/envelope.js";
 import type { WaitableSource } from "./waitable-source.js";
+import type { Runtime } from "./runtime.js";
 
 /**
  * The runtime's per-scope handle, passed to an extension's context factories
@@ -66,8 +67,18 @@ export interface EngineExtension {
    */
   reducers?: Partial<Record<EventType, ScopeStateReducer>>;
   /** Park conditions this extension can satisfy — each is started the same way `runtime()`
-   * already auto-starts the tool executor, with no separate setup required by any caller. */
+   * already starts an extension's `workers`, with no separate setup required by any caller. */
   waitables?: WaitableSource[];
+  /**
+   * Background workers started once `runtime()` has built its `Runtime` — the ai extension
+   * registers the decoupled tool executor here. Each returned function is invoked once,
+   * immediately; `runtime()` never awaits its promise (a worker commonly loops forever until
+   * `signal` aborts) but collects it so `Runtime.stop()` can await every worker's exit after
+   * aborting `signal`. Any async setup a worker needs (e.g. resolving toolset bindings) belongs
+   * inside the returned function's own body, before its first real work — nothing outside this
+   * extension can rely on that setup having finished before the function is even called.
+   */
+  workers?(runtime: Runtime, signal: AbortSignal): (() => Promise<void>)[];
 }
 
 /**

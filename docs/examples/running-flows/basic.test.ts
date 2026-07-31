@@ -14,8 +14,8 @@ describe("running-flows/basic", () => {
     expect(result).toEqual({ reply: "ok" });
   });
 
-  it("builds a runtime whose bindings and store are what was configured", () => {
-    expect(ready.bindings).toEqual([]);
+  it("builds a runtime ready to drive the flow", () => {
+    expect(ready.store.events().length).toBeGreaterThan(0);
     expect(chat.name).toBe("chat");
   });
 });

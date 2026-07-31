@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, runtime, runFlow, userText } from "@behalf-js/core";
 import type { ModelPort, Profile, Message } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { draftReview } from "./fork-and-revert.js";
@@ -53,9 +53,8 @@ describe("draftReview", () => {
   it("forks back to draft on rejection, then reaches notify on a fresh thread once approved", async () => {
     const { port } = scriptedPort();
     const ready = await runtime({
-      models: () => port,
-      bindings: [],
       store: memoryStore(),
+      extensions: [ai({ models: () => port, bindings: [] })],
     });
 
     const result = await runFlow(draftReview, userText("Add a dark mode toggle."), ready);
@@ -66,9 +65,8 @@ describe("draftReview", () => {
   it("seeds the forked retry with the review's feedback as its next prompt", async () => {
     const { port, draftPrompts } = scriptedPort();
     const ready = await runtime({
-      models: () => port,
-      bindings: [],
       store: memoryStore(),
+      extensions: [ai({ models: () => port, bindings: [] })],
     });
 
     await runFlow(draftReview, userText("Add a dark mode toggle."), ready);
@@ -81,11 +79,7 @@ describe("draftReview", () => {
   it("runs notify on a thread distinct from draft and review's, per its 'new' threadAction", async () => {
     const { port } = scriptedPort();
     const store = memoryStore();
-    const ready = await runtime({
-      models: () => port,
-      bindings: [],
-      store,
-    });
+    const ready = await runtime({ store, extensions: [ai({ models: () => port, bindings: [] })] });
 
     await runFlow(draftReview, userText("Add a dark mode toggle."), ready);
 

@@ -4,7 +4,6 @@ import type { TickOutcome, Runtime } from "../../runtime/runtime.js";
 import { defineGraph, runtime, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Waitable, WaitForResult } from "../../index.js";
-import { neverCalled } from "../acceptance/support.js";
 
 // tick()'s non-blocking waitFor path and its replay reconstruction only know
 // how to resolve a Waitable back to a message kind (Story 2 deliberately left
@@ -47,7 +46,7 @@ describe("a signal-based wait survives a restart via tick()", () => {
     const store = memoryStore();
 
     async function freshRuntime(): Promise<Runtime> {
-      return runtime({ models: neverCalled, bindings: [], store });
+      return runtime({ store });
     }
 
     seed(graph, undefined, await freshRuntime());
@@ -66,11 +65,11 @@ describe("a signal-based wait survives a restart via tick()", () => {
     const store = memoryStore();
 
     async function freshTick(): Promise<TickOutcome> {
-      const ready = await runtime({ models: neverCalled, bindings: [], store });
+      const ready = await runtime({ store });
       return tick(graph, ready);
     }
 
-    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
+    seed(graph, undefined, await runtime({ store }));
 
     await freshTick(); // runs `start`
     const parked = await freshTick(); // reaches `gate`, no signal yet
@@ -87,7 +86,7 @@ describe("a signal-based wait survives a restart via tick()", () => {
     const store = memoryStore();
 
     async function freshRuntime(): Promise<Runtime> {
-      return runtime({ models: neverCalled, bindings: [], store });
+      return runtime({ store });
     }
 
     seed(graph, undefined, await freshRuntime());

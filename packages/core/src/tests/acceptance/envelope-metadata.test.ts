@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { SessionStore } from "../../index.js";
-import { neverCalled, loggedEnvelopes } from "./support.js";
+import { loggedEnvelopes } from "./support.js";
 
 describe("envelope metadata: sequence, at, stepId, stepName, threadId", () => {
   // Two steps, not one — a single-envelope run can't tell "consistent across
@@ -22,7 +22,7 @@ describe("envelope metadata: sequence, at, stepId, stepName, threadId", () => {
 
   beforeEach(async () => {
     store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     await runFlow(labeled, userText("go"), ready);
   });
 

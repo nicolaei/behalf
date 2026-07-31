@@ -32,7 +32,10 @@ const chat = defineGraph("fake-chat", (flow) => {
 
 describe("fakePort", () => {
   it('always replies "ok", with no tool calls', async () => {
-    const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
+    const ready = await runtime({
+      store: memoryStore(),
+      extensions: [ai({ models: () => fakePort, bindings: [] })],
+    });
 
     const result = await runFlow(chat, userText("What's the weather?"), ready);
 
@@ -92,7 +95,10 @@ describe("scriptedPort", () => {
       [{ type: "text", text: "RESOLVE" }],
       [{ type: "text", text: "ESCALATE" }],
     ]);
-    const ready = await runtime({ models: () => port, bindings: [], store: memoryStore() });
+    const ready = await runtime({
+      store: memoryStore(),
+      extensions: [ai({ models: () => port, bindings: [] })],
+    });
 
     const first = await runFlow(classify, userText("Ticket one."), ready);
     const second = await runFlow(classify, userText("Ticket two."), ready);
@@ -151,15 +157,19 @@ describe("faking a tool", () => {
       [{ type: "text", text: "It's 14°C and sunny in Oslo." }],
     ]);
     const ready = await runtime({
-      models: () => port,
-      bindings: [
-        provide(getWeather, (input) => {
-          handlerCalls += 1;
-          expect(input).toEqual({ city: "Oslo" });
-          return Promise.resolve({ tempC: 14, condition: "sunny" });
+      store: memoryStore(),
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: [
+            provide(getWeather, (input) => {
+              handlerCalls += 1;
+              expect(input).toEqual({ city: "Oslo" });
+              return Promise.resolve({ tempC: 14, condition: "sunny" });
+            }),
+          ],
         }),
       ],
-      store: memoryStore(),
     });
 
     const result = await runFlow(chatWithTool, userText("What's the weather in Oslo?"), ready);

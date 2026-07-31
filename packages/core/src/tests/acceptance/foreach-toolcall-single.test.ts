@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  ai,
   defineGraph,
   runFlow,
   runtime,
@@ -67,9 +68,10 @@ describe("forEach + toolCall resolve one real tool call", () => {
 
     const store = memoryStore();
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: [provide(search, () => gate.promise)],
       store,
+      extensions: [
+        ai({ models: () => scriptedPort, bindings: [provide(search, () => gate.promise)] }),
+      ],
     });
 
     const resultPromise = runFlow(flow, userText("find x"), ready);

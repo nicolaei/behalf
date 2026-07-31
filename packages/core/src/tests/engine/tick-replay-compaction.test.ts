@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { tick, seed } from "../../runtime/runtime.js";
 import type { TickOutcome, Runtime } from "../../runtime/runtime.js";
-import { defineGraph, runtime, userInput, outputs } from "../../index.js";
+import { defineGraph, runtime, userInput, outputs, ai } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, SessionStore } from "../../index.js";
-import { neverCalled, textOf, assistantText } from "../acceptance/support.js";
+import { textOf, assistantText, neverCalled } from "../acceptance/support.js";
 
 // Phase 1 fixed the position/cursor half of the compact-replay bug: every
 // step (including one that calls compact()) now logs a proper `output`
@@ -56,11 +56,18 @@ describe("replay reconstructs thread.messages across a compaction, from the log 
     // exact technique that caught the original compact bug: nothing may
     // survive a tick() call except what's already committed to the log.
     async function freshTick(): Promise<TickOutcome> {
-      const ready: Runtime = await runtime({ models: neverCalled, bindings: [], store });
+      const ready: Runtime = await runtime({
+        store,
+        extensions: [ai({ models: neverCalled, bindings: [] })],
+      });
       return tick(graph, ready);
     }
 
-    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
+    seed(
+      graph,
+      undefined,
+      await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] }),
+    );
 
     await freshTick(); // runs start, reports active at gate1
     await freshTick(); // peeks gate1, parks — nothing in the inbox yet

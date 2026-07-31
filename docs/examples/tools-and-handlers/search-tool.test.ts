@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, agentTurn, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, defineGraph, agentTurn, runtime, runFlow, userText } from "@behalf-js/core";
 import type { ModelPort, Profile, AgentTurnResult } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { search, supportBundle, searchBinding, supportBundleBinding } from "./search-tool.js";
@@ -53,9 +53,8 @@ describe("tools and handlers", () => {
 
     const port = scriptedPort();
     const ready = await runtime({
-      models: () => port,
-      bindings: [searchBinding],
       store: memoryStore(),
+      extensions: [ai({ models: () => port, bindings: [searchBinding] })],
     });
 
     const result = (await runFlow(
@@ -84,9 +83,8 @@ describe("tools and handlers", () => {
 
     const port = scriptedPort();
     const ready = await runtime({
-      models: () => port,
-      bindings: [supportBundleBinding],
       store: memoryStore(),
+      extensions: [ai({ models: () => port, bindings: [supportBundleBinding] })],
     });
 
     const result = (await runFlow(

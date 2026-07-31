@@ -16,7 +16,7 @@
 // restart before writing this.
 
 import { describe, it, expect } from "vitest";
-import { defineGraph, driveFlow, runtime, agentTurn, userInput } from "../../index.js";
+import { ai, defineGraph, driveFlow, runtime, agentTurn, userInput } from "../../index.js";
 import type { Profile, ModelPort, SessionStore } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { assistantText, awaitAssistantMessage } from "./support.js";
@@ -71,9 +71,8 @@ describe("a multi-turn conversation, replayed fresh after a simulated restart", 
     };
     const store = memoryStore();
     const runtime1 = await runtime({
-      models: () => repliesNormallyPort("stale"),
-      bindings: [],
       store,
+      extensions: [ai({ models: () => repliesNormallyPort("stale"), bindings: [] })],
     });
     const graph1 = chatLikeGraph(profile);
     driveFlow(graph1, runtime1).catch(() => undefined);
@@ -84,6 +83,14 @@ describe("a multi-turn conversation, replayed fresh after a simulated restart", 
     await awaitAssistantMessage(store);
     sendChatPrompt(store, "second");
     await awaitAssistantMessage(store);
+    // awaitAssistantMessage only waits for the reply itself; agentTurn's own
+    // trailing chain (fold -> maybeCompact -> checkFinish -> finalize, then
+    // routing back to waitForPrompt) still needs a moment to settle on the
+    // stale runtime's own background loop. A macrotask tick guarantees every
+    // already-queued microtask in that chain runs first, so the "restart"
+    // below snapshots a log where turn two is genuinely, fully done — not
+    // paused mid-turn on an in-flight step replay would otherwise resume live.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     // Simulated restart: a brand-new runtime/graph pair against the same
     // store, exactly what SessionRegistry.reattachAll does.
@@ -95,7 +102,10 @@ describe("a multi-turn conversation, replayed fresh after a simulated restart", 
         return repliesNormallyPort("fresh").respond(profile2, messages, stream);
       },
     };
-    const runtime2 = await runtime({ models: () => trackingPort, bindings: [], store });
+    const runtime2 = await runtime({
+      store,
+      extensions: [ai({ models: () => trackingPort, bindings: [] })],
+    });
     const graph2 = chatLikeGraph(profile);
     driveFlow(graph2, runtime2).catch(() => undefined);
 
@@ -114,9 +124,8 @@ describe("a multi-turn conversation, replayed fresh after a simulated restart", 
     };
     const store = memoryStore();
     const runtime1 = await runtime({
-      models: () => repliesNormallyPort("stale"),
-      bindings: [],
       store,
+      extensions: [ai({ models: () => repliesNormallyPort("stale"), bindings: [] })],
     });
     const graph1 = chatLikeGraph(profile);
     driveFlow(graph1, runtime1).catch(() => undefined);
@@ -125,11 +134,12 @@ describe("a multi-turn conversation, replayed fresh after a simulated restart", 
     await awaitAssistantMessage(store);
     sendChatPrompt(store, "second");
     await awaitAssistantMessage(store);
+    // See the first test's own comment on this same wait.
+    await new Promise((resolve) => setTimeout(resolve, 0));
 
     const runtime2 = await runtime({
-      models: () => repliesNormallyPort("fresh"),
-      bindings: [],
       store,
+      extensions: [ai({ models: () => repliesNormallyPort("fresh"), bindings: [] })],
     });
     const graph2 = chatLikeGraph(profile);
     driveFlow(graph2, runtime2).catch(() => undefined);

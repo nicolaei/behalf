@@ -4,7 +4,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph } from "../packages/core/src/graph/graph.js";
 import type { Graph, NodeId, NodeKind } from "../packages/core/src/graph/graph.js";
-import { userInput } from "../packages/core/src/graph/waitable.js";
+import { userInput } from "../packages/core/src/ai/waitable.js";
 import { join } from "../packages/core/src/graph/step.js";
 import type { StepContext } from "../packages/core/src/graph/step.js";
 import type { Profile } from "../packages/core/src/ai/profile.js";

@@ -1,6 +1,6 @@
 // Acceptance test support — DSL helpers, not part of the public library surface.
 
-import { runtime } from "../../index.js";
+import { ai, runtime } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { fakePort } from "@behalf-js/testing";
 import type {
@@ -18,15 +18,14 @@ import type {
  * whose flow never calls a model or a tool.
  */
 export async function storeOnlyRuntime(): Promise<Runtime> {
-  return runtime({ models: neverCalled, bindings: [], store: memoryStore() });
+  return runtime({ store: memoryStore() });
 }
 
 /** A runtime wired with `fakePort` as the model resolver, no tool bindings. */
 export async function fakePortRuntime(): Promise<Runtime> {
   return runtime({
-    models: () => fakePort,
-    bindings: [],
     store: memoryStore(),
+    extensions: [ai({ models: () => fakePort, bindings: [] })],
   });
 }
 

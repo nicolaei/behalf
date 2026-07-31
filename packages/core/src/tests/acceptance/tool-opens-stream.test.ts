@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, loggedEnvelopes } from "./support.js";
 
@@ -18,15 +18,19 @@ describe("a tool handler opening its own stream", () => {
     });
     const store = memoryStore();
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [
-        provide(echo, (input, context) => {
-          const stream = context.openStream("output");
-          stream.commit({ value: `echoed: ${input.text}` });
-          return Promise.resolve(input);
+      store,
+      extensions: [
+        ai({
+          models: neverCalled,
+          bindings: [
+            provide(echo, (input, context) => {
+              const stream = context.openStream("output");
+              stream.commit({ value: `echoed: ${input.text}` });
+              return Promise.resolve(input);
+            }),
+          ],
         }),
       ],
-      store,
     });
 
     await runFlow(graph, userText("go"), ready);
@@ -52,15 +56,19 @@ describe("a tool handler opening its own stream", () => {
     });
     const store = memoryStore();
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [
-        provide(echo, (input, context) => {
-          const stream = context.openStream("output");
-          stream.commit({ value: `echoed: ${input.text}` });
-          return Promise.resolve(input);
+      store,
+      extensions: [
+        ai({
+          models: neverCalled,
+          bindings: [
+            provide(echo, (input, context) => {
+              const stream = context.openStream("output");
+              stream.commit({ value: `echoed: ${input.text}` });
+              return Promise.resolve(input);
+            }),
+          ],
         }),
       ],
-      store,
     });
 
     await runFlow(graph, userText("go"), ready);

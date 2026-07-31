@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, provide, tool, userText } from "@behalf-js/core";
+import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "@behalf-js/core";
 import type { Model, Profile, Envelope, EventType, SessionStore } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { createAnthropicPort } from "./index.js";
@@ -82,14 +82,18 @@ describe("the real Anthropic port runs a tool call end to end", () => {
     let handlerRan = false;
     const store = memoryStore();
     const ready = await runtime({
-      models: () => port,
-      bindings: [
-        provide(search, (input) => {
-          handlerRan = true;
-          return Promise.resolve({ hits: [`result for ${input.query}`] });
+      store,
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: [
+            provide(search, (input) => {
+              handlerRan = true;
+              return Promise.resolve({ hits: [`result for ${input.query}`] });
+            }),
+          ],
         }),
       ],
-      store,
     });
 
     await runFlow(graph, userText("what's the weather?"), ready);

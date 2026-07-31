@@ -3,7 +3,7 @@ import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userInput, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Runtime, SessionStore } from "../../index.js";
-import { neverCalled, stateChanges } from "../acceptance/support.js";
+import { stateChanges } from "../acceptance/support.js";
 
 // A review of the driveGraph/tick() unification (commit 31b1a10) found this
 // case had no coverage either way: before that refactor, tick()'s own
@@ -53,13 +53,13 @@ describe("stateChange dedupes across a paused forEach branch, resumed on a later
   });
 
   async function freshTick(store: SessionStore) {
-    const ready: Runtime = await runtime({ models: neverCalled, bindings: [], store });
+    const ready: Runtime = await runtime({ store });
     return tickUntilSuspended(graph, ready);
   }
 
   it("emits one stateChange, not two, for a branch that repeats its own state after pausing", async () => {
     const store = memoryStore();
-    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
+    seed(graph, undefined, await runtime({ store }));
 
     await freshTick(store); // runs produce + the branch's `before`, parks at its own waitFor
     store.receive(resume("a", "go-ahead"));

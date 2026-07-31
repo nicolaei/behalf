@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, RetryableError } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, userText, RetryableError } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { ErrorHandler, ModelCallResult, ModelPort, Profile } from "../../index.js";
 import { loggedEnvelopes } from "./support.js";
@@ -52,10 +52,9 @@ describe("a thrown RetryableError carries its own retryability", () => {
       error.retryable && ctx.attempts < 1 ? { action: "retry" } : { action: "fail" };
 
     const ready = await runtime({
-      models: () => port,
-      bindings: [],
       store: memoryStore(),
       errorHandlers: [retryOnce],
+      extensions: [ai({ models: () => port, bindings: [] })],
     });
 
     const result = await runFlow(modelCallGraph(profile), userText("go"), ready);
@@ -71,10 +70,9 @@ describe("a thrown RetryableError carries its own retryability", () => {
     const store = memoryStore();
 
     const ready = await runtime({
-      models: () => port,
-      bindings: [],
       store,
       errorHandlers: [alwaysRetry],
+      extensions: [ai({ models: () => port, bindings: [] })],
     });
 
     await runFlow(modelCallGraph(profile), userText("go"), ready);
@@ -90,7 +88,7 @@ describe("a thrown RetryableError carries its own retryability", () => {
     };
     const profile: Profile = { model: port.model, system: "agent", tools: [] };
     const store = memoryStore();
-    const ready = await runtime({ models: () => port, bindings: [], store });
+    const ready = await runtime({ store, extensions: [ai({ models: () => port, bindings: [] })] });
 
     await expect(runFlow(modelCallGraph(profile), userText("go"), ready)).rejects.toThrow();
 

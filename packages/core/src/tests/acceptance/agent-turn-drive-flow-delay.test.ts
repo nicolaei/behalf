@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { agentTurn, driveFlow, runtime, provide, tool, seed, userText } from "../../index.js";
+import { ai, agentTurn, driveFlow, runtime, provide, tool, seed, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Message, Model, ModelPort, Profile, Tool } from "../../index.js";
 import { assistantText, assistantToolCall, loggedEnvelopes } from "./support.js";
@@ -54,23 +54,27 @@ describe("agentTurn + driveFlow survive a real async tool-call delay", () => {
 
     const store = memoryStore();
     const ready = await runtime({
-      models: () => port,
-      bindings: [
-        provide(
-          slow,
-          () =>
-            new Promise((resolve) => {
-              // A genuine setTimeout, not a synchronously-resolving fake — this is
-              // the exact shape of delay that used to hang driveFlow forever: the
-              // tool executor resolves independently of whatever step requested it,
-              // and only driveFlow's own awaitReceive()-driven retry loop notices.
-              setTimeout(() => {
-                resolve({ done: true });
-              }, 150);
-            }),
-        ),
-      ],
       store,
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: [
+            provide(
+              slow,
+              () =>
+                new Promise((resolve) => {
+                  // A genuine setTimeout, not a synchronously-resolving fake — this is
+                  // the exact shape of delay that used to hang driveFlow forever: the
+                  // tool executor resolves independently of whatever step requested it,
+                  // and only driveFlow's own awaitReceive()-driven retry loop notices.
+                  setTimeout(() => {
+                    resolve({ done: true });
+                  }, 150);
+                }),
+            ),
+          ],
+        }),
+      ],
     });
 
     const flow = agentTurn(profile);

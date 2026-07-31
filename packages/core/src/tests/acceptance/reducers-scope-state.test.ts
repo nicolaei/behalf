@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runtime, runFlow, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { EngineExtension } from "../../index.js";
-import { neverCalled } from "./support.js";
 
 // Test-only event type + extension — not shipped. Proves EngineExtension.reducers fold
 // this extension's own events into its own per-scope state slot (ExecutionScope.state(name)),
@@ -53,8 +52,6 @@ describe("EngineExtension.reducers fold events into the extension's own scope-st
 
     const store = memoryStore();
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store,
       extensions: [notes, bystander],
     });

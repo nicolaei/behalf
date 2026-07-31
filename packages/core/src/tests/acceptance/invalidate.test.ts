@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, textOf, loggedEventTypes } from "./support.js";
+import { textOf, loggedEventTypes } from "./support.js";
 
 describe("invalidate reruns a node out of band", () => {
   // A fresh counter per test, so `planRuns` starts at zero each time.
@@ -31,8 +31,6 @@ describe("invalidate reruns a node out of band", () => {
   it("reruns the invalidated node, and its fresh output flows onward as normal", async () => {
     const graph = planThenImplement();
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
 
@@ -45,7 +43,7 @@ describe("invalidate reruns a node out of band", () => {
   it("appends an invalidation event between the two plan runs", async () => {
     const graph = planThenImplement();
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await runFlow(graph, userText("go"), ready);
 
@@ -85,8 +83,6 @@ describe("invalidate reruns a node out of band", () => {
       graph,
       userText("go"),
       await runtime({
-        models: neverCalled,
-        bindings: [],
         store: memoryStore(),
       }),
     )) as { runNumber: number; sawReason: boolean };
@@ -122,8 +118,6 @@ describe("invalidate reruns a node out of band", () => {
       graph,
       userText("go"),
       await runtime({
-        models: neverCalled,
-        bindings: [],
         store: memoryStore(),
       }),
     )) as { firstThreadId: unknown; secondThreadId: unknown };
@@ -157,8 +151,6 @@ describe("invalidate reruns a node out of band", () => {
       graph,
       userText("go"),
       await runtime({
-        models: neverCalled,
-        bindings: [],
         store: memoryStore(),
       }),
     );

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, userText } from "../../index.js";
 import type { Message, ModelCallResult, Profile } from "../../index.js";
 import { fakePort } from "@behalf-js/testing";
 import { memoryStore } from "@behalf-js/stores";
@@ -40,7 +40,10 @@ describe("a step that calls the model", () => {
 
   it("appends the initial input, the model's reply, then the step's output", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: () => fakePort, bindings: [], store });
+    const ready = await runtime({
+      store,
+      extensions: [ai({ models: () => fakePort, bindings: [] })],
+    });
 
     await runFlow(respondOnceGraph(), userText("hi"), ready);
 

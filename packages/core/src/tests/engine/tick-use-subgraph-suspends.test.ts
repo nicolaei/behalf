@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, textOf, submitApproval } from "../acceptance/support.js";
+import { textOf, submitApproval } from "../acceptance/support.js";
 
 // Needs tick() to genuinely suspend inside a used subgraph's own waitFor —
 // today's guard only covers the shallow case (the subgraph's entry node
@@ -33,7 +33,7 @@ describe("ticking a flow through a used subgraph that itself waits", () => {
 
   it("reports the used subgraph's own waitFor as a parked cursor, resumable across tick calls", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     seed(outer, undefined, ready);
 
     const parked = await tickUntilSuspended(outer, ready);

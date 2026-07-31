@@ -1,9 +1,10 @@
-// Flow authoring — Waitable / userInput / toolCall. See docs/reference.md.
+// Flow authoring — Waitable. See docs/reference.md.
+// `userInput()`/`toolCall()` (the two built-in Waitable constructors) moved
+// to ai/waitable.ts (B2.7) — they're ai-shaped (MessageKind/UserMessage), so
+// they belong with the rest of ai's authoring surface. `messageKindOf`/
+// `tryMessageKindOf` stay here: they only ever check a Waitable's own
+// `provider`/`label` strings, never any message-shaped data.
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) userInput()/toolCall() are ai waitables riding in graph/waitable.ts's plain B1 move; removed when they relocate to ai/ proper.
-import type { MessageKind, UserMessage } from "../ai/message.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) userInput()/toolCall() match on ai-owned event keys (message/toolResult); this side-effect import registers ai/event.ts's declaration merge so any isolated program compiling this file directly (e.g. tools/tsconfig.json) still sees those keys on Event. Removed alongside the import above.
-import "../ai/event.js";
 import type { Envelope } from "../session/index.js";
 
 /**
@@ -22,46 +23,6 @@ export interface Waitable<T> {
   match(events: readonly Envelope[]): T | undefined;
 }
 
-/** The built-in Waitable: parks until a message of the given kind arrives. @public */
-export function userInput(kind: MessageKind): Waitable<UserMessage> {
-  return {
-    provider: "userInput",
-    label: kind,
-    match: (events) => {
-      for (const envelope of events) {
-        if (envelope.form !== "committed" || envelope.type !== "message") continue;
-        const message = (envelope.event as { message: UserMessage }).message;
-        if (message.kind === kind) return message;
-      }
-      return undefined;
-    },
-  };
-}
-
-/**
- * A Waitable matching a committed `toolResult` event by correlationId — the
- * decoupled counterpart to a model-call step's own `toolCall` request:
- * whatever eventually resolves the call (a tool executor, in later stories)
- * commits a `toolResult` event independently, and this Waitable scans the
- * committed log for the one whose correlationId matches, the same scanning
- * pattern `userInput`'s match() uses above.
- * @public
- */
-export function toolCall(correlationId: string): Waitable<unknown> {
-  return {
-    provider: "toolCall",
-    label: correlationId,
-    match: (events) => {
-      for (const envelope of events) {
-        if (envelope.form !== "committed" || envelope.type !== "toolResult") continue;
-        const event = envelope.event as { correlationId: string; output: unknown };
-        if (event.correlationId === correlationId) return event.output;
-      }
-      return undefined;
-    },
-  };
-}
-
 /**
  * The message kind a `userInput` Waitable parks on — the engine's bridge to
  * `SessionStore.consume`/`waitForMessage`'s pending-inbox check, which reads
@@ -72,7 +33,7 @@ export function toolCall(correlationId: string): Waitable<unknown> {
  * stays engine-internal rather than part of the public `Waitable` contract —
  * not exported from `flow/index.ts`.
  */
-export function messageKindOf(waitable: Waitable<unknown>): MessageKind {
+export function messageKindOf(waitable: Waitable<unknown>): string {
   const kind = tryMessageKindOf(waitable);
   if (kind === undefined)
     throw new Error(`waitable provider "${waitable.provider}" has no message kind`);
@@ -86,6 +47,6 @@ export function messageKindOf(waitable: Waitable<unknown>): MessageKind {
  * a try/catch, since only the former ever has a message kind to check the
  * live inbox against.
  */
-export function tryMessageKindOf(waitable: Waitable<unknown>): MessageKind | undefined {
+export function tryMessageKindOf(waitable: Waitable<unknown>): string | undefined {
   return waitable.provider === "userInput" ? waitable.label : undefined;
 }

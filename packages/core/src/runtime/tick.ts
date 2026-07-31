@@ -320,7 +320,7 @@ function delegatedReducer(runtime: Runtime, type: EventType): ScopeStateReducer 
   return undefined;
 }
 
-/** Folds a committed `message` event onto `thread` through whichever extension registered a `message` reducer (today, ai's `messageReducer` — see `routing.ts`) — the one place `applyMessageEvent`'s three branches share "how a message folds," instead of each calling `withMessage` directly. Falls back to `withMessage` itself only if nothing is registered (never happens through `runtime()`, which always registers ai's reducers — see `runtime.ts`; kept so a `Runtime` built some other way still folds correctly). */
+/** Folds a committed `message` event onto `thread` through whichever extension registered a `message` reducer (the ai extension's `messageReducer` — see `ai/reducers.ts` — when the caller passed `ai({ models, bindings })` via `runtime({ extensions })`). Falls back to `withMessage` itself only if nothing is registered, e.g. a `Runtime` built with no ai extension at all. */
 function foldMessage(runtime: Runtime, thread: Thread, envelope: CommittedEnvelope): Thread {
   const reducer = delegatedReducer(runtime, "message");
   if (!reducer) return withMessage(thread, (envelope.event as Event["message"]).message);

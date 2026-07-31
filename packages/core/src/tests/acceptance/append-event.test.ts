@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, storeOnlyRuntime, loggedEventTypes, loggedEnvelopes } from "./support.js";
 
@@ -19,7 +19,7 @@ describe("a step or tool can append a standalone event", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await runFlow(graph, userText("go"), ready);
 
@@ -61,14 +61,18 @@ describe("a step or tool can append a standalone event", () => {
 
     const store = memoryStore();
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [
-        provide(echo, (input, context) => {
-          context.appendEvent({ correlationId: "1", name: "echo", input }, "toolCall");
-          return Promise.resolve(input);
+      store,
+      extensions: [
+        ai({
+          models: neverCalled,
+          bindings: [
+            provide(echo, (input, context) => {
+              context.appendEvent({ correlationId: "1", name: "echo", input }, "toolCall");
+              return Promise.resolve(input);
+            }),
+          ],
         }),
       ],
-      store,
     });
 
     await runFlow(graph, userText("go"), ready);

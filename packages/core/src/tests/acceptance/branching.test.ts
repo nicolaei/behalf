@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { storeOnlyRuntime, neverCalled, loggedEventTypes } from "./support.js";
+import { storeOnlyRuntime, loggedEventTypes } from "./support.js";
 
 describe("branching on a step's output", () => {
   function branchOn(classifyValue: boolean) {
@@ -33,7 +33,7 @@ describe("branching on a step's output", () => {
 
   it("appends one output event per step that ran, not the step that didn't", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await runFlow(branchOn(true), userText("hi"), ready);
 

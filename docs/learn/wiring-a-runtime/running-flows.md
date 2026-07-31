@@ -5,8 +5,10 @@ completion.
 
 ## You will learn
 
-- How to assemble a `runtime`: model resolution, tool bindings, a store
-- How `satisfiesFlows` checks coverage before you run anything, and what a `Missing` entry tells you
+- How to assemble a `runtime`: a store, plus the `ai` extension for model resolution and tool
+  bindings
+- How `satisfiesFlows` checks a flow's structure and `satisfiesPersonas` checks its personas, and
+  what a `Missing` entry tells you
 - How `runFlow` seeds a session with a message and resolves with the result
 - How `parentThreadId` makes a spawned flow a child (how a tool spawns a sub-agent)
 
@@ -14,23 +16,22 @@ completion.
 
 A flow's authored graph never touches a real model or a real disk.
 It calls `context.modelCall(profile)` and reads `context.thread`, and leaves resolving those to
-whatever runs it. `runtime()` is that supply: it holds a model resolver, the tool bindings, and a
-session store, and hands back a `Runtime` every `runFlow` call reuses.
+whatever runs it. `runtime()` itself only holds a store, error handlers, and registered extensions;
+model resolution and tool bindings are the `ai` extension's job, passed in through `extensions`.
 
 Here's a runtime built from a fake model port and an in-memory store:
 
 ```ts source=docs/examples/running-flows/basic.ts#runtime
 export const ready = await runtime({
-  models: () => fakePort,
-  bindings: [],
   store: memoryStore(),
+  extensions: [ai({ models: () => fakePort, bindings: [] })],
 });
 ```
 
 `models` is a function, not a value, because a flow can call more than one model across different
-personas: `runtime()` calls it with whichever `Model` a `Profile` names and expects a `ModelPort`
-back for it. `bindings` is empty here because this flow's persona declares no tools.
-An optional fourth field, `errorHandlers`, is covered in
+personas: `ai()` calls it with whichever `Model` a `Profile` names and expects a `ModelPort` back
+for it. `bindings` is empty here because this flow's persona declares no tools.
+An optional `errorHandlers` field on `runtime()` itself is covered in
 [Handling errors](../agents-in-practice/handling-errors.md); `runtime()` always appends its own
 default retry handler after whatever you pass, so omitting it just means "use the default."
 
@@ -38,24 +39,31 @@ default retry handler after whatever you pass, so omitting it just means "use th
 
 You might expect a missing tool binding to surface the first time a flow actually calls that tool,
 mid-run.
-Instead, `satisfiesFlows` checks everything a set of flows could reach before you run anything, by
-walking each flow's graph structure: every `step`, `interrupt`, `waitFor`, and `use` node, recursing
-into a subgraph the same way.
-For each persona it finds this way, it checks three things: does the model resolver return a port
-for it, is every declared tool bound, and does the model actually support the persona's requested
-reasoning level.
-It also collects every `waitFor` provider and checks each against a `waitableSources` resolver, an
-optional fourth argument: `"userInput"` is always satisfied, since it needs no registered source,
-but any other provider missing one is reported too.
-An empty result means the flow is ready to run.
+Instead, two functions check everything a flow could reach before you run anything, by walking its
+graph structure: every `step`, `interrupt`, `waitFor`, and `use` node, recursing into a subgraph the
+same way.
 
-Here's a coverage check against `chat` (clean) and a deliberately broken flow whose persona declares
-a tool with no matching binding, so you can see a real `Missing` entry instead of a described one:
+`satisfiesFlows` is the graph-shape half: it collects every `waitFor`/`interrupt` provider and
+checks each against a `waitableSources` resolver, an optional second argument — `"userInput"` is
+always satisfied, since it needs no registered source, but any other provider missing one is
+reported too.
+It has no model or binding awareness at all.
+
+`satisfiesPersonas` is the model/binding half: given a flow and `{ models, bindings }` (the same
+shape `ai()` takes), it finds every persona the flow could reach and checks three things per
+persona: does the model resolver return a port for it, is every declared tool bound, and does the
+model actually support the persona's requested reasoning level.
+
+Both return a `Missing[]`; an empty result means that half is ready.
+
+Here's a persona coverage check against `chat` (clean) and a deliberately broken flow whose persona
+declares a tool with no matching binding, so you can see a real `Missing` entry instead of a
+described one:
 
 ```ts source=docs/examples/running-flows/basic.ts#coverage
-export const missing = satisfiesFlows([chat], () => fakePort, []);
+export const missing = satisfiesPersonas(chat, { models: () => fakePort, bindings: [] });
 
-// A persona that declares a tool with no matching binding, so satisfiesFlows
+// A persona that declares a tool with no matching binding, so satisfiesPersonas
 // has something real to report.
 const lookupOrder = tool<{ orderId: string }, { status: string }>(
   "lookup_order",
@@ -75,7 +83,7 @@ const brokenChat: Graph = defineGraph("broken-chat", (flow) => {
   turn.then(flow.finish);
 });
 
-export const missingTool = satisfiesFlows([brokenChat], () => fakePort, []);
+export const missingTool = satisfiesPersonas(brokenChat, { models: () => fakePort, bindings: [] });
 ```
 
 `missing` comes back empty: `chat`'s one persona has no tools and a port is registered for its
@@ -85,7 +93,7 @@ Boot your app with something like `if (missing.length) throw new Error(JSON.stri
 and a misconfigured deployment fails at startup with the exact gap named, not three turns into a
 conversation with a user watching.
 
-> [!NOTE] `satisfiesFlows` finds a persona by its step's own `.persona` tag, the same tag
+> [!NOTE] `satisfiesPersonas` finds a persona by its step's own `.persona` tag, the same tag
 > `context.modelCall`'s caller attaches by hand (see the example's `Object.assign`).
 > It's a static check: nothing here calls a model or a tool.
 
@@ -118,9 +126,9 @@ spawn with its result, live in [Tools and handlers](../describing-a-flow/tools-a
 
 - `runtime()` holds a model resolver, tool bindings, and a store; `bindings` covers only the tools
   your personas actually declare
-- `satisfiesFlows` walks a flow's structure statically (`step`/`interrupt`/`waitFor`/`use`,
-  recursing into subgraphs) and reports every `Missing` model, tool, reasoning level, or
-  unregistered `waitFor` provider; empty means ready
+- `satisfiesFlows` walks a flow's structure statically and reports every `Missing` unregistered
+  `waitFor` provider; `satisfiesPersonas` does the same walk for personas, reporting every missing
+  model, tool, or reasoning level; empty means ready
 - `runFlow` seeds a new thread with a message, drives the graph to `flow.finish`, and resolves with
   its output
 - A tool spawns a child flow through `ToolContext.runFlow`, with `parentThreadId` marking the
@@ -130,8 +138,8 @@ spawn with its result, live in [Tools and handlers](../describing-a-flow/tools-a
 
 ---
 
-**Reference:** reference.md § satisfiesPersonas / satisfiesFlows, § runtime / runFlow. **Examples:**
-`docs/examples/running-flows/basic.ts`, regions `runtime`, `coverage`, `run-flow`. **Section:**
-[Wiring a runtime](./README.md) **Prev / Next:**
+**Reference:** reference.md § satisfiesFlows / satisfiesPersonas, § runtime / runFlow, § ai.
+**Examples:** `docs/examples/running-flows/basic.ts`, regions `runtime`, `coverage`, `run-flow`.
+**Section:** [Wiring a runtime](./README.md) **Prev / Next:**
 [Handling errors](../agents-in-practice/handling-errors.md) /
 [Model ports and bindings](./model-ports-and-bindings.md)

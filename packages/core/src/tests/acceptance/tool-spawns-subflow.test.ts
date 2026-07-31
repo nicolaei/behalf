@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, textOf } from "./support.js";
 
@@ -34,11 +34,15 @@ describe("a tool handler spawning a child flow", () => {
   it("returns the child flow's result as the tool's output", async () => {
     const { parent, research, child } = fixture();
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [
-        provide(research, (input, context) => context.runFlow(child, userText(input.question))),
-      ],
       store: memoryStore(),
+      extensions: [
+        ai({
+          models: neverCalled,
+          bindings: [
+            provide(research, (input, context) => context.runFlow(child, userText(input.question))),
+          ],
+        }),
+      ],
     });
 
     const result = await runFlow(parent, userText("go"), ready);
@@ -53,24 +57,28 @@ describe("a tool handler spawning a child flow", () => {
     let parentThreadId: unknown;
     let childParentThreadId: unknown;
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [
-        provide(research, (input, context) => {
-          parentThreadId = context.thread;
-          return context.runFlow(
-            defineGraph("child-captures-parent", (flow) => {
-              const step = flow.step((stepContext) => {
-                childParentThreadId = stepContext.thread.parentThreadId;
-                return Promise.resolve(stepContext.output("done"));
-              });
-              flow.entry(step);
-              step.then(flow.finish);
+      store: memoryStore(),
+      extensions: [
+        ai({
+          models: neverCalled,
+          bindings: [
+            provide(research, (input, context) => {
+              parentThreadId = context.thread;
+              return context.runFlow(
+                defineGraph("child-captures-parent", (flow) => {
+                  const step = flow.step((stepContext) => {
+                    childParentThreadId = stepContext.thread.parentThreadId;
+                    return Promise.resolve(stepContext.output("done"));
+                  });
+                  flow.entry(step);
+                  step.then(flow.finish);
+                }),
+                userText(input.question),
+              );
             }),
-            userText(input.question),
-          );
+          ],
         }),
       ],
-      store: memoryStore(),
     });
 
     await runFlow(parent, userText("go"), ready);

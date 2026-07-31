@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, stateChanges } from "./support.js";
+import { stateChanges } from "./support.js";
 
 describe("stateChange on an interrupt node's own state", () => {
   it("emits when an armed interrupt wins the race and takes over routing", async () => {
@@ -23,7 +23,7 @@ describe("stateChange on an interrupt node's own state", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = runFlow(graph, userText("go"), ready);
     store.receive({

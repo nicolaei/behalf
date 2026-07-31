@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runtime, runFlow, userText, provide } from "@behalf-js/core";
+import { ai, runtime, runFlow, userText, provide } from "@behalf-js/core";
 import type { ModelPort, AssistantMessage, Message } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { chat, assistant, lookup } from "./chat.js";
@@ -46,9 +46,13 @@ describe("chat", () => {
 
     const store = memoryStore();
     const ready = await runtime({
-      models: () => port,
-      bindings: [provide(lookup, () => Promise.resolve({ hits: ["tide table"] }))],
       store,
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: [provide(lookup, () => Promise.resolve({ hits: ["tide table"] }))],
+        }),
+      ],
     });
 
     // The chat graph loops forever (it's an interactive session, not a

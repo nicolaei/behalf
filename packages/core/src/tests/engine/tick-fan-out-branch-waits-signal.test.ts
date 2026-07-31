@@ -3,7 +3,6 @@ import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import { defineGraph, runtime, join, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Waitable, WaitForResult } from "../../index.js";
-import { neverCalled } from "../acceptance/support.js";
 
 // A review of the driveGraph/tick() waitFor unification (commit 31b1a10)
 // flagged this combination as untested either before or after that change.
@@ -49,7 +48,7 @@ describe("ticking a fan-out branch that waits for a signal", () => {
 
   it("reports the waiting branch as parked with its signal's label, resumable across tick calls", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     seed(flow, undefined, ready);
 
     const parked = await tickUntilSuspended(flow, ready);

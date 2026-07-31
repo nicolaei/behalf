@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, runtime, runFlow, userText } from "@behalf-js/core";
 import type { ModelPort, Profile } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { audit } from "./audit.js";
@@ -31,9 +31,8 @@ function scriptedPort(): ModelPort {
 describe("audit", () => {
   it("fans out to three reviewers and merges their findings into one recommendation", async () => {
     const ready = await runtime({
-      models: () => scriptedPort(),
-      bindings: [],
       store: memoryStore(),
+      extensions: [ai({ models: () => scriptedPort(), bindings: [] })],
     });
 
     const result = await runFlow(audit, userText("Add a search endpoint."), ready);

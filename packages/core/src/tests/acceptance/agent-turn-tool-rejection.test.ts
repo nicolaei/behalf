@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { agentTurn, driveFlow, runtime, provide, tool, seed, userText } from "../../index.js";
+import { ai, agentTurn, driveFlow, runtime, provide, tool, seed, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Model, ModelPort, Profile, Tool } from "../../index.js";
 import { assistantText, assistantToolCall, loggedEnvelopes } from "./support.js";
@@ -49,9 +49,13 @@ describe("agentTurn survives a rejecting tool handler", () => {
 
     const store = memoryStore();
     const ready = await runtime({
-      models: () => port,
-      bindings: [provide(failing, () => Promise.reject(new Error("ENOENT: no such file")))],
       store,
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: [provide(failing, () => Promise.reject(new Error("ENOENT: no such file")))],
+        }),
+      ],
     });
 
     const flow = agentTurn(profile);

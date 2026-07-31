@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Message, ModelCallResult, ModelPort, Profile, Tool } from "../../index.js";
 import { loggedEnvelopes } from "./support.js";
@@ -57,9 +57,8 @@ describe("runModelCall commits toolCall events and outputs correlationIds", () =
     const { flow, scriptedPort, echo, shout } = scriptedFixture();
     const store = memoryStore();
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: bindingsFor(echo, shout),
       store,
+      extensions: [ai({ models: () => scriptedPort, bindings: bindingsFor(echo, shout) })],
     });
 
     await runFlow(flow, userText("go"), ready);
@@ -76,9 +75,8 @@ describe("runModelCall commits toolCall events and outputs correlationIds", () =
   it("returns toolCalls with correlationId and name for every call requested this turn", async () => {
     const { flow, scriptedPort, echo, shout } = scriptedFixture();
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: bindingsFor(echo, shout),
       store: memoryStore(),
+      extensions: [ai({ models: () => scriptedPort, bindings: bindingsFor(echo, shout) })],
     });
 
     const result = (await runFlow(flow, userText("go"), ready)) as ModelCallResult;

@@ -4,10 +4,6 @@ import type { ThreadId } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { noRetryOnValidation, retryFlakyFetchTwice } from "./backoff.js";
 
-function neverCalled(): never {
-  throw new Error("no model call expected in this test");
-}
-
 describe("noRetryOnValidation", () => {
   it("fails immediately on a validation error, without retrying", async () => {
     let attempts = 0;
@@ -20,8 +16,6 @@ describe("noRetryOnValidation", () => {
       step.then(flow.finish);
     });
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
       errorHandlers: [noRetryOnValidation],
     });
@@ -54,8 +48,6 @@ describe("retryFlakyFetchTwice", () => {
       step.then(flow.finish);
     });
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
       errorHandlers: [retryFlakyFetchTwice],
     });
@@ -79,8 +71,6 @@ describe("retryFlakyFetchTwice", () => {
       step.then(flow.finish);
     });
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
       errorHandlers: [retryFlakyFetchTwice],
     });

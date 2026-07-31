@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs, toolCall } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { WaitForResult } from "../../index.js";
-import { neverCalled } from "./support.js";
 
 // toolCall(correlationId)'s match() throws notImplemented — it's still a
 // Story 1 stub. Written now, isolated from forEach entirely, so the
@@ -21,7 +20,7 @@ describe("toolCall(correlationId) Waitable resolves via a committed toolResult",
 
   it("resumes with the tool's output once a matching toolResult is committed", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = runFlow(flow, userText("go"), ready);
     store.append({ correlationId: "call-1", output: { celsius: 21 } }, { type: "toolResult" });
@@ -32,7 +31,7 @@ describe("toolCall(correlationId) Waitable resolves via a committed toolResult",
 
   it("ignores a toolResult with a different correlationId", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = runFlow(flow, userText("go"), ready);
     store.append(

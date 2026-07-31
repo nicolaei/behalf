@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runFlow, runtime, provide, tool, userText } from "@behalf-js/core";
+import { ai, runFlow, runtime, provide, tool, userText } from "@behalf-js/core";
 import type { ModelPort, Profile, AssistantMessage, ModelCallResult } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { agentGraph } from "../../eval/harness/agent-graph.js";
@@ -37,7 +37,10 @@ describe("agentGraph", () => {
       },
     };
     const profile: Profile = { model: scriptedPort.model, system: "agent", tools: [] };
-    const ready = await runtime({ models: () => scriptedPort, bindings: [], store: memoryStore() });
+    const ready = await runtime({
+      store: memoryStore(),
+      extensions: [ai({ models: () => scriptedPort, bindings: [] })],
+    });
 
     const result = (await runFlow(agentGraph(profile), userText("hi"), ready)) as ModelCallResult;
 
@@ -58,9 +61,13 @@ describe("agentGraph", () => {
     };
     const profile: Profile = { model: scriptedPort.model, system: "agent", tools: [search] };
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
       store: memoryStore(),
+      extensions: [
+        ai({
+          models: () => scriptedPort,
+          bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
+        }),
+      ],
     });
 
     const result = (await runFlow(
@@ -86,9 +93,13 @@ describe("agentGraph", () => {
     };
     const profile: Profile = { model: scriptedPort.model, system: "agent", tools: [search] };
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
       store: memoryStore(),
+      extensions: [
+        ai({
+          models: () => scriptedPort,
+          bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
+        }),
+      ],
     });
 
     await runFlow(agentGraph(profile), userText("find x"), ready);

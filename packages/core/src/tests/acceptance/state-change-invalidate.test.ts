@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, stateChanges } from "./support.js";
+import { stateChanges } from "./support.js";
 
 describe("stateChange and invalidate: same thread suppresses, a forked/new thread starts fresh", () => {
   it("does not refire when the invalidated node reruns on the same thread", async () => {
@@ -24,7 +24,7 @@ describe("stateChange and invalidate: same thread suppresses, a forked/new threa
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     const result = await runFlow(graph, userText("go"), ready);
 
     expect(planRuns).toBe(2);
@@ -53,7 +53,7 @@ describe("stateChange and invalidate: same thread suppresses, a forked/new threa
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     await runFlow(graph, userText("go"), ready);
 
     // a forked thread is a fresh context: its own first "red" fires clean,

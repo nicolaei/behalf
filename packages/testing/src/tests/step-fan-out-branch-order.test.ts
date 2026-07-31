@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { stepUntilBlocked } from "../index.js";
 import { defineGraph, runtime, join, outputs, userInput, seed } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, submitApproval } from "./support.js";
+import { submitApproval } from "./support.js";
 
 describe("a fan-out where the parked branch is declared before the active one", () => {
   // start.then([wait, a]) — wait declared FIRST. Regression: naive
@@ -22,7 +22,7 @@ describe("a fan-out where the parked branch is declared before the active one", 
 
   it("advances the active branch instead of starving on the parked one", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     seed(flow, undefined, ready);
 
     const parked = await stepUntilBlocked(flow, ready);

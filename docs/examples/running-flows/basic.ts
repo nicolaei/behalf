@@ -4,7 +4,15 @@
 // so its behavior (a clean coverage check, a deliberately-missing one, and a
 // real run) is exercised by basic.test.ts, not just typechecked.
 
-import { defineGraph, userText, runtime, runFlow, satisfiesFlows, tool } from "@behalf-js/core";
+import {
+  ai,
+  defineGraph,
+  userText,
+  runtime,
+  runFlow,
+  satisfiesPersonas,
+  tool,
+} from "@behalf-js/core";
 import type { Profile, Graph, StepContext } from "@behalf-js/core";
 import { fakePort } from "@behalf-js/testing";
 import { memoryStore } from "@behalf-js/stores";
@@ -22,7 +30,7 @@ const assistant: Profile = {
   tools: [],
 };
 
-// A step tagged with `.persona` is how satisfiesFlows finds a model call
+// A step tagged with `.persona` is how satisfiesPersonas finds a model call
 // statically, with no execution: the same tag context.modelCall's caller
 // attaches by hand, so the graph needs no separate persona registration.
 const respond = Object.assign(
@@ -41,16 +49,15 @@ export const chat: Graph = defineGraph("chat", (flow) => {
 
 // #region runtime
 export const ready = await runtime({
-  models: () => fakePort,
-  bindings: [],
   store: memoryStore(),
+  extensions: [ai({ models: () => fakePort, bindings: [] })],
 });
 // #endregion runtime
 
 // #region coverage
-export const missing = satisfiesFlows([chat], () => fakePort, []);
+export const missing = satisfiesPersonas(chat, { models: () => fakePort, bindings: [] });
 
-// A persona that declares a tool with no matching binding, so satisfiesFlows
+// A persona that declares a tool with no matching binding, so satisfiesPersonas
 // has something real to report.
 const lookupOrder = tool<{ orderId: string }, { status: string }>(
   "lookup_order",
@@ -70,7 +77,7 @@ const brokenChat: Graph = defineGraph("broken-chat", (flow) => {
   turn.then(flow.finish);
 });
 
-export const missingTool = satisfiesFlows([brokenChat], () => fakePort, []);
+export const missingTool = satisfiesPersonas(brokenChat, { models: () => fakePort, bindings: [] });
 // #endregion coverage
 
 // #region run-flow

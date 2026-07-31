@@ -17,7 +17,6 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runtime, driveFlow, outputs, seed } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { EdgeContext, EdgeFn, Graph } from "../../index.js";
-import { neverCalled } from "./support.js";
 import { isCommittedEnvelope } from "../../session/envelope.js";
 
 /** entry -> (edge fn fires here) -> after -> finish. `edgeFn` is the only
@@ -43,7 +42,7 @@ describe("edge functions: run once, at routing commit", () => {
     };
 
     const store = memoryStore();
-    const runtime1 = await runtime({ models: neverCalled, bindings: [], store });
+    const runtime1 = await runtime({ store });
     const graph1 = edgeFnFlow(countingEdge);
     seed(graph1, undefined, runtime1);
     const result1 = await driveFlow(graph1, runtime1);
@@ -53,7 +52,7 @@ describe("edge functions: run once, at routing commit", () => {
     // Simulated restart: a brand-new runtime/graph pair against the same
     // store — driveFlow has nothing left to do but replay, exactly like
     // multi-turn-replay-after-restart.test.ts's own reattach simulation.
-    const runtime2 = await runtime({ models: neverCalled, bindings: [], store });
+    const runtime2 = await runtime({ store });
     const graph2 = edgeFnFlow(countingEdge);
     const result2 = await driveFlow(graph2, runtime2);
     expect(result2).toBe("start-value");
@@ -79,7 +78,7 @@ describe("edge functions: emit, don't mutate", () => {
     };
 
     const store = memoryStore();
-    const runtime1 = await runtime({ models: neverCalled, bindings: [], store });
+    const runtime1 = await runtime({ store });
     const seededFlow = edgeFnFlow(liveEdge);
     seed(seededFlow, undefined, runtime1);
     await driveFlow(seededFlow, runtime1);
@@ -96,7 +95,7 @@ describe("edge functions: emit, don't mutate", () => {
       return value;
     };
 
-    const runtime2 = await runtime({ models: neverCalled, bindings: [], store });
+    const runtime2 = await runtime({ store });
     const result = await driveFlow(edgeFnFlow(edgeFn2), runtime2);
     expect(result).toBe("start-value"); // the log alone still reaches the right answer
 

@@ -3,7 +3,6 @@ import { tick, tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import type { TickOutcome } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userText, join, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled } from "../acceptance/support.js";
 
 // Needs tick() to support a fan-out inside a used subgraph — today it
 // throws notImplemented("tick: fan-out inside a used subgraph") whenever
@@ -35,8 +34,6 @@ describe("ticking a flow through a used subgraph that itself fans out", () => {
 
   it("drives the subgraph's own fan-out via tick and reports its joined result", async () => {
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
     seed(outer, undefined, ready);
@@ -50,8 +47,6 @@ describe("ticking a flow through a used subgraph that itself fans out", () => {
 
   it("reports the nested branch cursors' parent as the fan-out node during an in-flight snapshot", async () => {
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
     seed(outer, undefined, ready);
@@ -80,11 +75,11 @@ describe("ticking a flow through a used subgraph that itself fans out", () => {
     const store = memoryStore();
 
     async function freshTick(): Promise<TickOutcome> {
-      const ready = await runtime({ models: neverCalled, bindings: [], store });
+      const ready = await runtime({ store });
       return tick(outer, ready);
     }
 
-    seed(outer, undefined, await runtime({ models: neverCalled, bindings: [], store }));
+    seed(outer, undefined, await runtime({ store }));
 
     let outcome = await freshTick();
     const maxIterations = 20;

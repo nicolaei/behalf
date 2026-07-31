@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { ModelCallResult, ModelPort, Profile } from "../../index.js";
 import { assistantToolCall, loggedEventTypes, awaitEventType } from "./support.js";
@@ -39,9 +39,10 @@ describe("a decoupled executor resolves tool calls independently of modelCall", 
 
     const store = memoryStore();
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: [provide(slow, () => gate.promise)],
       store,
+      extensions: [
+        ai({ models: () => scriptedPort, bindings: [provide(slow, () => gate.promise)] }),
+      ],
     });
 
     const resolved = awaitEventType(store, "toolResult");

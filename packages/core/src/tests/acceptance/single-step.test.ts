@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { storeOnlyRuntime, neverCalled, loggedEventTypes, loggedEventAt } from "./support.js";
+import { storeOnlyRuntime, loggedEventTypes, loggedEventAt } from "./support.js";
 
 describe("a graph with a single step", () => {
   const echo = defineGraph("echo", (flow) => {
@@ -18,7 +18,7 @@ describe("a graph with a single step", () => {
 
   it("appends the initial input, then the step's output", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await runFlow(echo, userText("hi"), ready);
 

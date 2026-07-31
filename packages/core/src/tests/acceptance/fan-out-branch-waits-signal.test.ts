@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, join, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Waitable, WaitForResult } from "../../index.js";
-import { neverCalled } from "./support.js";
 
 // runBranchNode's waitFor handling still unconditionally resolves a branch's
 // Waitable to a message kind via messageKindOf, which throws for a
@@ -44,7 +43,7 @@ describe("a fan-out branch that waits for a signal before joining", () => {
 
   it("parks the waiting branch until its signal arrives, then joins with the other branch's output", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = runFlow(flow, userText("go"), ready);
     store.receive({ kind: "signal", name: "ping", payload: { pong: "yes" } });

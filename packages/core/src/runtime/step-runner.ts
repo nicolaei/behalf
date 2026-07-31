@@ -3,14 +3,14 @@
 // tagging, and folding the compact/error emits every step-running path
 // handles the same way.
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) commitCompaction takes an ai-shaped Message; removed when compaction moves into ai/.
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) commitCompaction takes an ai-shaped Message; removed when compaction moves into ai/ alongside Thread itself.
 import type { Message } from "../ai/message.js";
 import type { NodeId, Graph } from "../graph/graph.js";
 import type { ThreadAction } from "../graph/thread.js";
 import type { Step, StepContext, Emit, ModelCallResult, StepError } from "../graph/step.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) StepContextConfig.callTool takes a Tool; removed when callTool moves into ai's stepContext hook.
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) StepContextConfig.callTool takes a Tool; kept built-in for B2.7's minimal path (see ai/model-call.ts's import note in drive.ts) — removed only once callTool routes through the stepContext extension seam.
 import type { Tool } from "../ai/tool.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) StepContextConfig.modelCall takes a Profile; removed when modelCall moves into ai's stepContext hook.
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) StepContextConfig.modelCall takes a Profile; same reasoning as callTool's note above.
 import type { Profile } from "../ai/profile.js";
 import type { Stream, CommittedEnvelope } from "../session/envelope.js";
 import type { Event, EventType } from "../session/event.js";

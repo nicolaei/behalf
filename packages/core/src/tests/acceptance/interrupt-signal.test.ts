@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Waitable } from "../../index.js";
-import { neverCalled, loggedEventTypes } from "./support.js";
+import { loggedEventTypes } from "./support.js";
 
 // An interrupt still only races against a message-based waitFor by flattening
 // every armed Waitable into a message-kind list — a signal-based interrupt
@@ -41,7 +41,7 @@ describe("a signal-based interrupt wins over a userInput waitFor when it fires f
 
   it("bypasses the waiting path when the interrupt's signal arrives instead of the waited-for message", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = runFlow(withSignalInterrupt, userText("go"), ready);
     store.receive({ kind: "signal", name: "ping", payload: { pong: "hi" } });
@@ -51,7 +51,7 @@ describe("a signal-based interrupt wins over a userInput waitFor when it fires f
 
   it("appends the interrupt's output to the session log", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = runFlow(withSignalInterrupt, userText("go"), ready);
     store.receive({ kind: "signal", name: "ping", payload: { pong: "hi" } });
@@ -62,7 +62,7 @@ describe("a signal-based interrupt wins over a userInput waitFor when it fires f
 
   it("still resumes the normal waitFor path when a matching message arrives instead of a signal", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = runFlow(withSignalInterrupt, userText("go"), ready);
     store.receive({

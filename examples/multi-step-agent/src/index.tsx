@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { render, Box, Text } from "ink";
-import { runtime, provide } from "@behalf-js/core";
+import { ai, runtime, provide } from "@behalf-js/core";
 import type { Runtime, Binding } from "@behalf-js/core";
 import { createAnthropicPort } from "@behalf-js/models-anthropic";
 import { memoryStore } from "@behalf-js/stores";
@@ -31,10 +31,9 @@ function Root() {
   useEffect(() => {
     let cancelled = false;
     runtime({
-      models: () => createAnthropicPort(DEFAULT_MODEL),
-      bindings,
       errorHandlers: [rateLimitBackoff],
       store: memoryStore(),
+      extensions: [ai({ models: () => createAnthropicPort(DEFAULT_MODEL), bindings })],
     }).then(
       (resolved) => {
         if (!cancelled) setReady(resolved);

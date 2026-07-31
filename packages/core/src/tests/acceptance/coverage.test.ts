@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, satisfiesFlows, satisfiesPersonas, tool, provide } from "../../index.js";
+import { defineGraph, satisfiesPersonas, tool, provide } from "../../index.js";
 import type { Graph, Model, ModelPort, Profile, Tool, StepContext } from "../../index.js";
 
-describe("satisfiesFlows reports what a runtime is missing", () => {
+describe("satisfiesPersonas reports what a runtime is missing", () => {
   function testProfile(): { profile: Profile; search: Tool } {
     const gpt: Model = {
       identifier: "gpt",
@@ -47,9 +47,10 @@ describe("satisfiesFlows reports what a runtime is missing", () => {
     const { profile, search } = testProfile();
     const graph = usesProfileGraph("uses-profile", profile);
 
-    const missing = satisfiesFlows([graph], () => fakePortFor(profile.model), [
-      provide(search, () => Promise.resolve({ hits: [] })),
-    ]);
+    const missing = satisfiesPersonas(graph, {
+      models: () => fakePortFor(profile.model),
+      bindings: [provide(search, () => Promise.resolve({ hits: [] }))],
+    });
 
     expect(missing).toEqual([]);
   });
@@ -58,17 +59,17 @@ describe("satisfiesFlows reports what a runtime is missing", () => {
     const { profile } = testProfile();
     const graph = usesProfileGraph("uses-profile-2", profile);
 
-    const missing = satisfiesFlows([graph], () => undefined, []);
+    const missing = satisfiesPersonas(graph, { models: () => undefined, bindings: [] });
 
     expect(missing).toContainEqual({ kind: "model", model: profile.model.identifier });
   });
 });
 
-// Needs satisfiesFlows to walk the graph's structure statically (finding every
+// Needs satisfiesPersonas to walk the graph's structure statically (finding every
 // PersonaStep node) instead of dynamically probing execution — the current
 // design only ever sees the first modelCall reachable before the flow's first
 // suspension. Written now so the shape is pinned down before that slice starts.
-describe("satisfiesFlows discovers persona steps regardless of position in the graph", () => {
+describe("satisfiesPersonas discovers persona steps regardless of position in the graph", () => {
   function testProfile(): Profile {
     const gpt: Model = {
       identifier: "gpt",
@@ -96,7 +97,7 @@ describe("satisfiesFlows discovers persona steps regardless of position in the g
     });
 
     // given a resolver missing the model entirely, no execution needed to find it
-    const missing = satisfiesFlows([graph], () => undefined, []);
+    const missing = satisfiesPersonas(graph, { models: () => undefined, bindings: [] });
 
     expect(missing).toContainEqual({ kind: "model", model: "gpt" });
   });
@@ -120,14 +121,12 @@ describe("satisfiesFlows discovers persona steps regardless of position in the g
       useChild.then(flow.finish);
     });
 
-    const missing = satisfiesFlows([parent], () => undefined, []);
+    const missing = satisfiesPersonas(parent, { models: () => undefined, bindings: [] });
 
     expect(missing).toContainEqual({ kind: "model", model: "gpt" });
   });
 });
 
-// Test-only additions — satisfiesPersonas already implements both Missing
-// kinds below; only the "model" kind was ever exercised by a test before now.
 describe("satisfiesPersonas reports missing tools and unsupported reasoning levels", () => {
   function fakePortFor(model: Model): ModelPort {
     return {
@@ -143,6 +142,18 @@ describe("satisfiesPersonas reports missing tools and unsupported reasoning leve
     };
   }
 
+  function usesProfileGraph(profile: Profile): Graph {
+    const persona = Object.assign(
+      async (context: StepContext) => context.output(await context.modelCall(profile)),
+      { persona: profile },
+    );
+    return defineGraph("uses-profile-missing", (flow) => {
+      const respond = flow.step(persona);
+      flow.entry(respond);
+      respond.then(flow.finish);
+    });
+  }
+
   it("reports a missing tool when the persona's tool has no binding", () => {
     const gpt: Model = {
       identifier: "gpt",
@@ -152,8 +163,9 @@ describe("satisfiesPersonas reports missing tools and unsupported reasoning leve
     };
     const search = tool<{ query: string }, { hits: string[] }>("search", "Search the web.");
     const profile: Profile = { model: gpt, system: "test", tools: [search] };
+    const graph = usesProfileGraph(profile);
 
-    const missing = satisfiesPersonas([profile], () => fakePortFor(gpt), []);
+    const missing = satisfiesPersonas(graph, { models: () => fakePortFor(gpt), bindings: [] });
 
     expect(missing).toContainEqual({ kind: "tool", model: "gpt", tool: "search" });
   });
@@ -161,8 +173,9 @@ describe("satisfiesPersonas reports missing tools and unsupported reasoning leve
   it("reports a missing reasoning level when the model doesn't support it", () => {
     const gpt: Model = { identifier: "gpt", provider: "test", contextWindow: 1000, reasoning: [] };
     const profile: Profile = { model: gpt, system: "test", tools: [], reasoning: "medium" };
+    const graph = usesProfileGraph(profile);
 
-    const missing = satisfiesPersonas([profile], () => fakePortFor(gpt), []);
+    const missing = satisfiesPersonas(graph, { models: () => fakePortFor(gpt), bindings: [] });
 
     expect(missing).toContainEqual({ kind: "reasoning", model: "gpt", level: "medium" });
   });

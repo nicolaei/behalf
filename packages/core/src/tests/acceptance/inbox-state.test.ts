@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled } from "./support.js";
 
 describe("the inbox reflects pending and consumed input", () => {
   // Deliberately store-level, no graph: this is SessionStore's own contract
@@ -24,7 +23,7 @@ describe("the inbox reflects pending and consumed input", () => {
       after.then(flow.finish);
     });
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = runFlow(consumeInbox, userText("go"), ready);
     store.receive({

@@ -10,6 +10,7 @@
 
 import { describe, it, expect } from "vitest";
 import {
+  ai,
   defineGraph,
   driveFlow,
   runFlow,
@@ -76,7 +77,7 @@ function buildHangingChatGraph(): {
   return {
     graph,
     store,
-    runtimeReady: runtime({ models: () => port, bindings: [], store }),
+    runtimeReady: runtime({ store, extensions: [ai({ models: () => port, bindings: [] })] }),
     modelCallStarted,
   };
 }
@@ -177,7 +178,7 @@ describe("flow.onAbort backward compatibility", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: () => port, bindings: [], store });
+    const ready = await runtime({ store, extensions: [ai({ models: () => port, bindings: [] })] });
     const done = runFlow(graph, userText("hi"), ready);
 
     sendAbort(store);
@@ -229,7 +230,7 @@ describe("flow.onAbort bubbling through a use()'d subgraph", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: () => port, bindings: [], store });
+    const ready = await runtime({ store, extensions: [ai({ models: () => port, bindings: [] })] });
     driveFlow(outer, ready).catch(() => undefined);
 
     store.receive({

@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  ai,
   defineGraph,
   runFlow,
   runtime,
@@ -84,13 +85,17 @@ describe("multiple real tool calls in one turn", () => {
 
     const store = memoryStore();
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: [
-        provide(alpha, () => gates["1"].promise),
-        provide(beta, () => gates["2"].promise),
-        provide(gamma, () => gates["3"].promise),
-      ],
       store,
+      extensions: [
+        ai({
+          models: () => scriptedPort,
+          bindings: [
+            provide(alpha, () => gates["1"].promise),
+            provide(beta, () => gates["2"].promise),
+            provide(gamma, () => gates["3"].promise),
+          ],
+        }),
+      ],
     });
 
     const resultPromise = runFlow(flow, userText("go"), ready);

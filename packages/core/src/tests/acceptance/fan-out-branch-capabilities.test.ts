@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  ai,
   defineGraph,
   runFlow,
   runtime,
@@ -37,9 +38,13 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
     });
 
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [provide(search, (input) => Promise.resolve({ hits: [input.query] }))],
       store: memoryStore(),
+      extensions: [
+        ai({
+          models: neverCalled,
+          bindings: [provide(search, (input) => Promise.resolve({ hits: [input.query] }))],
+        }),
+      ],
     });
 
     const result = await runFlow(graph, userText("go"), ready);
@@ -102,7 +107,7 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await runFlow(graph, userText("go"), ready);
 
@@ -115,7 +120,7 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
   it("commits an event to the log via the branch's own opened stream, scoped to the branch's forked thread", async () => {
     let branchThreadId: unknown;
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const graph = defineGraph("branch-opens-stream", (flow) => {
       const start = flow.step(outputs(() => "go"));

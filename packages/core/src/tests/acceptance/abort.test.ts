@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { ModelPort } from "../../index.js";
 
@@ -27,7 +27,10 @@ describe("aborting an in-flight run", () => {
       respond.then(flow.finish);
     });
     const store = memoryStore();
-    const ready = await runtime({ models: () => slowPort, bindings: [], store });
+    const ready = await runtime({
+      store,
+      extensions: [ai({ models: () => slowPort, bindings: [] })],
+    });
 
     // an abort is submitted before the model call resolves
     // (best-effort design — confirm the exact abort/streaming contract against

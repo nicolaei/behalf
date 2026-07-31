@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, runtime, runFlow, userText } from "@behalf-js/core";
 import type { ModelPort, Message } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { chat } from "./chat.js";
@@ -42,11 +42,7 @@ describe("chat", () => {
   it("loops back to respond on a follow-up prompt, then stops on an interrupt", async () => {
     const store = memoryStore();
     const port = scriptedPort(["Hello!", "Why did the chicken cross the road?"]);
-    const ready = await runtime({
-      models: () => port,
-      bindings: [],
-      store,
-    });
+    const ready = await runtime({ store, extensions: [ai({ models: () => port, bindings: [] })] });
 
     const done = runFlow(chat, userText("Hi"), ready);
 

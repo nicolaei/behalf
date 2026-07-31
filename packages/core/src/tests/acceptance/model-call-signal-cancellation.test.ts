@@ -11,7 +11,7 @@
 // file is deliberately narrower: does the signal itself propagate.
 
 import { describe, it, expect } from "vitest";
-import { defineGraph, driveFlow, runtime, agentTurn, userInput } from "../../index.js";
+import { ai, defineGraph, driveFlow, runtime, agentTurn, userInput } from "../../index.js";
 import type { Profile, ModelPort, Runtime, SessionStore } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { assistantText, awaitAssistantMessage } from "./support.js";
@@ -73,7 +73,7 @@ function buildCancellableChatGraph(): {
   return {
     graph,
     store,
-    runtimeReady: runtime({ models: () => port, bindings: [], store }),
+    runtimeReady: runtime({ store, extensions: [ai({ models: () => port, bindings: [] })] }),
     modelCallStarted,
     deltaCount: () => count,
   };

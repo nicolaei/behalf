@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { tick, seed } from "../../runtime/runtime.js";
 import type { TickOutcome } from "../../runtime/runtime.js";
-import { defineGraph, runtime, provide, tool, outputs, toolCall } from "../../index.js";
+import { ai, defineGraph, runtime, provide, tool, outputs, toolCall } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, ModelCallResult, ModelPort, Profile, WaitForResult } from "../../index.js";
 import { assistantToolCalls } from "../acceptance/support.js";
@@ -63,9 +63,13 @@ describe("tick() resumes mid-forEach after a simulated restart", () => {
     // arrives after the restart, independent of this process."
     async function freshTick(): Promise<TickOutcome> {
       const ready = await runtime({
-        models: () => scriptedPort,
-        bindings: [provide(alpha, () => Promise.resolve({ n: 10 }))],
         store,
+        extensions: [
+          ai({
+            models: () => scriptedPort,
+            bindings: [provide(alpha, () => Promise.resolve({ n: 10 }))],
+          }),
+        ],
       });
       return tick(outer, ready);
     }
@@ -74,9 +78,13 @@ describe("tick() resumes mid-forEach after a simulated restart", () => {
       outer,
       undefined,
       await runtime({
-        models: () => scriptedPort,
-        bindings: [provide(alpha, () => Promise.resolve({ n: 10 }))],
         store,
+        extensions: [
+          ai({
+            models: () => scriptedPort,
+            bindings: [provide(alpha, () => Promise.resolve({ n: 10 }))],
+          }),
+        ],
       }),
     );
     let outcome = await freshTick();

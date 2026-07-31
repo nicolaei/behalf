@@ -3,7 +3,7 @@ import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userInput, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Runtime, SessionStore } from "../../index.js";
-import { neverCalled, stateChanges } from "../acceptance/support.js";
+import { stateChanges } from "../acceptance/support.js";
 
 // tick() reconstructs cursor position purely from the store on every call
 // (see tick-and-resume.test.ts) — stateChange tracking must survive that same
@@ -27,7 +27,7 @@ describe("stateChange survives across separate tick() calls, not just within one
   // of "position/state came from the log, not from anything tick() carried in
   // its own closures," matching tick-and-resume.test.ts's own third case.
   async function freshTick(graph: Graph, store: SessionStore) {
-    const ready: Runtime = await runtime({ models: neverCalled, bindings: [], store });
+    const ready: Runtime = await runtime({ store });
     return tickUntilSuspended(graph, ready);
   }
 
@@ -49,7 +49,7 @@ describe("stateChange survives across separate tick() calls, not just within one
     });
     const store = memoryStore();
 
-    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
+    seed(graph, undefined, await runtime({ store }));
     await freshTick(graph, store); // runs `start`, parks at `gate`
     store.receive(followUp("go-ahead"));
     await freshTick(graph, store); // resumes, runs `after` — same declared state
@@ -75,7 +75,7 @@ describe("stateChange survives across separate tick() calls, not just within one
     });
     const store = memoryStore();
 
-    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
+    seed(graph, undefined, await runtime({ store }));
     await freshTick(graph, store); // runs `start`, parks at `gate`
     store.receive(followUp("go-ahead"));
     await freshTick(graph, store); // resumes, runs `after` — a real transition

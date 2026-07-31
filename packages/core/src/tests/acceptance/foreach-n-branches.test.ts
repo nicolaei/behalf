@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Message, WaitForResult } from "../../index.js";
-import { neverCalled, textOf } from "./support.js";
+import { textOf } from "./support.js";
 
 // Story 2 proved forEach works for exactly one item whose branch is a bare
 // waitFor node. This story generalizes both axes at once: (1) a dynamic
@@ -56,7 +56,7 @@ describe("forEach runs N branches, each a multi-node graph (step -> waitFor -> u
 
     it("resolves every branch regardless of order and folds results in item order", async () => {
       const store = memoryStore();
-      const ready = await runtime({ models: neverCalled, bindings: [], store });
+      const ready = await runtime({ store });
 
       const done = runFlow(flow, userText("go"), ready);
 

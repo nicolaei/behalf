@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, loggedEnvelopes } from "./support.js";
+import { loggedEnvelopes } from "./support.js";
 
 // Mirrors examples/simple-chat's chat graph shape: a `use` node as the
 // entry, looping back to itself through a waitFor. The first message is
@@ -26,7 +26,7 @@ describe("a use node looped back through a waitFor", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     // Fire-and-forget: this graph never finishes, so we never await it.
     runFlow(outer, userText("hi"), ready).catch(() => {

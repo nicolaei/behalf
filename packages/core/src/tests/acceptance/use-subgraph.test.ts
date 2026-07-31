@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { storeOnlyRuntime, neverCalled, textOf, loggedEventTypes } from "./support.js";
+import { storeOnlyRuntime, textOf, loggedEventTypes } from "./support.js";
 
 describe("composing a graph as a node with `use`", () => {
   const inner = defineGraph("inner", (flow) => {
@@ -28,7 +28,7 @@ describe("composing a graph as a node with `use`", () => {
 
   it("appends the subgraph's messages and output to the same session log", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await runFlow(outer, userText("go"), ready);
 

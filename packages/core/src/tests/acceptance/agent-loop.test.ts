@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  ai,
   defineGraph,
   runFlow,
   runtime,
@@ -98,9 +99,13 @@ describe("the agent loop", () => {
   it("keeps looping while the model calls tools, finishes once it doesn't", async () => {
     const { agentLoop, scriptedPort, search, callCount } = scriptedFixture();
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
       store: memoryStore(),
+      extensions: [
+        ai({
+          models: () => scriptedPort,
+          bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
+        }),
+      ],
     });
 
     const result = await runFlow(agentLoop, userText("find x"), ready);
@@ -114,9 +119,13 @@ describe("the agent loop", () => {
     const { agentLoop, scriptedPort, search } = scriptedFixture();
     const store = memoryStore();
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
       store,
+      extensions: [
+        ai({
+          models: () => scriptedPort,
+          bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
+        }),
+      ],
     });
 
     await runFlow(agentLoop, userText("find x"), ready);

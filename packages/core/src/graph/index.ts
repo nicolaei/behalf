@@ -13,7 +13,6 @@ export type {
 } from "./graph.js";
 export { defineGraph } from "./graph.js";
 export type { Waitable } from "./waitable.js";
-export { userInput, toolCall } from "./waitable.js";
 export type {
   ModelCallResult,
   StepError,

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs, join } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, stateChanges } from "./support.js";
+import { stateChanges } from "./support.js";
 
 describe("stateChange inside a static fan-out (.then([a, b]))", () => {
   // Two branches declare the SAME state — since each branch already forks
@@ -28,7 +28,7 @@ describe("stateChange inside a static fan-out (.then([a, b]))", () => {
 
   it("emits one stateChange per branch, independently, not deduplicated across branches", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     await runFlow(graph, userText("go"), ready);
 
     // each branch is its own thread, so both fire — collapsing them into one

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { agentTurn, driveFlow, runtime, provide, tool, seed, userText } from "../../index.js";
+import { ai, agentTurn, driveFlow, runtime, provide, tool, seed, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { AssistantMessage, Message, Model, ModelPort, Profile, Tool } from "../../index.js";
 import { assistantText, orphanedToolCallIds } from "./support.js";
@@ -92,12 +92,16 @@ describe("agentTurn + driveFlow: two separate tool-calling turns in one thread",
 
     const store = memoryStore();
     const ready = await runtime({
-      models: () => port,
-      bindings: [
-        provide(search, () => Promise.resolve({ hits: ["a"] })),
-        provide(weather, () => Promise.resolve({ forecast: "sunny" })),
-      ],
       store,
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: [
+            provide(search, () => Promise.resolve({ hits: ["a"] })),
+            provide(weather, () => Promise.resolve({ forecast: "sunny" })),
+          ],
+        }),
+      ],
     });
 
     const flow = agentTurn(profile);

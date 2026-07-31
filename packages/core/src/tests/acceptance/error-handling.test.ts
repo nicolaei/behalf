@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { ErrorHandler, Graph, SessionStore } from "../../index.js";
-import { neverCalled, loggedEventTypes } from "./support.js";
+import { loggedEventTypes } from "./support.js";
 
 describe("a step error and its retry handler", () => {
   // A fresh attempt counter per test, and a fresh graph name (defineGraph
@@ -31,7 +31,7 @@ describe("a step error and its retry handler", () => {
   }
 
   async function runtimeFor(store: SessionStore, retryOnce: ErrorHandler) {
-    return runtime({ models: neverCalled, bindings: [], store, errorHandlers: [retryOnce] });
+    return runtime({ store, errorHandlers: [retryOnce] });
   }
 
   it("retries a retryable error until it succeeds", async () => {
@@ -63,8 +63,6 @@ describe("a step error and its retry handler", () => {
       step.then(flow.finish);
     });
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
 

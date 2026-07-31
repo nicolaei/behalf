@@ -1,4 +1,4 @@
-import { defineGraph, agentTurn, userText, runtime, runFlow } from "@behalf-js/core";
+import { ai, defineGraph, agentTurn, userText, runtime, runFlow } from "@behalf-js/core";
 import type { Profile, Model } from "@behalf-js/core";
 import { createAnthropicPort } from "@behalf-js/models-anthropic";
 import { memoryStore } from "@behalf-js/stores";
@@ -28,9 +28,8 @@ export const quickStart = defineGraph("quick-start", (flow) => {
 
 // #region run
 const ready = await runtime({
-  models: () => createAnthropicPort(sonnet5),
-  bindings: [],
   store: memoryStore(),
+  extensions: [ai({ models: () => createAnthropicPort(sonnet5), bindings: [] })],
 });
 
 const result = await runFlow(quickStart, userText("Say hello world in one sentence."), ready);

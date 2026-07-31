@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, loggedEnvelopes } from "./support.js";
+import { loggedEnvelopes } from "./support.js";
 
 describe("a late reader replays the full committed log", () => {
   const graph = defineGraph("two-events", (flow) => {
@@ -12,7 +12,7 @@ describe("a late reader replays the full committed log", () => {
 
   it("returns every committed envelope, in order, to a reader who connects after the run", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await runFlow(graph, userText("go"), ready);
 

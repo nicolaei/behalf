@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { SessionStore } from "../../index.js";
-import { neverCalled, loggedEventTypes } from "./support.js";
+import { loggedEventTypes } from "./support.js";
 
 describe("interrupt fires wherever the graph currently is", () => {
   const withInterrupt = defineGraph("with-interrupt", (flow) => {
@@ -24,7 +24,7 @@ describe("interrupt fires wherever the graph currently is", () => {
 
   beforeEach(async () => {
     store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     // parked at `waitFor("resume")`; a "cancel" message (the interrupt's kind) arrives instead
     // NOTE: submit timing is the same known open concern as waitFor's own test.

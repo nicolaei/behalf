@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { agentTurn, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, agentTurn, runFlow, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Model, ModelPort, Profile } from "../../index.js";
 import { assistantToolCall, assistantText } from "./support.js";
@@ -36,9 +36,15 @@ describe("agentTurn finishOn", () => {
     };
 
     const ready = await runtime({
-      models: () => port,
-      bindings: [provide(submitSpec, (input) => Promise.resolve({ ok: true, page: input.page }))],
       store: memoryStore(),
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: [
+            provide(submitSpec, (input) => Promise.resolve({ ok: true, page: input.page })),
+          ],
+        }),
+      ],
     });
 
     const result = await runFlow(
@@ -74,12 +80,16 @@ describe("agentTurn finishOn", () => {
     };
 
     const ready = await runtime({
-      models: () => port,
-      bindings: [
-        provide(ask, () => Promise.resolve({ answer: "counter" })),
-        provide(submitSpec, (input) => Promise.resolve({ ok: true, page: input.page })),
-      ],
       store: memoryStore(),
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: [
+            provide(ask, () => Promise.resolve({ answer: "counter" })),
+            provide(submitSpec, (input) => Promise.resolve({ ok: true, page: input.page })),
+          ],
+        }),
+      ],
     });
 
     const result = await runFlow(
@@ -102,12 +112,16 @@ describe("agentTurn finishOn", () => {
     };
 
     const ready = await runtime({
-      models: () => port,
-      bindings: [
-        provide(submitSpec, () => Promise.resolve({ ok: true })),
-        provide(cancel, () => Promise.resolve({ ok: true })),
-      ],
       store: memoryStore(),
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: [
+            provide(submitSpec, () => Promise.resolve({ ok: true })),
+            provide(cancel, () => Promise.resolve({ ok: true })),
+          ],
+        }),
+      ],
     });
 
     const result = await runFlow(
@@ -136,9 +150,15 @@ describe("agentTurn finishOn", () => {
     };
 
     const ready = await runtime({
-      models: () => port,
-      bindings: [provide(submitSpec, (input) => Promise.resolve({ ok: true, page: input.page }))],
       store: memoryStore(),
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: [
+            provide(submitSpec, (input) => Promise.resolve({ ok: true, page: input.page })),
+          ],
+        }),
+      ],
     });
 
     const result = await runFlow(
@@ -157,9 +177,8 @@ describe("agentTurn finishOn", () => {
     };
     const profile: Profile = { model: MODEL, system: "agent", tools: [] };
     const ready = await runtime({
-      models: () => port,
-      bindings: [],
       store: memoryStore(),
+      extensions: [ai({ models: () => port, bindings: [] })],
     });
 
     const result = await runFlow(agentTurn(profile), userText("hi"), ready);

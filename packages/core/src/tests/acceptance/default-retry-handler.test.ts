@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, loggedEventTypes } from "./support.js";
+import { loggedEventTypes } from "./support.js";
 
 // Needs runtime() to append a built-in default ErrorHandler after any
 // user-supplied ones — currently errorHandlers defaults to an empty array,
@@ -24,8 +24,6 @@ describe("the built-in default retry/backoff handler, with no errorHandlers conf
       step.then(flow.finish);
     });
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
 
@@ -44,7 +42,7 @@ describe("the built-in default retry/backoff handler, with no errorHandlers conf
       flow.entry(step);
       step.then(flow.finish);
     });
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await expect(runFlow(alwaysRetryable, userText("go"), ready)).rejects.toThrow();
 

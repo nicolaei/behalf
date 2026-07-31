@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, runtime, runFlow, userText } from "@behalf-js/core";
 import type { ModelPort } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { triage, triageErrorHandlers } from "./triage.js";
@@ -24,10 +24,9 @@ function scriptedPort(replyText: string, onCall?: () => void): ModelPort {
 describe("triage", () => {
   it("resolves automatically when the model doesn't escalate", async () => {
     const ready = await runtime({
-      models: () => scriptedPort("RESOLVE"),
-      bindings: [],
       store: memoryStore(),
       errorHandlers: triageErrorHandlers,
+      extensions: [ai({ models: () => scriptedPort("RESOLVE"), bindings: [] })],
     });
 
     const result = await runFlow(triage, userText("How do I reset my password?"), ready);
@@ -38,10 +37,9 @@ describe("triage", () => {
   it("waits for a human reply, then responds using it, on the same thread", async () => {
     const store = memoryStore();
     const ready = await runtime({
-      models: () => scriptedPort("ESCALATE"),
-      bindings: [],
       store,
       errorHandlers: triageErrorHandlers,
+      extensions: [ai({ models: () => scriptedPort("ESCALATE"), bindings: [] })],
     });
 
     const done = runFlow(triage, userText("My account was hacked."), ready);
@@ -63,13 +61,17 @@ describe("triage", () => {
   it("fails fast on a malformed classification, without retrying", async () => {
     let calls = 0;
     const ready = await runtime({
-      models: () =>
-        scriptedPort("MAYBE", () => {
-          calls += 1;
-        }),
-      bindings: [],
       store: memoryStore(),
       errorHandlers: triageErrorHandlers,
+      extensions: [
+        ai({
+          models: () =>
+            scriptedPort("MAYBE", () => {
+              calls += 1;
+            }),
+          bindings: [],
+        }),
+      ],
     });
 
     await expect(runFlow(triage, userText("A weird ticket."), ready)).rejects.toThrow(

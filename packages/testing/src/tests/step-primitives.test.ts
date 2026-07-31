@@ -4,7 +4,7 @@ import { StepUntilError } from "../errors.js";
 import { defineGraph, runtime, outputs, userInput, seed } from "@behalf-js/core";
 import type { Handle } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, textOf } from "./support.js";
+import { textOf } from "./support.js";
 
 describe("stepOnce", () => {
   const flow = defineGraph("step-once", (flowBuilder) => {
@@ -17,8 +17,6 @@ describe("stepOnce", () => {
 
   it("advances exactly one lane per call", async () => {
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
     seed(flow, undefined, ready);
@@ -46,8 +44,6 @@ describe("stepUntilBlocked", () => {
 
   it("drives until every lane is parked or done", async () => {
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
     seed(flow, undefined, ready);
@@ -74,8 +70,6 @@ describe("stepUntil", () => {
     if (!targetStep) throw new Error("unreachable: targetStep not set by the graph builder");
     const target = targetStep;
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
     seed(flow, undefined, ready);
@@ -94,8 +88,6 @@ describe("stepUntil", () => {
       wait.then(flowBuilder.finish);
     });
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
     seed(flow, undefined, ready);
@@ -120,8 +112,6 @@ describe("stepUntil", () => {
       b.then(a);
     });
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
     seed(flow, undefined, ready);

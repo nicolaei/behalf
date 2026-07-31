@@ -4,7 +4,7 @@ import type { TickOutcome } from "../../runtime/runtime.js";
 import { defineGraph, runtime, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Runtime, WaitForResult } from "../../index.js";
-import { neverCalled, textOf } from "../acceptance/support.js";
+import { textOf } from "../acceptance/support.js";
 
 // Needs tick() to advance a flow exactly one node, reconstructing position
 // purely from runtime.store on every call — currently waitFor is driven by
@@ -41,7 +41,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
   it("advances one node per tick, then suspends at waitFor", async () => {
     const graph = fixture("tick-advances");
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     seed(graph, undefined, ready);
 
     const first = await tick(graph, ready); // runs `start`
@@ -56,7 +56,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
   it("resumes and finishes once a fresh tick sees the submitted message, using tickUntilSuspended", async () => {
     const graph = fixture("tick-resumes-same-runtime");
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     seed(graph, undefined, ready);
 
     const parked = await tickUntilSuspended(graph, ready); // start, then suspend at gate
@@ -75,12 +75,12 @@ describe("ticking a flow one node at a time and resuming it from the store alone
   it("resumes correctly even with a brand new Runtime object per tick — only the store persists", async () => {
     const graph = fixture("tick-resumes-fresh-runtime");
     const store = memoryStore();
-    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
+    seed(graph, undefined, await runtime({ store }));
 
     // every tick gets its own fresh runtime() call — the only thing carried
     // between them is the store itself, nothing cached on a shared Runtime
     async function freshTick(): Promise<TickOutcome> {
-      const ready: Runtime = await runtime({ models: neverCalled, bindings: [], store });
+      const ready: Runtime = await runtime({ store });
       return tick(graph, ready);
     }
 
@@ -118,7 +118,7 @@ describe("ticking a flow one node at a time and resuming it from the store alone
       finish.then(flow.finish);
     });
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     seed(graph, undefined, ready);
 
     await tickUntilSuspended(graph, ready); // suspends at gate

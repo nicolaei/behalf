@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Message, WaitForResult } from "../../index.js";
-import { neverCalled, textOf } from "./support.js";
+import { textOf } from "./support.js";
 
 // Flow.forEach throws notImplemented and tick()/drive.ts have no support for
 // the forEach NodeKind yet. Written now so the shape is pinned before
@@ -41,7 +41,7 @@ describe("forEach runs a single dynamically-produced branch, end-to-end", () => 
 
   it("parks on the one dynamically-produced branch and folds its result", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = runFlow(flow, userText("go"), ready);
     store.receive({

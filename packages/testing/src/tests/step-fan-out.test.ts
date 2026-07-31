@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { stepOnce, stepUntilBlocked } from "../index.js";
 import { defineGraph, runtime, join, outputs, seed } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled } from "./support.js";
 
 // Story 4's own tests never exercised a fan-out flow (only linear graphs) —
 // this proves stepOnce/stepUntilBlocked, not just tick() directly, correctly
@@ -22,8 +21,6 @@ describe("the testing module driving a fan-out flow", () => {
 
   it("stepOnce shows multiple concurrent lanes mid-fan-out", async () => {
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
     seed(fanOut, undefined, ready);
@@ -36,8 +33,6 @@ describe("the testing module driving a fan-out flow", () => {
 
   it("stepUntilBlocked drives a fan-out flow to a single done result", async () => {
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
     seed(fanOut, undefined, ready);

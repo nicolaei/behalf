@@ -4,7 +4,7 @@ import type { TickOutcome, Runtime } from "../../runtime/runtime.js";
 import { defineGraph, runtime, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, SessionStore } from "../../index.js";
-import { neverCalled, loggedEventTypes } from "../acceptance/support.js";
+import { loggedEventTypes } from "../acceptance/support.js";
 
 // invalidate has the exact same replay gap compact used to have, confirmed
 // in the design doc (.plans/compaction-redesign-overview.md, "Position
@@ -52,11 +52,11 @@ describe("replay recognizes an invalidating step as already-completed", () => {
     // is needed to force a pause between steps: `plan` and `implement` each
     // land in their own call.
     async function freshTick(): Promise<TickOutcome> {
-      const ready: Runtime = await runtime({ models: neverCalled, bindings: [], store });
+      const ready: Runtime = await runtime({ store });
       return tick(graph, ready);
     }
 
-    seed(graph, undefined, await runtime({ models: neverCalled, bindings: [], store }));
+    seed(graph, undefined, await runtime({ store }));
 
     await freshTick(); // runs plan (draft-1), reports active at implement
     await freshTick(); // runs implement: draft-1 -> invalidates plan (fork), reports active at plan

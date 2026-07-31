@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runtime, runFlow, userText, satisfiesPersonas } from "@behalf-js/core";
+import { ai, runtime, runFlow, userText, satisfiesPersonas } from "@behalf-js/core";
 import type { Message } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { createEchoPort, echoModel, bindings, support, supportFlow } from "./sketch.js";
@@ -44,7 +44,10 @@ describe("createEchoPort", () => {
 
 describe("bindings", () => {
   it("resolves every tool the support persona declares", () => {
-    const missing = satisfiesPersonas([support], () => createEchoPort(echoModel), bindings);
+    const missing = satisfiesPersonas(supportFlow, {
+      models: () => createEchoPort(echoModel),
+      bindings,
+    });
 
     expect(missing).toEqual([]);
   });
@@ -53,9 +56,8 @@ describe("bindings", () => {
 describe("running the flow", () => {
   it("drives a full turn through the echo port and the assembled bindings", async () => {
     const ready = await runtime({
-      models: () => createEchoPort(echoModel),
-      bindings,
       store: memoryStore(),
+      extensions: [ai({ models: () => createEchoPort(echoModel), bindings })],
     });
 
     const result = await runFlow(supportFlow, userText("Hello there"), ready);

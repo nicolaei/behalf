@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, stateChanges } from "./support.js";
+import { stateChanges } from "./support.js";
 
 describe("stateChange inside forEach branches", () => {
   // Unlike a static fan-out branch, a forEach branch runs on the PARENT's own
@@ -31,7 +31,7 @@ describe("stateChange inside forEach branches", () => {
 
   it("dedupes stateChange across branches that share the parent's thread", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     await runFlow(graph, userText("go"), ready);
 
     expect(stateChanges(store)).toEqual([{ to: "processing" }]);

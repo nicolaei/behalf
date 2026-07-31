@@ -13,7 +13,7 @@ import type { Waitable } from "../graph/waitable.js";
 import type { ThreadId } from "../graph/thread.js";
 import { tryMessageKindOf, messageKindOf } from "../graph/waitable.js";
 import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../graph/step.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) buildDriveContext.callTool takes a Tool; removed when callTool moves into ai's stepContext hook.
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) buildDriveContext.callTool takes a Tool; removed when callTool moves into ai's stepContext hook.
 import type { Tool } from "../ai/tool.js";
 import { isCommittedEnvelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
@@ -42,9 +42,11 @@ import {
   ExecutionScope,
   type ExecutionContext,
 } from "./step-runner.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) runModelCall/callTool live in ai/ now (B2.7); this stays a runtime→ai import because modelCall/callTool remain built-in StepContext fields wired by drive.ts's own setThread plumbing, not yet routed through the generic stepContext extension seam — that redesign is B2.8's thread-extraction job, not this one's.
+import { runModelCall } from "../ai/model-call.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) see runModelCall's import note above; same reasoning for callTool.
+import { callTool } from "../ai/tool-executor.js";
 import {
-  runModelCall,
-  callTool,
   waitForSignal,
   waitForRace,
   peekMessageFromInbox,

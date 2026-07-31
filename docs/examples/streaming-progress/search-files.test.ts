@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { defineGraph, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, defineGraph, runtime, runFlow, userText } from "@behalf-js/core";
 import type { Envelope, EventType } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import {
@@ -37,7 +37,10 @@ describe("search_files streams progress while it works", () => {
 
   it("broadcasts a delta per scanned file before its own stream commits", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [searchFilesBinding], store });
+    const ready = await runtime({
+      store,
+      extensions: [ai({ models: neverCalled, bindings: [searchFilesBinding] })],
+    });
     const graph = defineGraph("search", (flow) => {
       const step = flow.step(async (context) =>
         context.output(await context.callTool(searchFiles, { path: dir, query: "needle" })),
@@ -88,7 +91,10 @@ describe("search_files streams progress while it works", () => {
 describe("the delta/commit/abort lifecycle", () => {
   it("commits normally when the tool succeeds", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [progressDemoBinding], store });
+    const ready = await runtime({
+      store,
+      extensions: [ai({ models: neverCalled, bindings: [progressDemoBinding] })],
+    });
     const graph = defineGraph("progress-succeed", (flow) => {
       const step = flow.step(async (context) =>
         context.output(await context.callTool(progressDemo, { succeed: true })),
@@ -109,7 +115,10 @@ describe("the delta/commit/abort lifecycle", () => {
 
   it("marks the envelope aborted when the tool aborts instead of committing", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [progressDemoBinding], store });
+    const ready = await runtime({
+      store,
+      extensions: [ai({ models: neverCalled, bindings: [progressDemoBinding] })],
+    });
     const graph = defineGraph("progress-abort", (flow) => {
       const step = flow.step(async (context) =>
         context.output(await context.callTool(progressDemo, { succeed: false })),

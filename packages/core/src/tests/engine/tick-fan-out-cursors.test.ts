@@ -3,7 +3,6 @@ import { tick, seed } from "../../runtime/runtime.js";
 import type { TickOutcome } from "../../runtime/runtime.js";
 import { defineGraph, runtime, join, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled } from "../acceptance/support.js";
 
 // Needs tick() to support fan-out — currently it throws
 // notImplemented("tick: fan-out") whenever a step's outcome carries
@@ -26,8 +25,6 @@ describe("ticking a fan-out flow", () => {
 
   it("reports fan-out branches as independent cursors, then folds to one root result", async () => {
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store: memoryStore(),
     });
     seed(fanOut, undefined, ready);
@@ -68,11 +65,11 @@ describe("ticking a fan-out flow", () => {
     // every tick gets its own fresh runtime() call — the only thing carried
     // between them is the store itself, nothing cached on a shared Runtime
     async function freshTick(): Promise<TickOutcome> {
-      const ready = await runtime({ models: neverCalled, bindings: [], store });
+      const ready = await runtime({ store });
       return tick(fanOut, ready);
     }
 
-    seed(fanOut, undefined, await runtime({ models: neverCalled, bindings: [], store }));
+    seed(fanOut, undefined, await runtime({ store }));
 
     const seen: TickOutcome[] = [];
     let outcome = await freshTick();

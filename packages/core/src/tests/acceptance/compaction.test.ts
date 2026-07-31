@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { storeOnlyRuntime, neverCalled, loggedEventTypes } from "./support.js";
+import { storeOnlyRuntime, loggedEventTypes } from "./support.js";
 
 describe("compacting the thread replaces the assembled view", () => {
   const compactThenRead = defineGraph("compact-then-read", (flow) => {
@@ -32,7 +32,7 @@ describe("compacting the thread replaces the assembled view", () => {
 
   it("appends the initial input, the compaction, the compact step's own output, then the read step's output", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await runFlow(compactThenRead, userText("hi"), ready);
 

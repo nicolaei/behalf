@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runtime, runFlow, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { EngineExtension } from "../../index.js";
-import { neverCalled } from "./support.js";
 
 // Test-only extension — not shipped. Proves `EngineExtension.stepContext` gets merged into
 // every `StepContext` the runtime builds, alongside the built-in fields (inputs, thread,
@@ -27,8 +26,6 @@ describe("EngineExtension.stepContext merges a contributed method into StepConte
 
     const store = memoryStore();
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store,
       extensions: [extension],
     });

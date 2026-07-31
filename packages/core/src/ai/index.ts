@@ -27,3 +27,8 @@ export type {
   AgentTurnResult,
 } from "./agent-turn.js";
 export type { ModelPort } from "./model-port.js";
+export type { AiConfig } from "./extension.js";
+export { ai } from "./extension.js";
+export { userInput, toolCall } from "./waitable.js";
+export type { Missing } from "../runtime/index.js";
+export { satisfiesPersonas } from "./coverage.js";

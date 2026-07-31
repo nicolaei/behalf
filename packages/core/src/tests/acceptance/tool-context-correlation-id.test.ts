@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
 import { fakePort } from "@behalf-js/testing";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, assistantToolCall } from "./support.js";
@@ -27,17 +27,21 @@ describe("a tool handler sees its own call's correlationId", () => {
 
     const store = memoryStore();
     const ready = await runtime({
-      models: () => ({
-        model: fakePort.model,
-        respond: () => Promise.resolve(assistantToolCall("search", { query: "x" })),
-      }),
-      bindings: [
-        provide(search, (input, context) => {
-          seenCorrelationId = context.correlationId;
-          return Promise.resolve({ hits: [input.query] });
+      store,
+      extensions: [
+        ai({
+          models: () => ({
+            model: fakePort.model,
+            respond: () => Promise.resolve(assistantToolCall("search", { query: "x" })),
+          }),
+          bindings: [
+            provide(search, (input, context) => {
+              seenCorrelationId = context.correlationId;
+              return Promise.resolve({ hits: [input.query] });
+            }),
+          ],
         }),
       ],
-      store,
     });
 
     await runFlow(graph, userText("go"), ready);
@@ -67,14 +71,18 @@ describe("a tool handler sees its own call's correlationId", () => {
     });
 
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [
-        provide(echo, (input, context) => {
-          seenCorrelationId = context.correlationId;
-          return Promise.resolve(input);
+      store: memoryStore(),
+      extensions: [
+        ai({
+          models: neverCalled,
+          bindings: [
+            provide(echo, (input, context) => {
+              seenCorrelationId = context.correlationId;
+              return Promise.resolve(input);
+            }),
+          ],
         }),
       ],
-      store: memoryStore(),
     });
 
     await runFlow(graph, userText("go"), ready);

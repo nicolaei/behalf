@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { toolset, expand, satisfiesPersonas } from "../../index.js";
-import type { Model, Profile } from "../../index.js";
+import { defineGraph, toolset, expand, satisfiesPersonas } from "../../index.js";
+import type { Model, Profile, StepContext } from "../../index.js";
 
 // Every scenario here needs toolset()/expand() to be real — they're currently
 // bare `declare function` stubs with no implementation body. Written now so
@@ -42,12 +42,20 @@ describe("toolset groups multiple tool handlers behind one binding", () => {
     const bundle = toolset("search-bundle", "Search-related tools.");
     const profile: Profile = { model, system: "test", tools: [bundle], reasoning: "medium" };
     const binding = expand(bundle, () => Promise.resolve({}));
-
-    const missing = satisfiesPersonas(
-      [profile],
-      () => ({ model, respond: () => Promise.reject(new Error("unused")) }),
-      [binding],
+    const persona = Object.assign(
+      async (context: StepContext) => context.output(await context.modelCall(profile)),
+      { persona: profile },
     );
+    const graph = defineGraph("toolset-persona", (flow) => {
+      const respond = flow.step(persona);
+      flow.entry(respond);
+      respond.then(flow.finish);
+    });
+
+    const missing = satisfiesPersonas(graph, {
+      models: () => ({ model, respond: () => Promise.reject(new Error("unused")) }),
+      bindings: [binding],
+    });
 
     // then the toolset binding alone satisfies the persona's tool requirement —
     // no need to call discover() up front to know it's covered

@@ -11,7 +11,6 @@ import {
 import { memoryStore } from "@behalf-js/stores";
 import type { Waitable, WaitForResult, WaitableSource } from "../../index.js";
 import { FlowNotReadyError } from "../../index.js";
-import { neverCalled } from "./support.js";
 
 function pingSignal(): Waitable<{ pong: string }> {
   return {
@@ -52,7 +51,7 @@ describe("a registered WaitableSource satisfies a flow end-to-end", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     fakeSource.start(store);
     const result = await runFlow(flow, userText("go"), ready);
@@ -74,14 +73,14 @@ describe("satisfiesFlows reports a missing Waitable provider", () => {
   });
 
   it("reports the provider missing when no source resolves it", () => {
-    const missing = satisfiesFlows([flow], neverCalled, [], () => undefined);
+    const missing = satisfiesFlows([flow], () => undefined);
 
     expect(missing).toContainEqual({ kind: "waitable", provider: "test-signal" });
   });
 
   it("reports nothing missing once a source resolves the provider", () => {
     const fakeSource: WaitableSource = { provider: "test-signal", start: () => () => undefined };
-    const missing = satisfiesFlows([flow], neverCalled, [], (provider) =>
+    const missing = satisfiesFlows([flow], (provider: string) =>
       provider === "test-signal" ? fakeSource : undefined,
     );
 
@@ -95,7 +94,7 @@ describe("satisfiesFlows reports a missing Waitable provider", () => {
       wait.then(flowBuilder.finish);
     });
 
-    const missing = satisfiesFlows([userInputFlow], neverCalled, [], () => undefined);
+    const missing = satisfiesFlows([userInputFlow], () => undefined);
 
     expect(missing).not.toContainEqual({ kind: "waitable", provider: "userInput" });
   });

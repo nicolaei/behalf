@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs, join } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { storeOnlyRuntime, neverCalled, loggedEventTypes } from "./support.js";
+import { storeOnlyRuntime, loggedEventTypes } from "./support.js";
 
 describe("fan-out and fan-in", () => {
   const fanOut = defineGraph("fan-out", (flow) => {
@@ -30,7 +30,7 @@ describe("fan-out and fan-in", () => {
 
   it("appends one output event per branch, plus the start and join steps", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await runFlow(fanOut, userText("go"), ready);
 

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, toolset, expand } from "../../index.js";
+import { ai, defineGraph, runFlow, runtime, userText, toolset, expand } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { ModelPort, Profile } from "../../index.js";
 import { assistantToolCall, assistantText, loggedEventTypes } from "./support.js";
@@ -43,9 +43,8 @@ describe("a model calling a tool that came from an expanded toolset", () => {
   it("resolves the toolset's member by name and runs its handler", async () => {
     const { agentLoop, scriptedPort, binding } = fixture();
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: [binding],
       store: memoryStore(),
+      extensions: [ai({ models: () => scriptedPort, bindings: [binding] })],
     });
 
     // if this doesn't throw "no tool binding for search", the toolset member was found and called
@@ -55,7 +54,10 @@ describe("a model calling a tool that came from an expanded toolset", () => {
   it("appends the toolset member's tool call and result to the session log", async () => {
     const { agentLoop, scriptedPort, binding } = fixture();
     const store = memoryStore();
-    const ready = await runtime({ models: () => scriptedPort, bindings: [binding], store });
+    const ready = await runtime({
+      store,
+      extensions: [ai({ models: () => scriptedPort, bindings: [binding] })],
+    });
 
     await runFlow(agentLoop, userText("find x"), ready);
 

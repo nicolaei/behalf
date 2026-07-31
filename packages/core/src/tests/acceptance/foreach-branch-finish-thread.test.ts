@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  ai,
   defineGraph,
   runFlow,
   runtime,
@@ -59,9 +60,13 @@ describe("forEach tool-call branch completion stays on the flow's own thread", (
 
     const store = memoryStore();
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
       store,
+      extensions: [
+        ai({
+          models: () => scriptedPort,
+          bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
+        }),
+      ],
     });
 
     await runFlow(flow, userText("find x"), ready);

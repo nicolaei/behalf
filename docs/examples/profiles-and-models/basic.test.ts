@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, agentTurn, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, defineGraph, agentTurn, runtime, runFlow, userText } from "@behalf-js/core";
 import type { ModelPort, AgentTurnResult } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { supportModel, supportAgent } from "./basic.js";
@@ -37,9 +37,8 @@ describe("profiles and models", () => {
     });
 
     const ready = await runtime({
-      models: () => scriptedPort,
-      bindings: [],
       store: memoryStore(),
+      extensions: [ai({ models: () => scriptedPort, bindings: [] })],
     });
 
     const result = (await runFlow(

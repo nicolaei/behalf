@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runtime, runFlow, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Waitable, WaitForResult, WaitableSource, EngineExtension } from "../../index.js";
-import { neverCalled } from "./support.js";
 
 function pingSignal(): Waitable<{ pong: string }> {
   return {
@@ -45,8 +44,6 @@ describe("runtime({ extensions }) folds an extension's waitables into its regist
 
     const store = memoryStore();
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [],
       store,
       extensions: [extension],
     });

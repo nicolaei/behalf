@@ -76,9 +76,8 @@ result.
 
 ```ts source=docs/examples/quick-start/basic.ts#run
 const ready = await runtime({
-  models: () => createAnthropicPort(sonnet5),
-  bindings: [],
   store: memoryStore(),
+  extensions: [ai({ models: () => createAnthropicPort(sonnet5), bindings: [] })],
 });
 
 const result = await runFlow(quickStart, userText("Say hello world in one sentence."), ready);

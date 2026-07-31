@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, stateChanges } from "./support.js";
+import { stateChanges } from "./support.js";
 
 describe("stateChange: fires only when a node's declared `state` differs from the last one seen", () => {
   // Four nodes: two share "red" (proving the event collapses repeats), one
@@ -34,7 +34,7 @@ describe("stateChange: fires only when a node's declared `state` differs from th
 
   it("fires once entering a state, not once per node that shares it", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     await runFlow(trafficLight, userText("go"), ready);
 
     const redChanges = stateChanges(store).filter((change) => change.to === "red");
@@ -43,7 +43,7 @@ describe("stateChange: fires only when a node's declared `state` differs from th
 
   it("omits `from` on the very first state a run enters", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     await runFlow(trafficLight, userText("go"), ready);
 
     expect(stateChanges(store)[0]).toEqual({ to: "red" });
@@ -51,7 +51,7 @@ describe("stateChange: fires only when a node's declared `state` differs from th
 
   it("fires again on a real transition, carrying the prior state as `from`", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     await runFlow(trafficLight, userText("go"), ready);
 
     expect(stateChanges(store)).toEqual([{ to: "red" }, { from: "red", to: "green" }]);
@@ -62,7 +62,7 @@ describe("stateChange: fires only when a node's declared `state` differs from th
     // count stays 2, not 3, so a state-less node never resets or interrupts
     // an in-progress phase.
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     await runFlow(trafficLight, userText("go"), ready);
 
     expect(stateChanges(store)).toHaveLength(2);
@@ -90,7 +90,7 @@ describe("stateChange works on any node kind, not just step", () => {
 
   it("emits stateChange for a waitFor node's own state", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = runFlow(approvalGate, userText("go"), ready);
     store.receive({

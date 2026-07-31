@@ -12,7 +12,6 @@ import { isCommittedEnvelope, type CommittedEnvelope } from "../session/envelope
 import {
   type EngineExtension,
   type ExecutionScope as ScopeHandle,
-  type ScopeStateReducer,
   foldExtensionState,
 } from "./extension.js";
 import { freshThreadId } from "./ids.js";
@@ -271,28 +270,6 @@ export function deriveCompactedMessages(
 export function withCompaction(thread: Thread, compaction: Event["compaction"]): Thread {
   return { ...thread, messages: deriveCompactedMessages(thread.history, compaction) };
 }
-
-/**
- * The ai extension's own reducers — still physically defined here in runtime/ (full
- * relocation of ai's runtime logic to `ai/` is B2.7), registered through the
- * `EngineExtension.reducers` seam by `runtime()`'s built-in ai registration (see
- * `runtime.ts`). `tick.ts`'s replay switch calls these through that registration instead
- * of calling `withMessage`/`withCompaction` directly — one source of truth for "how these
- * two event types fold", reached both by `tick`'s own inline routing (which still needs to
- * fold-then-route in one step for a `waitFor`/`use` node consuming a message) and by any
- * caller of the generic `ExecutionScope.state("ai")` slot. Each assumes `state` is already
- * a `Thread` — true for every call site today; a cold `state()` fold starting from
- * `undefined` is not yet a supported entry point for these two (that's B2.8's job, when
- * Thread itself becomes ai's own scope state).
- */
-export const messageReducer: ScopeStateReducer = (state, event) => {
-  const { message } = event.event as Event["message"];
-  return withMessage(state as Thread, message);
-};
-
-export const compactionReducer: ScopeStateReducer = (state, event) => {
-  return withCompaction(state as Thread, event.event as Event["compaction"]);
-};
 
 /**
  * Resolves the thread an invalidated node reruns on, per its `threadAction`:

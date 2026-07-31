@@ -29,7 +29,10 @@ import {
   type ExecutionContext,
   ExecutionScope,
 } from "./step-runner.js";
-import { runModelCall, callTool } from "./execution.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) runModelCall/callTool live in ai/ now (B2.7); kept as a runtime→ai import for the same reason drive.ts's own import note explains — setThread plumbing, not yet routed through the stepContext extension seam.
+import { runModelCall } from "../ai/model-call.js";
+// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) see runModelCall's import note above; same reasoning for callTool.
+import { callTool } from "../ai/tool-executor.js";
 import {
   findInterruptNodes,
   runWaitForNode,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { agentTurn, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, agentTurn, runFlow, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Message, Model, ModelPort, Profile, Tool } from "../../index.js";
 import {
@@ -57,9 +57,13 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
     };
 
     const ready = await runtime({
-      models: () => port,
-      bindings: tools.map((t) => provide(t, () => Promise.resolve({ ok: true }))),
       store: memoryStore(),
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: tools.map((t) => provide(t, () => Promise.resolve({ ok: true }))),
+        }),
+      ],
     });
 
     const result = await runFlow(agentTurn(profile), userText("go"), ready);
@@ -82,9 +86,13 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
     };
     const store = memoryStore();
     const ready = await runtime({
-      models: () => port,
-      bindings: tools.map((t) => provide(t, () => Promise.resolve({ ok: true }))),
       store,
+      extensions: [
+        ai({
+          models: () => port,
+          bindings: tools.map((t) => provide(t, () => Promise.resolve({ ok: true }))),
+        }),
+      ],
     });
 
     await runFlow(agentTurn(profile), userText("go"), ready);
@@ -118,12 +126,16 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
 
     const store = memoryStore();
     const ready = await runtime({
-      models: () => ({
-        model: MODEL,
-        respond: (p, m, s) => (p.system === "agent-A" ? respondA(p, m, s) : respondB(p, m, s)),
-      }),
-      bindings: tools.map((t) => provide(t, () => Promise.resolve({ ok: true }))),
       store,
+      extensions: [
+        ai({
+          models: () => ({
+            model: MODEL,
+            respond: (p, m, s) => (p.system === "agent-A" ? respondA(p, m, s) : respondB(p, m, s)),
+          }),
+          bindings: tools.map((t) => provide(t, () => Promise.resolve({ ok: true }))),
+        }),
+      ],
     });
 
     const [resultA, resultB] = await Promise.all([

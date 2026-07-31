@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, runtime, runFlow, userText } from "@behalf-js/core";
 import type { ModelPort, AssistantMessage, Profile } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { audit, securityReviewer, performanceReviewer, styleReviewer } from "./audit.js";
@@ -31,9 +31,8 @@ function scriptedPort(): ModelPort {
 describe("audit", () => {
   it("runs all three reviewers and joins their findings into one reply", async () => {
     const ready = await runtime({
-      models: () => scriptedPort(),
-      bindings: [],
       store: memoryStore(),
+      extensions: [ai({ models: () => scriptedPort(), bindings: [] })],
     });
 
     const result = await runFlow(audit, userText("Review this pull request."), ready);
@@ -48,7 +47,10 @@ describe("audit", () => {
 
   it("gives each branch its own forked thread, one reviewer's reply never leaking into another's", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: () => scriptedPort(), bindings: [], store });
+    const ready = await runtime({
+      store,
+      extensions: [ai({ models: () => scriptedPort(), bindings: [] })],
+    });
 
     await runFlow(audit, userText("Review this pull request."), ready);
 

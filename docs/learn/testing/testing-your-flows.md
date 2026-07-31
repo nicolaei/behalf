@@ -67,7 +67,10 @@ export const pipeline: Graph = defineGraph("step-through", (flow) => {
 });
 
 export async function stepOnceDemo() {
-  const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
+  const ready = await runtime({
+    store: memoryStore(),
+    extensions: [ai({ models: () => fakePort, bindings: [] })],
+  });
   seed(pipeline, undefined, ready);
   return stepOnce(pipeline, ready);
 }
@@ -90,7 +93,10 @@ returns, the same `StepResult` shape as `stepOnce`.
 
 ```ts source=docs/examples/testing-your-flows/step-through.ts#until-blocked
 export async function untilBlockedDemo() {
-  const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
+  const ready = await runtime({
+    store: memoryStore(),
+    extensions: [ai({ models: () => fakePort, bindings: [] })],
+  });
   seed(pipeline, undefined, ready);
   return stepUntilBlocked(pipeline, ready);
 }
@@ -111,7 +117,10 @@ common condition: satisfied the moment any lane sits at that node.
 
 ```ts source=docs/examples/testing-your-flows/step-through.ts#step-until
 export async function stepUntilFastDemo() {
-  const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
+  const ready = await runtime({
+    store: memoryStore(),
+    extensions: [ai({ models: () => fakePort, bindings: [] })],
+  });
   seed(pipeline, undefined, ready);
   return stepUntil(pipeline, ready, atNode(fastNode));
 }
@@ -121,7 +130,10 @@ export async function stepUntilFastDemo() {
 // every lane ends up parked, and stepUntil throws StepUntilError("stalled")
 // instead of stepping forever.
 export async function stepUntilStalledDemo() {
-  const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
+  const ready = await runtime({
+    store: memoryStore(),
+    extensions: [ai({ models: () => fakePort, bindings: [] })],
+  });
   seed(pipeline, undefined, ready);
   return stepUntil(pipeline, ready, atNode(mergeNode));
 }
@@ -144,7 +156,10 @@ export const infiniteLoop: Graph = defineGraph("infinite-loop", (flow) => {
 });
 
 export async function stepUntilBudgetExceededDemo() {
-  const ready = await runtime({ models: () => fakePort, bindings: [], store: memoryStore() });
+  const ready = await runtime({
+    store: memoryStore(),
+    extensions: [ai({ models: () => fakePort, bindings: [] })],
+  });
   seed(infiniteLoop, undefined, ready);
   return stepUntil(infiniteLoop, ready, () => false, { maxSteps: 5 });
 }

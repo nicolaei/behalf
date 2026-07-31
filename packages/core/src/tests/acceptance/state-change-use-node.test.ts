@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, stateChanges } from "./support.js";
+import { stateChanges } from "./support.js";
 
 describe("stateChange on a `use` node's own state", () => {
   it("emits for the use node's own state before its subgraph runs", async () => {
@@ -20,7 +20,7 @@ describe("stateChange on a `use` node's own state", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     const result = await runFlow(graph, userText("go"), ready);
 
     expect(result).toBe("echoed");

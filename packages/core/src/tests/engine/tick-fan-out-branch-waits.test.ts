@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
 import { defineGraph, runtime, join, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, submitApproval } from "../acceptance/support.js";
+import { submitApproval } from "../acceptance/support.js";
 
 // Needs a fan-out branch to support a waitFor node — today runBranchNode
 // throws notImplemented("fan-out branch node kind \"waitFor\"") for any
@@ -25,7 +25,7 @@ describe("ticking a fan-out branch that waits for a message", () => {
 
   it("reports the waiting branch as parked with waitingFor, resumable across tick calls", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
     seed(flow, undefined, ready);
 
     const parked = await tickUntilSuspended(flow, ready);

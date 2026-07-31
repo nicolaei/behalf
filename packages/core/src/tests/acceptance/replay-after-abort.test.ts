@@ -6,7 +6,7 @@
 // reproduces that against @behalf-js/core directly, no cockpit involved.
 
 import { describe, it, expect } from "vitest";
-import { defineGraph, driveFlow, runtime, agentTurn, userInput } from "../../index.js";
+import { ai, defineGraph, driveFlow, runtime, agentTurn, userInput } from "../../index.js";
 import type { Profile, ModelPort, SessionStore } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { assistantText, awaitAssistantMessage } from "./support.js";
@@ -67,7 +67,10 @@ describe("replaying a store containing a real abort, against a brand-new runtime
     };
     const store = memoryStore();
     const { port, modelCallStarted } = hangingPort("stale");
-    const runtime1 = await runtime({ models: () => port, bindings: [], store });
+    const runtime1 = await runtime({
+      store,
+      extensions: [ai({ models: () => port, bindings: [] })],
+    });
     const graph1 = chatLikeGraph(profile);
 
     driveFlow(graph1, runtime1).catch(() => undefined);
@@ -80,7 +83,10 @@ describe("replaying a store containing a real abort, against a brand-new runtime
 
     // Simulate a process restart: a brand-new runtime/graph pair against the
     // SAME store, exactly what SessionRegistry.reattachAll does.
-    const runtime2 = await runtime({ models: () => port, bindings: [], store });
+    const runtime2 = await runtime({
+      store,
+      extensions: [ai({ models: () => port, bindings: [] })],
+    });
     const graph2 = chatLikeGraph(profile);
 
     // Must not reject. The bug reproduced here throws synchronously from
@@ -119,7 +125,10 @@ describe("replaying a store containing a real abort, against a brand-new runtime
     // guard: the crash this file's first test reproduces would otherwise
     // have left it exactly that stuck.
     const { port: stalePort, modelCallStarted } = hangingPort("stale");
-    const runtime1 = await runtime({ models: () => stalePort, bindings: [], store });
+    const runtime1 = await runtime({
+      store,
+      extensions: [ai({ models: () => stalePort, bindings: [] })],
+    });
     const graph1 = chatLikeGraph(profile);
 
     driveFlow(graph1, runtime1).catch(() => undefined);
@@ -131,7 +140,10 @@ describe("replaying a store containing a real abort, against a brand-new runtime
     await abortedCommit;
 
     const { port: freshPort } = hangingPort("fresh");
-    const runtime2 = await runtime({ models: () => freshPort, bindings: [], store });
+    const runtime2 = await runtime({
+      store,
+      extensions: [ai({ models: () => freshPort, bindings: [] })],
+    });
     const graph2 = chatLikeGraph(profile);
     driveFlow(graph2, runtime2).catch(() => undefined);
 
@@ -155,7 +167,10 @@ describe("replaying a store containing a real abort, against a brand-new runtime
     };
     const store = memoryStore();
     const { port, modelCallStarted } = hangingPort("whichever");
-    const runtime1 = await runtime({ models: () => port, bindings: [], store });
+    const runtime1 = await runtime({
+      store,
+      extensions: [ai({ models: () => port, bindings: [] })],
+    });
     const graph1 = chatLikeGraph(profile);
 
     driveFlow(graph1, runtime1).catch(() => undefined);
@@ -177,7 +192,10 @@ describe("replaying a store containing a real abort, against a brand-new runtime
       { type: "invalidation" },
     );
 
-    const runtime2 = await runtime({ models: () => port, bindings: [], store });
+    const runtime2 = await runtime({
+      store,
+      extensions: [ai({ models: () => port, bindings: [] })],
+    });
     const graph2 = chatLikeGraph(profile);
 
     const outcome = await Promise.race([

@@ -6,95 +6,73 @@
 // lives alongside this file in src/runtime/ and is re-exported below so
 // `import ... from "./runtime/runtime.js"` keeps resolving exactly as before.
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) runtime() config's `models` resolver is keyed by Model; removed when models/bindings leave the engine's own vocabulary for ai({ models, bindings }).
-import type { Model } from "../ai/model.js";
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) runFlow's initialPrompt is a Message; removed when a session starts from its first event instead of runFlow seeding a prompt.
 import type { Message } from "../ai/message.js";
 import type { Graph } from "../graph/graph.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) runtime() config's `bindings` are ai Binding/ToolHandler; removed when bindings move into ai({ bindings }).
-import type { Binding, ToolHandler } from "../ai/tool.js";
 import type { ThreadId } from "../graph/thread.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 7: assemble ai()) ModelPort is an ai concern; removed when runtime() stops taking `models` directly.
-import type { ModelPort } from "../ai/model-port.js";
 import type { SessionStore } from "../session/session-store.js";
 import type { EngineExtension } from "./extension.js";
 import { defaultErrorHandler, type ErrorHandler } from "./errors.js";
 import type { Thread } from "./routing.js";
-import { messageReducer, compactionReducer } from "./routing.js";
 export type { Thread } from "./routing.js";
 export { withMessage, withCompaction, deriveCompactedMessages } from "./routing.js";
 import { driveGraph } from "./drive.js";
-import { resolvedTools, startToolExecutor } from "./execution.js";
 import { idFactories, freshThreadId } from "./ids.js";
 import { tickUntilSuspended } from "./tick.js";
 
 export type { CursorState, TickOutcome } from "./tick.js";
 export { tick, tickUntilSuspended } from "./tick.js";
 
-/** What a flow runs against — model resolution, bindings, and store. @public */
+/**
+ * What a flow runs against — the durable store, error handling, and every registered
+ * extension's own capabilities. `runtime()` no longer knows `models`/`bindings` directly (B2.7):
+ * a flow whose steps call `context.modelCall`/`context.callTool` needs the ai extension
+ * registered via `extensions: [ai({ models, bindings })]` — see `ai()` in `ai/extension.ts`.
+ * @public
+ */
 export interface Runtime {
-  readonly models: (model: Model) => ModelPort;
-  readonly bindings: Binding[];
   readonly store: SessionStore;
   readonly errorHandlers: ErrorHandler[];
   readonly extensions: EngineExtension[]; // registered capabilities; their stepContext() is merged into every StepContext
-}
-
-/** Expands every binding into one name -> handler map: direct tool bindings as-is, toolset bindings via their `discover()`, called once each. */
-async function expandToolsets(bindings: Binding[]): Promise<Map<string, ToolHandler>> {
-  const resolved = new Map<string, ToolHandler>();
-  for (const binding of bindings) {
-    if (binding.kind === "tool") {
-      resolved.set(binding.tool.name, binding.handler);
-      continue;
-    }
-    const members = await binding.discover();
-    for (const [name, handler] of Object.entries(members)) {
-      resolved.set(name, handler);
-    }
-  }
-  return resolved;
+  /** Aborts the signal handed to every extension's `workers`, then awaits each worker's own returned promise settling. Idempotent to call more than once — later calls just re-await already-settled promises. */
+  stop(): Promise<void>;
 }
 
 /**
- * Builds a ready-to-run Runtime, expanding all toolset bindings and auto-starting the decoupled
- * tool executor (see `startToolExecutor` in engine/runtime/execution.ts) against the same
- * bindings — every `toolCall` a running flow commits gets resolved independently, with no
- * separate setup required by any caller.
+ * Builds a ready-to-run Runtime: starts every registered extension's `waitables` (each park
+ * condition it can satisfy) and `workers` (background loops — the ai extension's decoupled tool
+ * executor, once `extensions: [ai({ models, bindings })]` registers it), with no separate setup
+ * required by any caller.
  * @public
  */
-export async function runtime(config: {
-  models: (model: Model) => ModelPort;
-  bindings: Binding[];
+export function runtime(config: {
   store: SessionStore;
-  extensions?: EngineExtension[]; // capabilities registering their own waitables (later steps add more)
+  extensions?: EngineExtension[]; // capabilities registering their own waitables/workers/reducers/context contributions
   errorHandlers?: ErrorHandler[]; // consulted on a step error; a default retry handler runs last
   idFactory?: () => string; // generates every fresh correlation/thread id; omit for the default counters
 }): Promise<Runtime> {
-  // The ai extension's own reducers, registered through the seam alongside whatever the
-  // caller passed — `ai()` doesn't exist as a standalone extension builder until B2.7,
-  // but `EngineExtension.reducers` does, and message/compaction folding shouldn't wait on
-  // that split to be reachable through it (see `routing.ts`'s `messageReducer`/
-  // `compactionReducer` doc comment).
-  const builtInAi: EngineExtension = {
-    name: "ai",
-    reducers: { message: messageReducer, compaction: compactionReducer },
-  };
-  const extensions = [builtInAi, ...(config.extensions ?? [])];
+  const extensions = config.extensions ?? [];
+  const abortController = new AbortController();
+  const workerPromises: Promise<void>[] = [];
+
   const ready: Runtime = {
-    models: config.models,
-    bindings: config.bindings,
     store: config.store,
     errorHandlers: [...(config.errorHandlers ?? []), defaultErrorHandler],
     extensions,
+    stop: async () => {
+      abortController.abort();
+      await Promise.allSettled(workerPromises);
+    },
   };
-  resolvedTools.set(ready, await expandToolsets(config.bindings));
-  startToolExecutor(ready);
+
   for (const extension of extensions) {
     for (const source of extension.waitables ?? []) source.start(config.store);
+    for (const start of extension.workers?.(ready, abortController.signal) ?? []) {
+      workerPromises.push(start());
+    }
   }
   if (config.idFactory) idFactories.set(ready, config.idFactory);
-  return ready;
+  return Promise.resolve(ready);
 }
 
 /**
@@ -157,8 +135,8 @@ export async function runFlow(
  * keeps going: whenever every cursor is parked (nothing left to advance right now),
  * it waits for the store's next `receive()`/`append()` — via `runtime.store.awaitReceive()`
  * — then tries again, instead of returning while work is merely in flight. This is what
- * makes an async tool call (resolved independently by `startToolExecutor`, decoupled from
- * whatever step requested it) actually get noticed once it lands: `tickUntilSuspended` alone
+ * makes an async tool call (resolved independently by the ai extension's decoupled tool
+ * executor, if registered) actually get noticed once it lands: `tickUntilSuspended` alone
  * stops the moment a `waitFor(toolCall(id))` peeks and finds nothing yet, and nothing ever
  * calls it again on its own.
  *

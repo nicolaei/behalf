@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  ai,
   defineGraph,
   driveFlow,
   seed,
@@ -64,7 +65,7 @@ describe("driveFlow", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = driveFlow(flow, ready);
 
@@ -107,22 +108,26 @@ describe("driveFlow", () => {
     });
 
     const ready = await runtime({
-      models: neverCalled,
-      bindings: [
-        provide(
-          slow,
-          () =>
-            new Promise((resolve) => {
-              // A genuine setTimeout, not a synchronously-resolving fake —
-              // proves driveFlow actually waits through real async latency,
-              // not just a microtask queue that happens to drain in time.
-              setTimeout(() => {
-                resolve({ done: true });
-              }, 30);
-            }),
-        ),
-      ],
       store: memoryStore(),
+      extensions: [
+        ai({
+          models: neverCalled,
+          bindings: [
+            provide(
+              slow,
+              () =>
+                new Promise((resolve) => {
+                  // A genuine setTimeout, not a synchronously-resolving fake —
+                  // proves driveFlow actually waits through real async latency,
+                  // not just a microtask queue that happens to drain in time.
+                  setTimeout(() => {
+                    resolve({ done: true });
+                  }, 30);
+                }),
+            ),
+          ],
+        }),
+      ],
     });
     seed(flow, undefined, ready);
 
@@ -146,7 +151,7 @@ describe("driveFlow", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = driveFlow(flow, ready);
 
@@ -186,7 +191,7 @@ describe("driveFlow", () => {
       respond.then(flowBuilder.finish);
     });
 
-    const ready = await runtime({ models: neverCalled, bindings: [], store: memoryStore() });
+    const ready = await runtime({ store: memoryStore() });
     seed(flow, undefined, ready);
 
     const result = await driveFlow(flow, ready);
@@ -223,7 +228,7 @@ describe("driveFlow", () => {
       });
     });
 
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const result = await driveFlow(flow, ready);
 

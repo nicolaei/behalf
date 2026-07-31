@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, provide, tool, userText } from "@behalf-js/core";
+import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "@behalf-js/core";
 import type { Graph, ModelPort, Profile, AssistantMessage, SessionStore } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { foldRun } from "../../eval/run.js";
@@ -55,9 +55,13 @@ async function runAgentOnce(): Promise<{ store: SessionStore; latencyInput: numb
   const profile: Profile = { model: scriptedPort.model, system: "agent", tools: [search] };
   const store = memoryStore();
   const ready = await runtime({
-    models: () => scriptedPort,
-    bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
     store,
+    extensions: [
+      ai({
+        models: () => scriptedPort,
+        bindings: [provide(search, () => Promise.resolve({ hits: ["a"] }))],
+      }),
+    ],
   });
   await runFlow(agentGraph(profile), userText("find x"), ready);
   return { store, latencyInput: 42 };
@@ -159,7 +163,10 @@ describe("foldRun on a run with no tool calls", () => {
     };
     const profile: Profile = { model: scriptedPort.model, system: "agent", tools: [] };
     const store = memoryStore();
-    const ready = await runtime({ models: () => scriptedPort, bindings: [], store });
+    const ready = await runtime({
+      store,
+      extensions: [ai({ models: () => scriptedPort, bindings: [] })],
+    });
     await runFlow(agentGraph(profile), userText("hi"), ready);
     return store;
   }

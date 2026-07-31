@@ -4,10 +4,6 @@ import type { Event } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { trafficLight } from "./traffic-light.js";
 
-function neverCalled(): never {
-  throw new Error("no model call expected in this example");
-}
-
 function stateChanges(store: { events(): readonly unknown[] }): Event["stateChange"][] {
   const changes: Event["stateChange"][] = [];
   for (const envelope of store.events() as { form: string; type: string; event: unknown }[]) {
@@ -20,7 +16,7 @@ function stateChanges(store: { events(): readonly unknown[] }): Event["stateChan
 describe("trafficLight", () => {
   it("emits one stateChange per real transition: red, then yellow, then green", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const done = runFlow(trafficLight, userText("go"), ready);
     store.receive({

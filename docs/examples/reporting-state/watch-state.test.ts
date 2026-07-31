@@ -4,14 +4,10 @@ import { memoryStore } from "@behalf-js/stores";
 import { trafficLight } from "./traffic-light.js";
 import { collectStateChanges } from "./watch-state.js";
 
-function neverCalled(): never {
-  throw new Error("no model call expected in this example");
-}
-
 describe("collectStateChanges", () => {
   it("reads stateChange transitions live, without importing the graph that produced them", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     // Subscribed before the flow runs, so nothing committed in the same tick
     // is missed — the same ordering rule every `store.changes()` consumer

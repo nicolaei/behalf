@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { neverCalled, loggedEventTypes } from "./support.js";
+import { loggedEventTypes } from "./support.js";
 
 // Every scenario here needs context.openStream to be real — it's currently a
 // notImplemented stub in both the main-loop and branch StepContext builders.
@@ -20,7 +20,7 @@ describe("a step can open its own stream", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     await runFlow(graph, userText("go"), ready);
 
@@ -31,7 +31,7 @@ describe("a step can open its own stream", () => {
 
   it("broadcasts a delta from the opened stream to changes() subscribers, without persisting it", async () => {
     const store = memoryStore();
-    const ready = await runtime({ models: neverCalled, bindings: [], store });
+    const ready = await runtime({ store });
 
     const graph = defineGraph("opens-stream-delta", (flow) => {
       const emit = flow.step((context) => {
