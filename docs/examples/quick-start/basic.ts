@@ -1,4 +1,4 @@
-import { ai, defineGraph, agentTurn, userText, runtime, runFlow } from "@behalf-js/core";
+import { ai, defineGraph, agentTurn, userText, runtime, seed, driveFlow } from "@behalf-js/core";
 import type { Profile, Model } from "@behalf-js/core";
 import { createAnthropicPort } from "@behalf-js/models-anthropic";
 import { memoryStore } from "@behalf-js/stores";
@@ -32,6 +32,7 @@ const ready = await runtime({
   extensions: [ai({ models: () => createAnthropicPort(sonnet5), bindings: [] })],
 });
 
-const result = await runFlow(quickStart, userText("Say hello world in one sentence."), ready);
+seed(quickStart, userText("Say hello world in one sentence."), ready);
+const result = await driveFlow(quickStart, ready);
 console.log(result);
 // #endregion run

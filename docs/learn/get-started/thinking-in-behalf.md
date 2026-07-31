@@ -104,8 +104,8 @@ of them, not a reset conversation.
 It's called out because choosing it deliberately, and saying why, is the point of this step, not
 because the code requires it. `new` earns its place in a different shape: a step that deliberately
 starts a clean sub-conversation, unrelated to what came before it.
-An unrelated follow-up ticket doesn't need `new` either: a fresh `runFlow()` call already begins on
-its own thread.
+An unrelated follow-up ticket doesn't need `new` either: a fresh session already begins on its own
+thread.
 
 ## Step 4: Add a wait point
 

@@ -8,7 +8,7 @@ path from nothing to a working reply.
 - How to install behalf and which package holds what
 - How to describe a `Profile` (model, system prompt, tools)
 - How to wire a one-step graph: `entry`, a step, `finish`
-- How to run it with `runtime()` and `runFlow()` and see the reply
+- How to run it with `runtime()`, `seed()` and `driveFlow()`, and see the reply
 
 ## Install
 
@@ -71,8 +71,8 @@ immediately.
 ## Run it
 
 `runtime()` builds the pieces every flow runs against: how to resolve a model, what tools are bound,
-and where the session log lives. `runFlow()` seeds a graph with one message and drives it to its
-result.
+and where the session log lives. `seed()` starts a session with one message and `driveFlow()` drives
+it to its result.
 
 ```ts source=docs/examples/quick-start/basic.ts#run
 const ready = await runtime({
@@ -80,7 +80,8 @@ const ready = await runtime({
   extensions: [ai({ models: () => createAnthropicPort(sonnet5), bindings: [] })],
 });
 
-const result = await runFlow(quickStart, userText("Say hello world in one sentence."), ready);
+seed(quickStart, userText("Say hello world in one sentence."), ready);
+const result = await driveFlow(quickStart, ready);
 console.log(result);
 ```
 
@@ -100,15 +101,15 @@ in-memory assertion once you want to test a flow instead of running it live.
 - A `Profile` is a model, a system prompt, and its tools
 - `defineGraph` builds a graph once from a callback; `flow.use()` composes a reusable graph
   (`agentTurn`) as a single node
-- `runtime()` resolves models and holds the session store; `runFlow()` seeds a message and drives to
-  a result
+- `runtime()` resolves models and holds the session store; `seed()` records the first message and
+  `driveFlow()` drives to a result
 - Next: design a flow of your own, from a blank page, using the same methodology, in
   [Thinking in behalf](./thinking-in-behalf.md)
 
 ---
 
 **Reference:** [`Profile`](../../reference.md), [`defineGraph`](../../reference.md),
-[`runtime`/`runFlow`](../../reference.md). **Examples:** `docs/examples/quick-start/basic.ts`,
-regions `profile`, `graph`, `run` (also the README's own quick start snippet, sourced from the same
-file). **Section:** [Get started](./README.md) **Next:**
+[`runtime`/`seed`/`driveFlow`](../../reference.md). **Examples:**
+`docs/examples/quick-start/basic.ts`, regions `profile`, `graph`, `run` (also the README's own quick
+start snippet, sourced from the same file). **Section:** [Get started](./README.md) **Next:**
 [Thinking in behalf](./thinking-in-behalf.md)

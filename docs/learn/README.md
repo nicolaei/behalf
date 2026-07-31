@@ -42,7 +42,7 @@ For exact signatures, see [`../reference.md`](../reference.md).
 
 ## [Wiring a runtime](./wiring-a-runtime/README.md)
 
-- [Running flows](./wiring-a-runtime/running-flows.md) — `runtime()`, `runFlow()`, the
+- [Running flows](./wiring-a-runtime/running-flows.md) — `runtime()`, `seed()`/`driveFlow()`, the
   `satisfiesFlows` coverage gate.
 - [Model ports and bindings](./wiring-a-runtime/model-ports-and-bindings.md) — implementing a
   `ModelPort` for a provider, assembling tool bindings.

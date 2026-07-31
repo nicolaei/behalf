@@ -56,7 +56,12 @@ export interface LocalAgentSpawnerConfig {
  * carried".
  */
 function asFinishResult(output: unknown): FinishResult {
-  if (typeof output === "object" && output !== null && "result" in output && "succeeded" in output) {
+  if (
+    typeof output === "object" &&
+    output !== null &&
+    "result" in output &&
+    "succeeded" in output
+  ) {
     return output as FinishResult;
   }
   return { result: typeof output === "string" ? output : JSON.stringify(output), succeeded: true };

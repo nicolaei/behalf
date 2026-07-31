@@ -19,7 +19,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import TextInput from "ink-text-input";
-import { runFlow, userText } from "@behalf-js/core";
+import { seed, driveFlow, userText } from "@behalf-js/core";
 import type { Runtime, Message, StepError } from "@behalf-js/core";
 import { chat, DEFAULT_MODEL, assistant } from "./chat.js";
 
@@ -295,7 +295,8 @@ export function App({ ready }: { ready: Runtime }) {
     setInput("");
     if (!started.current) {
       started.current = true;
-      runFlow(chat, userText(trimmed), ready).catch((cause) => {
+      seed(chat, userText(trimmed), ready);
+      driveFlow(chat, ready).catch((cause) => {
         setError(formatRunError(cause));
       });
       return;

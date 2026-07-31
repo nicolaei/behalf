@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, runtime, userText } from "@behalf-js/core";
 import type { ModelPort, AssistantMessage, Profile } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { audit, securityReviewer, performanceReviewer, styleReviewer } from "./audit.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 function assistantText(text: string): AssistantMessage {
   return {
@@ -35,7 +36,7 @@ describe("audit", () => {
       extensions: [ai({ models: () => scriptedPort(), bindings: [] })],
     });
 
-    const result = await runFlow(audit, userText("Review this pull request."), ready);
+    const result = await runToCompletion(audit, userText("Review this pull request."), ready);
 
     expect(result).toEqual({
       summary:
@@ -52,7 +53,7 @@ describe("audit", () => {
       extensions: [ai({ models: () => scriptedPort(), bindings: [] })],
     });
 
-    await runFlow(audit, userText("Review this pull request."), ready);
+    await runToCompletion(audit, userText("Review this pull request."), ready);
 
     const messageEnvelopes = store
       .events()

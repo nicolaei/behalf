@@ -77,8 +77,8 @@ whether its binding came from a direct `provide` or an expanded `toolset`.
 
 `ToolContext` carries two more capabilities this page only names: `context.openStream` opens a live,
 logged stream for a handler that takes a while and wants to report progress as it goes, and
-`context.runFlow` lets a handler spawn a child flow and await its result, the way a research tool
-might launch a whole sub-agent.
+`context.spawnAgent` lets a handler spawn a child agent — a session of its own, with its own log —
+and await its result, the way a research tool might launch a whole sub-agent.
 [Streaming progress](../streaming-and-sessions/streaming-progress.md) and
 [Fan-out and joining](../agents-in-practice/fan-out-and-joining.md) cover each in full.
 
@@ -90,7 +90,7 @@ might launch a whole sub-agent.
   re-run on resume
 - `context.correlationId` matches a handler's own `toolCall`/`toolResult` pair
 - `provide` binds a `tool`, `expand` binds a `toolset`; mixing them up is a compile error
-- `context.openStream` and `context.runFlow` cover progress streaming and spawning a sub-flow
+- `context.openStream` and `context.spawnAgent` cover progress streaming and spawning a child agent
 - Next: how these turns run in a loop end to end, in
   [The agent loop](../agents-in-practice/the-agent-loop.md)
 

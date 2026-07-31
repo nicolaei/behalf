@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, runtime, runFlow, userText, provide } from "@behalf-js/core";
+import { ai, runtime, userText, provide } from "@behalf-js/core";
 import type { ModelPort, AssistantMessage, Message } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { chat, assistant, lookup } from "./chat.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 function assistantText(text: string): AssistantMessage {
   return {
@@ -58,7 +59,7 @@ describe("chat", () => {
     // The chat graph loops forever (it's an interactive session, not a
     // one-shot computation), so this promise is deliberately never awaited
     // to completion; the assertions below watch its side effects instead.
-    void runFlow(chat, userText("When's the tide out?"), ready);
+    void runToCompletion(chat, userText("When's the tide out?"), ready);
 
     await waitUntil(() => calls === 2);
     expect(capturedMessages[1]?.some((m) => m.role === "tool")).toBe(true); // the tool result folded in

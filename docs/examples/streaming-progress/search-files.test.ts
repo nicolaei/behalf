@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { ai, defineGraph, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, defineGraph, runtime, userText } from "@behalf-js/core";
 import type { Envelope, EventType } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import {
@@ -11,6 +11,7 @@ import {
   progressDemo,
   progressDemoBinding,
 } from "./search-files.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 function neverCalled(): never {
   throw new Error("no model call expected in this test");
@@ -68,7 +69,7 @@ describe("search_files streams progress while it works", () => {
       }
     })();
 
-    await Promise.all([done, runFlow(graph, userText("go"), ready)]);
+    await Promise.all([done, runToCompletion(graph, userText("go"), ready)]);
 
     // both files got their own delta, scanned before the result committed
     expect(deltas).toHaveLength(2);
@@ -103,7 +104,7 @@ describe("the delta/commit/abort lifecycle", () => {
       step.then(flow.finish);
     });
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     const streamed = store
       .events()
@@ -127,7 +128,7 @@ describe("the delta/commit/abort lifecycle", () => {
       step.then(flow.finish);
     });
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     const aborted = store
       .events()

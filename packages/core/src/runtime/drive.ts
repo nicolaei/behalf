@@ -64,7 +64,6 @@ export function findInterruptNodes(flow: Graph): InterruptNode[] {
   return interrupts;
 }
 
-
 /**
  * The 5 things every `waitFor`/`interrupt` call site always carries
  * together — the armed interrupts, the running `StepContext` (which carries
@@ -192,7 +191,6 @@ export interface MessageSource {
    */
   signal<T>(waitable: Waitable<T>, scope: ScopeId): Promise<T | undefined>;
 }
-
 
 /** What a parked `waitFor` reports it is still waiting for: a message-based Waitable contributes its message kind, a signal-based one its own display `label` (see `CursorState.waitingFor`'s note on that overload). */
 function waitingForLabel(waitable: Waitable<unknown>): string {
@@ -525,4 +523,3 @@ export function buildDriveContext(
   });
   return context;
 }
-

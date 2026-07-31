@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, runtime, userText } from "@behalf-js/core";
 import type { ModelPort, Message } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { chat } from "./chat.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 /** A scripted ModelPort that replies once per call, cycling through the given texts.
  * Built once per test and reused via `models: () => port`, since `runtime.models()`
@@ -44,7 +45,7 @@ describe("chat", () => {
     const port = scriptedPort(["Hello!", "Why did the chicken cross the road?"]);
     const ready = await runtime({ store, extensions: [ai({ models: () => port, bindings: [] })] });
 
-    const done = runFlow(chat, userText("Hi"), ready);
+    const done = runToCompletion(chat, userText("Hi"), ready);
 
     store.receive({
       kind: "message",

@@ -3,18 +3,9 @@
 // passing vitest test here: there's no separate companion file.
 
 import { describe, it, expect } from "vitest";
-import {
-  ai,
-  defineGraph,
-  agentTurn,
-  userText,
-  runtime,
-  runFlow,
-  provide,
-  tool,
-} from "@behalf-js/core";
+import { ai, defineGraph, agentTurn, userText, runtime, provide, tool } from "@behalf-js/core";
 import type { ModelPort, Profile, AssistantMessage } from "@behalf-js/core";
-import { fakePort } from "@behalf-js/testing";
+import { fakePort, runToCompletion } from "@behalf-js/testing";
 import { memoryStore } from "@behalf-js/stores";
 import { z } from "zod";
 
@@ -38,7 +29,7 @@ describe("fakePort", () => {
       extensions: [ai({ models: () => fakePort, bindings: [] })],
     });
 
-    const result = await runFlow(chat, userText("What's the weather?"), ready);
+    const result = await runToCompletion(chat, userText("What's the weather?"), ready);
 
     expect(result).toEqual({ finishedBy: "finalMessage", text: "ok" });
   });
@@ -83,16 +74,21 @@ describe("scriptedPort", () => {
       [{ type: "text", text: "RESOLVE" }],
       [{ type: "text", text: "ESCALATE" }],
     ]);
-    const ready = await runtime({
-      store: memoryStore(),
-      extensions: [ai({ models: () => port, bindings: [] })],
-    });
+    // A scripted port replies differently per CALL, but each call has to come
+    // from its own session: a store already holding a finished run resumes to
+    // that run's result rather than starting a second turn.
+    const sessions = [userText("Ticket one."), userText("Ticket two.")];
+    const replies: unknown[] = [];
+    for (const prompt of sessions) {
+      const ready = await runtime({
+        store: memoryStore(),
+        extensions: [ai({ models: () => port, bindings: [] })],
+      });
+      replies.push(await runToCompletion(classify, prompt, ready));
+    }
 
-    const first = await runFlow(classify, userText("Ticket one."), ready);
-    const second = await runFlow(classify, userText("Ticket two."), ready);
-
-    expect(first).toEqual({ finishedBy: "finalMessage", text: "RESOLVE" });
-    expect(second).toEqual({ finishedBy: "finalMessage", text: "ESCALATE" });
+    expect(replies[0]).toEqual({ finishedBy: "finalMessage", text: "RESOLVE" });
+    expect(replies[1]).toEqual({ finishedBy: "finalMessage", text: "ESCALATE" });
   });
 });
 // #endregion scripted-port
@@ -138,7 +134,11 @@ describe("faking a tool", () => {
       ],
     });
 
-    const result = await runFlow(chatWithTool, userText("What's the weather in Oslo?"), ready);
+    const result = await runToCompletion(
+      chatWithTool,
+      userText("What's the weather in Oslo?"),
+      ready,
+    );
 
     expect(handlerCalls).toBe(1);
     expect(result).toEqual({

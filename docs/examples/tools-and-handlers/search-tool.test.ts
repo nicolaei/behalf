@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, agentTurn, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, defineGraph, agentTurn, runtime, userText } from "@behalf-js/core";
 import type { ModelPort, Profile, AgentTurnResult } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { search, supportBundle, searchBinding, supportBundleBinding } from "./search-tool.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 /** A scripted ModelPort that calls a tool once, then answers using its result. */
 function scriptedPort(): ModelPort {
@@ -57,7 +58,7 @@ describe("tools and handlers", () => {
       extensions: [ai({ models: () => port, bindings: [searchBinding] })],
     });
 
-    const result = (await runFlow(
+    const result = (await runToCompletion(
       turn,
       userText("How do I reset my password?"),
       ready,
@@ -87,7 +88,7 @@ describe("tools and handlers", () => {
       extensions: [ai({ models: () => port, bindings: [supportBundleBinding] })],
     });
 
-    const result = (await runFlow(
+    const result = (await runToCompletion(
       turn,
       userText("How do I reset my password?"),
       ready,

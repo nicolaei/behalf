@@ -31,7 +31,6 @@ import {
 } from "./drive.js";
 import type { CursorState, TickOutcome } from "./tick.js";
 
-
 /**
  * Walks each branch's linear .then() chain to find the node where all
  * branches converge. Throws notImplemented if any step inside a branch itself
@@ -201,9 +200,6 @@ export async function runBranchNode(
   }
   return { kind: "output", output: stepOutput, scope };
 }
-
-
-
 
 /** Applies a branch step's resolved `then` edge (or an already-resolved `{ from, to }` pair, e.g. a `waitFor`'s routed target): reaching the join marks the branch done, holding its output and settling `current` on the step that just produced it (`from` — the node the caller just ran) so it stays there per `BranchReplay.current`'s own contract ("once done, it stays at the last chain node the branch actually ran"); otherwise advances `current`/`currentInput` to `to`. Shared by `runBranch`'s own loop state, `replayBranchOutput`/`replayBranchMessage`, and `advanceFanOutGroup` — every place a branch's step-to-step edge gets resolved — so all of them settle a branch reaching its join the same way. */
 function applyBranchEdge(

@@ -16,7 +16,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Box, Text, useStdout } from "ink";
 import TextInput from "ink-text-input";
-import { runFlow, userText } from "@behalf-js/core";
+import { seed, driveFlow, userText } from "@behalf-js/core";
 import type { Runtime, Message, StepError, ScopeId } from "@behalf-js/core";
 import { pipeline } from "./pipeline.js";
 import { DEFAULT_MODEL, askerProfile } from "./profiles.js";
@@ -368,7 +368,8 @@ export function App({ ready, askBridge }: { ready: Runtime; askBridge: AskBridge
     setInput("");
     if (!started.current) {
       started.current = true;
-      runFlow(pipeline, userText(trimmed), ready).catch((cause) => {
+      seed(pipeline, userText(trimmed), ready);
+      driveFlow(pipeline, ready).catch((cause) => {
         setError(formatRunError(cause));
       });
     }

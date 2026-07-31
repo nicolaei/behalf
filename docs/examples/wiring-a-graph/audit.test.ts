@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, runtime, userText } from "@behalf-js/core";
 import type { ModelPort, Profile } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { audit } from "./audit.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 /** A scripted ModelPort that replies differently per persona, keyed by a keyword in
  * its system prompt, so the merge step's assertion can tell which review said what. */
@@ -35,7 +36,7 @@ describe("audit", () => {
       extensions: [ai({ models: () => scriptedPort(), bindings: [] })],
     });
 
-    const result = await runFlow(audit, userText("Add a search endpoint."), ready);
+    const result = await runToCompletion(audit, userText("Add a search endpoint."), ready);
 
     expect(result).toBe(
       "Recommendation: no injection risks found adds one extra query per request " +

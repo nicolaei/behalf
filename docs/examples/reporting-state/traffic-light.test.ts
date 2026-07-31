@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { runtime, runFlow, userText } from "@behalf-js/core";
+import { runtime, userText } from "@behalf-js/core";
 import type { Event } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { trafficLight } from "./traffic-light.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 function stateChanges(store: { events(): readonly unknown[] }): Event["stateChange"][] {
   const changes: Event["stateChange"][] = [];
@@ -18,7 +19,7 @@ describe("trafficLight", () => {
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    const done = runFlow(trafficLight, userText("go"), ready);
+    const done = runToCompletion(trafficLight, userText("go"), ready);
     store.receive({
       kind: "message",
       message: {

@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, runtime, userText } from "@behalf-js/core";
 import type { ModelPort } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { triage, triageErrorHandlers } from "./triage.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 /** A scripted ModelPort that always replies with the given text, no network. `onCall` fires once per `respond()` call, for asserting how many times the model actually ran. */
 function scriptedPort(replyText: string, onCall?: () => void): ModelPort {
@@ -29,7 +30,7 @@ describe("triage", () => {
       extensions: [ai({ models: () => scriptedPort("RESOLVE"), bindings: [] })],
     });
 
-    const result = await runFlow(triage, userText("How do I reset my password?"), ready);
+    const result = await runToCompletion(triage, userText("How do I reset my password?"), ready);
 
     expect(result).toEqual({ reply: "Resolved automatically." });
   });
@@ -42,7 +43,7 @@ describe("triage", () => {
       extensions: [ai({ models: () => scriptedPort("ESCALATE"), bindings: [] })],
     });
 
-    const done = runFlow(triage, userText("My account was hacked."), ready);
+    const done = runToCompletion(triage, userText("My account was hacked."), ready);
     store.receive({
       kind: "message",
       message: {
@@ -74,7 +75,7 @@ describe("triage", () => {
       ],
     });
 
-    await expect(runFlow(triage, userText("A weird ticket."), ready)).rejects.toThrow(
+    await expect(runToCompletion(triage, userText("A weird ticket."), ready)).rejects.toThrow(
       /RESOLVE.*ESCALATE/,
     );
     expect(calls).toBe(1);

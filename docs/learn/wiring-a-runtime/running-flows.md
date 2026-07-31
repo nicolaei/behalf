@@ -1,7 +1,7 @@
 # Running flows
 
-`runtime()` builds what a flow runs against; `runFlow()` seeds a session and drives it to
-completion.
+`runtime()` builds what a flow runs against; `seed()` starts a session and `driveFlow()` drives it
+to completion.
 
 ## You will learn
 
@@ -9,8 +9,8 @@ completion.
   bindings
 - How `satisfiesFlows` checks a flow's structure and `satisfiesPersonas` checks its personas, and
   what a `Missing` entry tells you
-- How `runFlow` seeds a session with a message and resolves with the result
-- How `parentThreadId` makes a spawned flow a child (how a tool spawns a sub-agent)
+- How `seed` starts a session with a message and `driveFlow` drives it to its result
+- How `spawnAgent` starts a child agent (how a tool delegates to a sub-agent)
 
 ## Assembling a runtime
 
@@ -97,30 +97,38 @@ conversation with a user watching.
 > `context.modelCall`'s caller attaches by hand (see the example's `Object.assign`).
 > It's a static check: nothing here calls a model or a tool.
 
-## runFlow
+## seed and driveFlow
 
-Once coverage is clean, `runFlow` seeds a graph with one message and drives it to its result:
+Once coverage is clean, `seed` records the session's first message and `driveFlow` runs it to its
+result:
 
 ```ts source=docs/examples/running-flows/basic.ts#run-flow
-export const result = await runFlow(chat, userText("Say hello."), ready);
+seed(chat, userText("Say hello."), ready);
+export const result = await driveFlow(chat, ready);
 ```
 
-`runFlow` opens a fresh thread, appends the seed message to the session log, and runs the graph
-until it reaches `flow.finish`, resolving with whatever value reached it.
-There's no separate `schedule` or `spawn` call: seeding and driving are the same step.
+`seed` mints a fresh thread and appends the starting message to the session log as its first durable
+fact. `driveFlow` then advances the graph until it reaches `flow.finish`, resolving with whatever
+value reached it — and along the way it parks whenever there's nothing to advance, waking on the
+next thing the store receives.
+That pairing is what makes a long-lived session work: the same call keeps resuming across as many
+turns as the session needs.
 
-## Spawning a child flow
+## Spawning a child agent
 
-A tool handler's `ToolContext` carries its own `runFlow`, so a tool can start another flow instead
-of just returning a value: a "delegate to a sub-agent" tool calls
-`context.runFlow(reviewFlow, prompt)` and awaits its result the same way any async call would.
+A tool handler's `ToolContext` carries `spawnAgent`, so a tool can start another agent instead of
+just returning a value: a "delegate to a sub-agent" tool calls
+`context.spawnAgent(reviewFlow, prompt)` and awaits `handle.result()` the same way any async call
+would.
 
-That inner call passes the parent thread's id along as `parentThreadId`, which is what makes the new
-flow a child rather than an unrelated run: `parentThreadId` is ownership (this thread exists because
-that one spawned it), distinct from `fork` (a `ThreadAction` that shares history up to a split
-point).
-The full mechanics, including how a tool handler reads its own `correlationId` to correlate the
-spawn with its result, live in [Tools and handlers](../describing-a-flow/tools-and-handlers.md).
+A spawned agent is a child _session_, with its own store and its own log — not a second thread
+inside the parent's.
+That's what keeps the two independently resumable: a session's position is reconstructed from its
+whole log, so two agents sharing one log would each read the other's events as their own.
+
+The spawn is idempotent by the tool call's own `correlationId`, so a call re-dispatched after a
+restart attaches to the child already running rather than starting a second one.
+The full mechanics live in [Tools and handlers](../describing-a-flow/tools-and-handlers.md).
 
 ## Recap
 
@@ -129,17 +137,17 @@ spawn with its result, live in [Tools and handlers](../describing-a-flow/tools-a
 - `satisfiesFlows` walks a flow's structure statically and reports every `Missing` unregistered
   `waitFor` provider; `satisfiesPersonas` does the same walk for personas, reporting every missing
   model, tool, or reasoning level; empty means ready
-- `runFlow` seeds a new thread with a message, drives the graph to `flow.finish`, and resolves with
-  its output
-- A tool spawns a child flow through `ToolContext.runFlow`, with `parentThreadId` marking the
-  ownership
+- `seed` records a new session's first message and mints its scope; `driveFlow` advances the graph
+  to `flow.finish` and resolves with its output
+- A tool spawns a child agent through `ToolContext.spawnAgent`, which is a separate session with its
+  own log
 - Next: implement a `ModelPort` and assemble the bindings a runtime needs, in
   [Model ports and bindings](./model-ports-and-bindings.md)
 
 ---
 
-**Reference:** reference.md § satisfiesFlows / satisfiesPersonas, § runtime / runFlow, § ai.
-**Examples:** `docs/examples/running-flows/basic.ts`, regions `runtime`, `coverage`, `run-flow`.
+**Reference:** reference.md § satisfiesFlows / satisfiesPersonas, § runtime / seed / driveFlow, §
+ai. **Examples:** `docs/examples/running-flows/basic.ts`, regions `runtime`, `coverage`, `run-flow`.
 **Section:** [Wiring a runtime](./README.md) **Prev / Next:**
 [Handling errors](../agents-in-practice/handling-errors.md) /
 [Model ports and bindings](./model-ports-and-bindings.md)

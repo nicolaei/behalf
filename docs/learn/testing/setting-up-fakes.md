@@ -8,7 +8,7 @@ without calling a real model.
 - How `fakePort` behaves by default and when to reach for it
 - How to script a different response per test case
 - How to fake a tool binding with `provide`
-- How to combine fakes with `stepUntilBlocked`/`runFlow` from the previous page
+- How to combine fakes with `stepUntilBlocked`/`runToCompletion` from the previous page
 
 ## fakePort
 
@@ -37,7 +37,7 @@ describe("fakePort", () => {
       extensions: [ai({ models: () => fakePort, bindings: [] })],
     });
 
-    const result = await runFlow(chat, userText("What's the weather?"), ready);
+    const result = await runToCompletion(chat, userText("What's the weather?"), ready);
 
     expect(result).toEqual({ finishedBy: "finalMessage", text: "ok" });
   });
@@ -95,16 +95,21 @@ describe("scriptedPort", () => {
       [{ type: "text", text: "RESOLVE" }],
       [{ type: "text", text: "ESCALATE" }],
     ]);
-    const ready = await runtime({
-      store: memoryStore(),
-      extensions: [ai({ models: () => port, bindings: [] })],
-    });
+    // A scripted port replies differently per CALL, but each call has to come
+    // from its own session: a store already holding a finished run resumes to
+    // that run's result rather than starting a second turn.
+    const sessions = [userText("Ticket one."), userText("Ticket two.")];
+    const replies: unknown[] = [];
+    for (const prompt of sessions) {
+      const ready = await runtime({
+        store: memoryStore(),
+        extensions: [ai({ models: () => port, bindings: [] })],
+      });
+      replies.push(await runToCompletion(classify, prompt, ready));
+    }
 
-    const first = await runFlow(classify, userText("Ticket one."), ready);
-    const second = await runFlow(classify, userText("Ticket two."), ready);
-
-    expect(first).toEqual({ finishedBy: "finalMessage", text: "RESOLVE" });
-    expect(second).toEqual({ finishedBy: "finalMessage", text: "ESCALATE" });
+    expect(replies[0]).toEqual({ finishedBy: "finalMessage", text: "RESOLVE" });
+    expect(replies[1]).toEqual({ finishedBy: "finalMessage", text: "ESCALATE" });
   });
 });
 ```
@@ -172,7 +177,11 @@ describe("faking a tool", () => {
       ],
     });
 
-    const result = await runFlow(chatWithTool, userText("What's the weather in Oslo?"), ready);
+    const result = await runToCompletion(
+      chatWithTool,
+      userText("What's the weather in Oslo?"),
+      ready,
+    );
 
     expect(handlerCalls).toBe(1);
     expect(result).toEqual({

@@ -1,6 +1,6 @@
 // M1 — one real, non-interactive model call. No tools, no UI loop (that's M2/M3).
 
-import { ai, defineGraph, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, defineGraph, runtime, seed, driveFlow, userText } from "@behalf-js/core";
 import type { Profile, Model } from "@behalf-js/core";
 import { createAnthropicPort } from "@behalf-js/models-anthropic";
 import { memoryStore } from "@behalf-js/stores";
@@ -48,7 +48,8 @@ async function main() {
     extensions: [ai({ models: () => createAnthropicPort(DEFAULT_MODEL), bindings: [] })],
   });
 
-  const text = await runFlow(sayHello, userText("Say hello in one sentence."), ready);
+  seed(sayHello, userText("Say hello in one sentence."), ready);
+  const text = await driveFlow(sayHello, ready);
   console.log(text);
 }
 

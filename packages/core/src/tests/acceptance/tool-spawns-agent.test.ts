@@ -96,8 +96,10 @@ describe("a tool handler spawning a child agent", () => {
     expect(host.stores.size).toBe(1);
     const childStore = [...host.stores.values()][0];
     expect(childStore?.events().length).toBeGreaterThan(0);
-    const parentTypes = parentStore.events().map((envelope) => envelope.type);
-    expect(parentTypes.filter((type) => type === "input")).toHaveLength(1);
+    const parentInputs = parentStore
+      .events()
+      .filter((envelope) => envelope.form === "committed" && envelope.type === "input");
+    expect(parentInputs).toHaveLength(1);
   });
 
   it("spawns once per correlationId, however many times the same call is dispatched", async () => {

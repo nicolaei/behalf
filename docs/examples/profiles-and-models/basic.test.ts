@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, agentTurn, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, defineGraph, agentTurn, runtime, userText } from "@behalf-js/core";
 import type { ModelPort, AgentTurnResult } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { supportModel, supportAgent } from "./basic.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("profiles and models", () => {
   it("captures identity, context window, reasoning levels, and price on the model", () => {
@@ -41,7 +42,7 @@ describe("profiles and models", () => {
       extensions: [ai({ models: () => scriptedPort, bindings: [] })],
     });
 
-    const result = (await runFlow(
+    const result = (await runToCompletion(
       turn,
       userText("How do I reset my password?"),
       ready,

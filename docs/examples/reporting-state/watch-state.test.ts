@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { runtime, runFlow, userText } from "@behalf-js/core";
+import { runtime, userText } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { trafficLight } from "./traffic-light.js";
 import { collectStateChanges } from "./watch-state.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("collectStateChanges", () => {
   it("reads stateChange transitions live, without importing the graph that produced them", async () => {
@@ -14,7 +15,7 @@ describe("collectStateChanges", () => {
     // depends on.
     const collected = collectStateChanges(store, 3);
 
-    const done = runFlow(trafficLight, userText("go"), ready);
+    const done = runToCompletion(trafficLight, userText("go"), ready);
     store.receive({
       kind: "message",
       message: {

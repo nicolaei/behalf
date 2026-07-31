@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText } from "@behalf-js/core";
+import { defineGraph, runtime, userText } from "@behalf-js/core";
 import type { ScopeId } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { noRetryOnValidation, retryFlakyFetchTwice } from "./backoff.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("noRetryOnValidation", () => {
   it("fails immediately on a validation error, without retrying", async () => {
@@ -20,7 +21,7 @@ describe("noRetryOnValidation", () => {
       errorHandlers: [noRetryOnValidation],
     });
 
-    await expect(runFlow(graph, userText("go"), ready)).rejects.toThrow(/bad reply/);
+    await expect(runToCompletion(graph, userText("go"), ready)).rejects.toThrow(/bad reply/);
     expect(attempts).toBe(1); // failed on the first attempt, never retried
   });
 
@@ -52,7 +53,7 @@ describe("retryFlakyFetchTwice", () => {
       errorHandlers: [retryFlakyFetchTwice],
     });
 
-    const result = await runFlow(graph, userText("go"), ready);
+    const result = await runToCompletion(graph, userText("go"), ready);
 
     expect(attempts).toBe(3); // two retries, despite retryable: false
     expect(result).toBe("fetched");
@@ -75,7 +76,7 @@ describe("retryFlakyFetchTwice", () => {
       errorHandlers: [retryFlakyFetchTwice],
     });
 
-    await expect(runFlow(graph, userText("go"), ready)).rejects.toThrow();
+    await expect(runToCompletion(graph, userText("go"), ready)).rejects.toThrow();
     expect(attempts).toBe(3); // the initial attempt plus two retries, then fail
   });
 });

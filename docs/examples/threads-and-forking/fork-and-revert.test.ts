@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, runtime, userText } from "@behalf-js/core";
 import type { ModelPort, Profile, Message } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { draftReview } from "./fork-and-revert.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 function lastUserText(messages: readonly Message[]): string | undefined {
   const last = messages.at(-1);
@@ -57,7 +58,7 @@ describe("draftReview", () => {
       extensions: [ai({ models: () => port, bindings: [] })],
     });
 
-    const result = await runFlow(draftReview, userText("Add a dark mode toggle."), ready);
+    const result = await runToCompletion(draftReview, userText("Add a dark mode toggle."), ready);
 
     expect(result).toBe("Notified: Adds a dark mode toggle to settings, off by default.");
   });
@@ -69,7 +70,7 @@ describe("draftReview", () => {
       extensions: [ai({ models: () => port, bindings: [] })],
     });
 
-    await runFlow(draftReview, userText("Add a dark mode toggle."), ready);
+    await runToCompletion(draftReview, userText("Add a dark mode toggle."), ready);
 
     // First call: the graph's own entry prompt. Second call: the forked retry,
     // seeded with the rejection's feedback instead of the original request.
@@ -81,7 +82,7 @@ describe("draftReview", () => {
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: () => port, bindings: [] })] });
 
-    await runFlow(draftReview, userText("Add a dark mode toggle."), ready);
+    await runToCompletion(draftReview, userText("Add a dark mode toggle."), ready);
 
     const outputThreadIds = store
       .events()

@@ -87,7 +87,7 @@ This flow knows its own `flakyFetch` step is idempotent, so it retries up to twi
 schedule even when the raiser marks the error `retryable: false`. `backoff.test.ts` proves both
 halves of that: one test raises the error twice and lets the step succeed on its third attempt,
 recovering despite `retryable: false`; a second lets it fail every time and confirms the flow gives
-up, and confirms `runFlow` rejects, once the two-retry budget is spent.
+up, and confirms the run rejects, once the two-retry budget is spent.
 
 > [!WARNING] `retryable` only ever informs a handler that chooses to read it.
 > A handler ignoring it entirely, like `noRetryOnValidation` above, is just as valid: the field is

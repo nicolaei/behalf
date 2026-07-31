@@ -1,6 +1,6 @@
 // The Learn "Running flows" page's example: assembling a runtime, checking
 // coverage with satisfiesFlows before running anything, and running a flow
-// with runFlow. Driven with the library's own fakePort (@behalf-js/testing),
+// with seed() + driveFlow(). Driven with the library's own fakePort (@behalf-js/testing),
 // so its behavior (a clean coverage check, a deliberately-missing one, and a
 // real run) is exercised by basic.test.ts, not just typechecked.
 
@@ -9,7 +9,8 @@ import {
   defineGraph,
   userText,
   runtime,
-  runFlow,
+  seed,
+  driveFlow,
   satisfiesPersonas,
   tool,
 } from "@behalf-js/core";
@@ -81,5 +82,6 @@ export const missingTool = satisfiesPersonas(brokenChat, { models: () => fakePor
 // #endregion coverage
 
 // #region run-flow
-export const result = await runFlow(chat, userText("Say hello."), ready);
+seed(chat, userText("Say hello."), ready);
+export const result = await driveFlow(chat, ready);
 // #endregion run-flow

@@ -12,8 +12,8 @@ vocabulary, the same way a fake-timer library wraps a runtime's clock.
 
 ## Why a separate entry point
 
-`runFlow` drives a flow straight to its result: fine for production, but a test that wants to assert
-partway through a run needs to see the flow mid-flight, one node at a time.
+`driveFlow` drives a flow straight to its result: fine for production, but a test that wants to
+assert partway through a run needs to see the flow mid-flight, one node at a time.
 The engine's own primitives for that, `tick` and `tickUntilSuspended`, work in terms of
 `CursorState` and `parent`: internal bookkeeping for how the engine tracks a fan-out branch, not
 vocabulary a test author should need to learn.

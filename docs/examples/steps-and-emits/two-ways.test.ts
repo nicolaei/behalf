@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, runtime, runFlow, userText } from "@behalf-js/core";
+import { ai, runtime, userText } from "@behalf-js/core";
 import type { ModelPort } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { twoWays } from "./two-ways.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 /** A scripted ModelPort that always replies with the given text, no network. */
 function scriptedPort(replyText: string): ModelPort {
@@ -26,7 +27,11 @@ describe("twoWays", () => {
       extensions: [ai({ models: () => scriptedPort("bug"), bindings: [] })],
     });
 
-    const result = await runFlow(twoWays, userText("The submit button does nothing."), ready);
+    const result = await runToCompletion(
+      twoWays,
+      userText("The submit button does nothing."),
+      ready,
+    );
 
     expect(result).toBe("File a bug: reproduce, isolate, patch.");
   });
@@ -37,7 +42,7 @@ describe("twoWays", () => {
       extensions: [ai({ models: () => scriptedPort("feature"), bindings: [] })],
     });
 
-    const result = await runFlow(twoWays, userText("Add a dark mode toggle."), ready);
+    const result = await runToCompletion(twoWays, userText("Add a dark mode toggle."), ready);
 
     expect(result).toBe("Draft a proposal: scope, design, estimate.");
   });

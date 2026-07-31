@@ -228,14 +228,16 @@ const mcp = toolset("mcp", "Whatever the connected servers expose.");
 ### ToolHandler
 
 The implementation behind a tool, written by the author.
-It takes the input and a context that can stream progress and launch a child flow.
+It takes the input and a context that can stream progress and spawn a child agent.
 It may re-run on resume, so it owns its idempotency.
 
 ```ts
 type ToolContext = {
   thread: ThreadId;
   openStream(type: EventType): Stream; // open a fresh, logged stream scoped to this thread
-  runFlow: (flow: Graph, initialPrompt: Message) => Promise<unknown>;
+  correlationId: string; // this call's own id, shared by its toolCall/toolResult pair
+  appendEvent<T extends EventType>(payload: Event[T], type: T): void;
+  spawnAgent: (flow: Graph, brief: Message) => AgentHandle;
 };
 
 type ToolHandler<Input = unknown, Output = unknown> = (
@@ -247,7 +249,30 @@ type ToolHandler<Input = unknown, Output = unknown> = (
 ```ts
 // a handler that spawns a sub-agent — this is how spawning works
 const researchHandler: ToolHandler<{ question: string }, unknown> = async ({ question }, context) =>
-  context.runFlow(researcher, userText(question));
+  (await context.spawnAgent(researcher, userText(question)).result()).result;
+```
+
+A spawned agent is a child _session_ with its own log, created through an `AgentSpawner` the host
+registers on the ai extension (`ai({ models, bindings, spawner })`).
+The spawn is idempotent by the tool call's own `correlationId`, so re-dispatching a still-pending
+call after a restart attaches to the child already running instead of starting a second one.
+
+```ts
+type FinishResult = { result: string; reason?: string; succeeded: boolean };
+
+interface AgentHandle {
+  readonly id: SessionId;
+  result(): Promise<FinishResult>; // durable — re-awaitable after a restart
+}
+
+interface AgentSpawner {
+  spawn(key: string, flow: Graph, brief: Message): AgentHandle; // key = the tool call's correlationId
+}
+
+// the in-process implementation; the host says where a child session's store lives
+function localAgentSpawner(config: {
+  createRuntime: (key: string) => Promise<Runtime>;
+}): AgentSpawner;
 ```
 
 ### provide / expand
@@ -471,10 +496,10 @@ message, then applies it to the thread. `interrupt` fires wherever the graph cur
 `waitFor` node is parked on a message-based `Waitable`, every armed `interrupt` races it too,
 whichever provider it's built on — a message-based interrupt is resolved by kind, a signal-based one
 by its own `match()` against the committed log — and whichever condition is satisfied first wins;
-the loser keeps waiting. `runFlow`'s blocking driver runs this race for real (`waitForRace` in
-`src/engine/runtime/execution.ts`); `tick()`'s non-blocking equivalent still only checks
-message-based interrupts each call (see § tick()). result, which is also the output of a `use` node
-and what `runFlow` resolves with.
+the loser keeps waiting. `tick()` runs this race non-blockingly on every call: message-based
+candidates are peeked out of the pending inbox, then every signal-based interrupt's own `match()` is
+checked against the committed log. result, which is also the output of a `use` node and what
+`driveFlow` resolves with.
 A `use` node seeds its subgraph with the incoming value as its initial prompt.
 Edges may form cycles: an edge back to an earlier node re-enables it as a new run, whose output
 supersedes the old — this is how a loop works. `invalidate` is the separate, out-of-band path, for
@@ -603,7 +628,7 @@ flowchart LR
   ModelPort["ModelPort"] --> Runtime["runtime()"]
   ToolBindings["tool bindings<br/>standard + author"] --> Runtime
   Store["SessionStore"] --> Runtime
-  Runtime --> RunFlow["runFlow"]
+  Runtime --> RunFlow["seed + driveFlow"]
   Flows["flows"] --> Check["satisfiesFlows"]
   ModelPort --> Check
   ToolBindings --> Check
@@ -760,34 +785,41 @@ const missing = satisfiesFlows([feature, chat], resolveModel, bindings, waitable
 if (missing.length) throw new Error(JSON.stringify(missing));
 ```
 
-### runtime / runFlow
+### runtime / seed / driveFlow
 
 `runtime` builds what a flow runs against — model resolution, bindings, and store — expanding
-toolsets once. `runFlow` seeds a new session with a user message, drives it to completion, and
-resolves with the terminal output; a `parentThreadId` makes it a child, which is how a tool spawns a
-sub-agent.
-There is no separate `schedule` or `spawn`.
+toolsets once. `seed` records a new session's starting message as the log's own first durable fact
+and mints its scope; `driveFlow` advances that session until its root cursor is done, resolving with
+the terminal output.
+Between them there is no separate `schedule` or `spawn`.
+
+`driveFlow` is built on `tick` (below) rather than a driver of its own — there is exactly one
+engine.
+It parks on `store.awaitReceive()` whenever nothing can advance right now, so a session that reaches
+a `waitFor` simply waits, and one call keeps resuming across as many turns as the session needs.
 
 ```ts
 async function runtime(config: {
-  models: (model: Model) => ModelPort;
-  bindings: Binding[];
   store: SessionStore;
+  extensions?: EngineExtension[]; // model resolution and tool bindings come from ai({ ... })
   errorHandlers?: ErrorHandler[]; // consulted on a step error; a default retry handler runs last
 }): Promise<Runtime>;
 
-function runFlow(
-  flow: Graph,
-  initialPrompt: Message,
-  runtime: Runtime,
-  options?: { parentThreadId?: ThreadId },
-): Promise<unknown>;
+function seed(flow: Graph, input: unknown, runtime: Runtime): ScopeId;
+
+function driveFlow(flow: Graph, runtime: Runtime): Promise<unknown>;
 ```
 
 ```ts
-const ready = await runtime({ models: resolveModel, bindings, store });
-await runFlow(feature, userText("Add rate limiting to the API."), ready);
+const ready = await runtime({ store, extensions: [ai({ models: resolveModel, bindings })] });
+seed(feature, userText("Add rate limiting to the API."), ready);
+await driveFlow(feature, ready);
 ```
+
+> [!WARNING] One session, one store. `tick` reconstructs a session's position from the whole log, so
+> two independently-driven flows sharing a store each read the other's events as their own.
+> A child agent gets its own store — that is what `spawnAgent`/`AgentSpawner` (§ ToolHandler) is
+> for.
 
 `tick` advances a flow by one step per independently-progressing cursor and returns;
 `tickUntilSuspended` calls `tick` in a loop until every cursor is parked or done.
@@ -839,9 +871,11 @@ type ErrorHandler = (error: StepError, context: ErrorContext) => ErrorDecision |
 // undefined → defer to the next handler
 ```
 
-Behaviour: `retry` re-runs the step after `after` ms and bumps `attempts`; `fail` halts the flow and
-`runFlow` rejects. `retryable` is only an advisory hint from the raiser — the handler owns the
-policy.
+Behaviour: `retry` re-runs the step, after `after` ms; `fail` halts the flow and `driveFlow`
+rejects. `attempts` is derived from the committed log — the `error` events already recorded for that
+node on that scope — so a budget survives a restart, and a fresh `Runtime` over the same store picks
+up the count where the last one left off. `retryable` is only an advisory hint from the raiser; the
+handler owns the policy.
 A default handler runs last: it retries `retryable` errors with exponential backoff up to a small
 cap, otherwise fails.
 
@@ -865,7 +899,8 @@ const ready = await runtime({
   bindings: [provide(ask, async () => ({ answer: "42" }))],
   store,
 });
-await runFlow(chat, userText("hi"), ready);
+seed(chat, userText("hi"), ready);
+await driveFlow(chat, ready);
 ```
 
 ```ts

@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, runtime, runFlow, userText, satisfiesPersonas } from "@behalf-js/core";
+import { ai, runtime, userText, satisfiesPersonas } from "@behalf-js/core";
 import type { Message } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { createEchoPort, echoModel, bindings, support, supportFlow } from "./sketch.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 const noopStream = { delta: () => undefined };
 
@@ -60,7 +61,7 @@ describe("running the flow", () => {
       extensions: [ai({ models: () => createEchoPort(echoModel), bindings })],
     });
 
-    const result = await runFlow(supportFlow, userText("Hello there"), ready);
+    const result = await runToCompletion(supportFlow, userText("Hello there"), ready);
 
     expect(result).toEqual({ finishedBy: "finalMessage", text: "You said: Hello there" });
   });
