@@ -54,7 +54,7 @@ export default defineConfig([
 
   // Acceptance tests are black-box against the public surface.
   // They may only import from ../../index.js (public API) or ../../testing
-  // (future public test helpers). Internal engine/flow/adapter/session/gateway
+  // (future public test helpers). Internal graph/ai/session/gateway/runtime/adapter
   // modules are off-limits.
   {
     files: ["packages/core/src/tests/acceptance/**/*.ts"],
@@ -65,11 +65,12 @@ export default defineConfig([
           patterns: [
             {
               group: [
-                "../../engine/*",
-                "../../flow/*",
+                "../../graph/*",
+                "../../ai/*",
                 "../../adapters/**",
                 "../../session/*",
                 "../../gateway/*",
+                "../../runtime/*",
               ],
               message:
                 "Acceptance tests are black-box — import from ../../index.js or ../../testing (both public), not internal modules directly.",
@@ -80,24 +81,66 @@ export default defineConfig([
     },
   },
 
-  // src/engine/runtime/ sub-modules (fan-out.ts, drive.ts, execution.ts, ids.ts,
-  // routing.ts, step-runner.ts, tick.ts) are necessarily exported so they can
-  // import each other, but that also makes them reachable directly from
-  // anywhere else in the codebase, bypassing the engine/runtime.js barrel.
-  // This rule blocks that: only files inside src/engine/runtime/ itself, or
-  // src/engine/runtime.ts (the barrel), may import a sub-module directly.
+  // Layering: graph ← session ← {gateway, runtime} ← ai (see
+  // .plans/restructure-cockpit-and-behalf.md, "Refactoring Behalf" §
+  // "Core folders and their interface"). ai sits on top and may import
+  // everything below it; the enforceable, at-risk direction is the reverse —
+  // graph/session/gateway/runtime must never import from ai/. Pre-existing
+  // violations (graph/{step,graph,waitable}.ts, gateway/gateway.ts,
+  // runtime/{drive,tick,execution}.ts importing ai-shaped Message/UserMessage
+  // types) are exempted line-by-line via eslint-disable-next-line, each
+  // tagged with the specific B2 step that removes it — not carved out here,
+  // so this rule still catches any NEW lower-layer → ai import.
   {
-    files: ["packages/core/src/**/*.ts"],
-    ignores: ["packages/core/src/engine/runtime/**", "packages/core/src/engine/runtime.ts"],
+    files: [
+      "packages/core/src/graph/**/*.ts",
+      "packages/core/src/session/**/*.ts",
+      "packages/core/src/gateway/**/*.ts",
+      "packages/core/src/runtime/**/*.ts",
+    ],
     rules: {
       "no-restricted-imports": [
         "error",
         {
           patterns: [
             {
-              group: ["**/runtime/*"],
+              group: ["**/ai/*"],
               message:
-                "Import from engine/runtime.js (the barrel), not its internal sub-modules directly.",
+                "graph/session/gateway/runtime must not import from ai/ — ai is the top layer and depends on them, never the reverse. A pre-existing violation here needs an eslint-disable-next-line with a TODO(B2 step N) comment, not a rule exception.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
+  // src/runtime/ sub-modules (tick.ts, drive.ts, step-runner.ts, routing.ts,
+  // fan-out.ts, foreach.ts, ids.ts, execution.ts) are necessarily exported so
+  // they can import each other, but that also makes them reachable directly
+  // from anywhere else in the codebase, bypassing the runtime/index.js barrel.
+  // This rule blocks that: only files inside src/runtime/ itself may import a
+  // sub-module directly.
+  {
+    files: ["packages/core/src/**/*.ts"],
+    ignores: ["packages/core/src/runtime/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "**/runtime/tick.js",
+                "**/runtime/drive.js",
+                "**/runtime/step-runner.js",
+                "**/runtime/routing.js",
+                "**/runtime/fan-out.js",
+                "**/runtime/foreach.js",
+                "**/runtime/ids.js",
+                "**/runtime/execution.js",
+              ],
+              message:
+                "Import from runtime/index.js (the barrel), not its internal sub-modules directly.",
             },
           ],
         },
