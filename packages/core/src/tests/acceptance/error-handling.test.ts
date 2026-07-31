@@ -55,7 +55,7 @@ describe("a step error and its retry handler", () => {
     expect(loggedEventTypes(store)).toEqual(["input", "error", "output"]);
   });
 
-  it("rejects runFlow when nothing recovers the error", async () => {
+  it("rejects the run when nothing recovers the error", async () => {
     const alwaysFails = defineGraph("always-fails", (flow) => {
       const step = flow.step((context) =>
         Promise.resolve(context.fail({ type: "validation", message: "nope" })),

@@ -438,7 +438,7 @@ export async function driveStepEmit(
   };
 }
 
-/** Guards that a node is currently running (`current` is set) and looks up its identity — shared by `driveGraph`'s `openStream` and `modelCall`, whose "no running node" guards differ only in their error message. */
+/** Guards that a node is currently running (`current` is set) and looks up its identity — shared by `openStream` and `modelCall`, whose "no running node" guards differ only in their error message. */
 function currentNodeIdentity(
   current: NodeId | undefined,
   flow: Graph,

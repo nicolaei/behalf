@@ -1,5 +1,5 @@
 // Harness — scenario(). One behaviour, many worlds, shared scorers. Drives
-// with runFlow (not the graph/ stepping primitives — evals never pause
+// with runToCompletion (not the graph/ stepping primitives — evals never pause
 // mid-flow), N times per row, folds each into a Run, scores, gates.
 
 import { describe, it, expect } from "vitest";

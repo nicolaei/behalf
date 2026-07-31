@@ -1,5 +1,5 @@
 // Internal helper shared by scenario.ts and explore.ts — Subject/Agent only
-// carry a Profile, never a Graph, so runFlow needs something to drive. This
+// carry a Profile, never a Graph, so the harness needs something to drive. This
 // builds the canonical one-step "agent" graph: call the model, loop back to
 // itself while it used tools, finish otherwise.
 //

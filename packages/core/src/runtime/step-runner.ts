@@ -96,7 +96,7 @@ export async function runStep(run: Step, context: StepContext): Promise<Emit> {
   }
 }
 
-/** Validates a step's inputs against its join() tagging: a join()-tagged step reached with fewer than two inputs was wired as a plain step; a step reached with two or more inputs (a fan-out's convergence point) but not tagged with join() forgot to declare it. Shared by driveGraph and tick, which each check this the same way right before running a step. */
+/** Validates a step's inputs against its join() tagging: a join()-tagged step reached with fewer than two inputs was wired as a plain step; a step reached with two or more inputs (a fan-out's convergence point) but not tagged with join() forgot to declare it. Checked right before a step runs. */
 export function assertJoinTagging(nodeId: NodeId, run: Step, inputs: unknown[]): void {
   if ((run as { join?: boolean }).join === true && inputs.length < 2) {
     throw new Error(

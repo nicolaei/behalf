@@ -29,7 +29,7 @@ export interface NodeVisit {
 /**
  * Every scorer reads a `Run`, folded from one flow execution's committed
  * event log. Produced by driving a synthesized one-step "agent" graph
- * (`agentGraph(profile)`) through `runFlow` — evals always run a case to
+ * (`agentGraph(profile)`) to completion — evals always run a case to
  * completion, they don't pause mid-flow.
  * @public
  */

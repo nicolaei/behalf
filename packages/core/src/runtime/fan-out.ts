@@ -87,12 +87,10 @@ export function findSingleThenEdge(
  * Runs one node inside a fan-out branch: builds its `StepContext`, retries on
  * error via the shared `handleStepError` path, commits a `compact` the same
  * way the main loop does, and logs a plain output. A `waitFor` node is driven
- * through `runWaitForNode` — the same shared implementation `driveGraph` and
- * `tick()` both use — picking `blockingMessageSource` for `waitMode: "block"`
- * (runBranch/runFlow) or `peekingMessageSource` for `"peek"` (tick's
- * `advanceFanOutGroup`, the default), so a branch's waitFor behaves exactly
- * like a top-level one under whichever mode is in play, with no separate
- * copy of that logic to keep in sync. `notImplemented` — out of scope for a
+ * through `runWaitForNode` — the same shared implementation a top-level
+ * waitFor goes through, on the same non-blocking `peekingMessageSource`, so a
+ * branch's waitFor behaves exactly like a top-level one with no separate copy
+ * of that logic to keep in sync. `notImplemented` — out of scope for a
  * branch. Only a plain `step`'s result never follows an edge (that's the
  * caller's job, since `runBranch` walks a whole chain to the join while
  * tick's per-call branch advance stops after one node); a `waitFor`'s result
@@ -117,7 +115,7 @@ export async function runBranchNode(
   if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${nodeId}"`);
 
   // A state-less node is invisible to the state machine; fires (or not)
-  // exactly once per node visit here, mirroring driveGraph's own top-of-loop
+  // exactly once per node visit here, mirroring tick's own top-of-loop
   // check — so a branch's retried step re-checks the same already-seen
   // state and stays a no-op.
   stateTracker.maybeEmit(runtime, scope, nodeDef.state, stepIdentity(nodeId, nodeDef.label));
@@ -222,7 +220,7 @@ function applyBranchEdge(
  * One fan-out branch's reconstructed progress inside an in-flight group.
  * `scope` is set once the branch has actually run its first node (forked
  * off the group's `mainScope`, same as `runBranch` forks per branch for
- * `runFlow`) — absent while the branch hasn't been picked yet. `current` is
+ * the group's own fan-out) — absent while the branch hasn't been picked yet. `current` is
  * the node this branch will run next; once `done`, it stays at the last
  * chain node the branch actually ran, and `output` holds what it reported
  * to the join. `waitingFor` is set only while this branch is parked at its

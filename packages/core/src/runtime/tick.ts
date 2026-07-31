@@ -537,9 +537,8 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
     if (envelope.type === "input" && !started) {
       // The session's own starting fact: establishes the starting cursor at
       // the named node with the given value — the ONE place that fold
-      // happens for a session's own first value, replacing runFlow's old
-      // separate pre-drive `message` commit (see runtime.ts's `seed`/
-      // `runFlow`). Content-folding (if the value looks like a message) is
+      // happens for a session's own first value (see runtime.ts's `seed`).
+      // Content-folding (if the value looks like a message) is
       // entirely an extension's own concern now, read back via `state()`.
       started = true;
       const { node, value } = envelope.event as Event["input"];
@@ -621,7 +620,7 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
   return { kind: "single", scope: state.scope, tree: state.tree };
 }
 
-/** One level of tick()'s live execution — same shape as a `ReplayFrame`, plus what only matters while actually running: this level's own armed interrupts (recomputed per level, same as `driveGraph` does for every nested `driveGraph` call) and the `StepContext` its own nodes run with. */
+/** One level of tick()'s live execution — same shape as a `ReplayFrame`, plus what only matters while actually running: this level's own armed interrupts (recomputed per level) and the `StepContext` its own nodes run with. */
 interface LiveFrame {
   flow: Graph;
   interrupts: InterruptNode[];
@@ -676,7 +675,7 @@ function parentOf<TFrame>(path: PathLevel<TFrame>[]): NodeId | undefined {
   return enclosing?.kind === "use-descent" ? enclosing.outerNode : undefined;
 }
 
-/** `tick()`'s own `use` node handling: descends a level into the subgraph, seeded with the outer frame's own current input (no core-side seeding logic left — any scope transition the reaching edge's own `run` fn made via `ctx.thread.start`/`fork` already happened before this node was ever entered) — same descent `driveUseNode` builds for `runFlow`, just captured as data instead of an immediate recursive call. */
+/** `tick()`'s own `use` node handling: descends a level into the subgraph, seeded with the outer frame's own current input (no core-side seeding logic left — any scope transition the reaching edge's own `run` fn made via `ctx.thread.start`/`fork` already happened before this node was ever entered), captured as data rather than as a recursive call. */
 function advanceTickUseNode(
   node: Extract<NodeKind, { kind: "use" }>,
   frame: LiveFrame,
@@ -800,7 +799,7 @@ function routeAbort(
  *
  * A fan-out node's branches advance one at a time across separate `tick`
  * calls instead of running every branch to completion in one `Promise.all`
- * like `runFlow` does — see `advanceFanOutGroup`.
+ * at once — see `advanceFanOutGroup`.
  *
  * A `use` node is driven the same way tick() drives its own top-level graph:
  * one node at a time, on a child level wrapped in a `use-descent` tree node
@@ -871,7 +870,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     // A state-less node is invisible to the state machine; a declared
     // `state` fires (or not) exactly once per node visit here, before
     // dispatching to this node's own kind-specific handling below — mirrors
-    // driveGraph's own top-of-loop check, so state fires on tick's very
+    // the same top-of-loop check replay assumes, so state fires on tick's very
     // first call too, not just once cross-call persistence (via
     // `replayStateTracker` above) has something to dedupe against.
     stateTracker.maybeEmit(
@@ -986,8 +985,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     const inputs = pendingInputs ?? [frame.currentInput];
     pendingInputs = undefined;
 
-    // Validate JoinStep tagging the same way driveGraph does for runFlow —
-    // see assertJoinTagging.
+    // Validate JoinStep tagging — see assertJoinTagging.
     assertJoinTagging(frame.current, node.run, inputs);
 
     const stepContext: StepContext = withInputs(frame.context, inputs);

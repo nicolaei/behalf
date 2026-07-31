@@ -8,8 +8,8 @@ import { submitApproval } from "../acceptance/support.js";
 // throws notImplemented("fan-out branch node kind \"waitFor\"") for any
 // non-step node inside a branch. This is the tick()-specific half of that
 // capability: the branch must report parked with waitingFor, resumable
-// across separate tick() calls, not just work via runFlow's blocking path
-// (see fan-out-branch-waits.test.ts for the runFlow side).
+// across separate tick() calls, not just within one drive
+// (see fan-out-branch-waits.test.ts for the run-to-completion side).
 describe("ticking a fan-out branch that waits for a message", () => {
   const flow = defineGraph("tick-fan-out-branch-waits", (flowBuilder) => {
     const start = flowBuilder.step(outputs(() => "go"));

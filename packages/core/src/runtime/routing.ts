@@ -248,7 +248,7 @@ export function commitRoute(
  * first entry. `maybeEmit` is a no-op when `state` is `undefined`: a node with
  * no declared state is invisible to the state machine, not a silent
  * transition to some "undefined" phase. Shared by every node kind's own
- * check-and-emit — `driveGraph`'s main loop, `runBranchNode`'s fan-out/
+ * check-and-emit — `tick`'s main loop, `runBranchNode`'s fan-out/
  * forEach branches, and the two places an armed `interrupt` wins a race and
  * takes over routing. `maybeEmit`'s optional `step` identity is stamped onto
  * the envelope the same way every other event type carries `stepId`/
