@@ -31,10 +31,11 @@ export interface ExecutionScope {
 /**
  * The seam through which a capability (ai, timers, …) attaches to a `Runtime` without the
  * engine knowing its vocabulary. B2.1 gave this just enough for `runtime()` to fold an
- * extension's `waitables` into its existing `WaitableSource` handling; this step adds
- * `stepContext`, merged into every `StepContext` the runtime builds. Later B2 steps extend
- * this interface further with `edgeContext`, `workers`, and `reducers` — additive members
- * only, so today's extensions keep compiling unchanged.
+ * extension's `waitables` into its existing `WaitableSource` handling; B2.2 added
+ * `stepContext`, merged into every `StepContext` the runtime builds; this step adds
+ * `edgeContext`, merged into every `EdgeContext` the runtime builds when an edge with a
+ * `run` function fires. Later B2 steps extend this interface further with `workers` and
+ * `reducers` — additive members only, so today's extensions keep compiling unchanged.
  * @public
  */
 export interface EngineExtension {
@@ -47,6 +48,13 @@ export interface EngineExtension {
    * picking a last-writer-wins policy.
    */
   stepContext?(scope: ExecutionScope): Record<string, unknown>;
+  /**
+   * Merged into every `EdgeContext` the runtime builds for an edge whose `run` function
+   * fires — alongside the built-in `scope`/`appendEvent` fields. Same collision rule as
+   * `stepContext`: a contributed key colliding with a built-in `EdgeContext` field, or with
+   * another extension's contribution, throws rather than silently picking a winner.
+   */
+  edgeContext?(scope: ExecutionScope): Record<string, unknown>;
   /** Park conditions this extension can satisfy — each is started the same way `runtime()`
    * already auto-starts the tool executor, with no separate setup required by any caller. */
   waitables?: WaitableSource[];

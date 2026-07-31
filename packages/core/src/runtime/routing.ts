@@ -3,11 +3,13 @@
 
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) withMessage/deriveCompactedMessages fold ai-shaped Message; removed when thread folding moves into ai's reducers.
 import type { Message } from "../ai/message.js";
-import type { NodeId, EdgeDefinition } from "../graph/graph.js";
+import type { NodeId, EdgeDefinition, EdgeContext } from "../graph/graph.js";
 import type { ThreadAction, ThreadId } from "../graph/thread.js";
 import type { StepContext } from "../graph/step.js";
 import type { Runtime } from "./runtime.js";
-import type { Event } from "../session/event.js";
+import type { Event, EventType } from "../session/event.js";
+import { isCommittedEnvelope, type CommittedEnvelope } from "../session/envelope.js";
+import type { EngineExtension, ExecutionScope as ScopeHandle } from "./extension.js";
 import { freshThreadId } from "./ids.js";
 
 export type Thread = StepContext["thread"];
@@ -121,7 +123,94 @@ export function route(
   return { thread: followed.thread, input: output, reason: edge.reason, to: followed.to };
 }
 
-/** Logs a step's output and routes from it, in one step — `route`, plus the log line `commitOutput` folds in on top of `advance`. */
+/** The built-in `EdgeContext` field names — reserved so an extension's contributed key can never silently shadow one. Mirrors `step-runner.ts`'s `BUILT_IN_STEP_CONTEXT_KEYS`. */
+const BUILT_IN_EDGE_CONTEXT_KEYS = ["scope", "appendEvent"];
+
+/** Builds the `ExecutionScope` handle passed to an extension's `edgeContext(scope)` — same shape `step-runner.ts`'s `makeExecutionScope` builds for `stepContext`, scoped to `threadId` instead of a live-updating getter (an edge fn runs once, against one fixed thread id, never a moving one). `state()` has no real backing yet, same documented stub as the step-context side — the per-extension scope-state slot doesn't exist until reducers land (B2 step 6). */
+function makeEdgeExecutionScope(runtime: Runtime, threadId: ThreadId): ScopeHandle {
+  return {
+    scope: threadId,
+    events(): readonly CommittedEnvelope[] {
+      return runtime.store
+        .events()
+        .filter(isCommittedEnvelope)
+        .filter((envelope) => envelope.threadId === threadId);
+    },
+    state(): unknown {
+      // TODO(B2 step 6): wire to the real per-extension replay state once reducers land.
+      return undefined;
+    },
+    appendEvent<T extends EventType>(payload: Event[T], type: T): void {
+      runtime.store.append(payload, { type, threadId });
+    },
+  };
+}
+
+/** Merges every registered extension's `edgeContext(scope)` contribution into one object — the `EdgeContext` analogue of `step-runner.ts`'s `mergeExtensionStepContext`. Throws on a key that collides with a built-in field, or with another extension's contribution, rather than silently picking a last-writer-wins policy. */
+function mergeExtensionEdgeContext(
+  extensions: EngineExtension[],
+  scope: ScopeHandle,
+): Record<string, unknown> {
+  const merged: Record<string, unknown> = {};
+  for (const extension of extensions) {
+    if (!extension.edgeContext) continue;
+    const contributed = extension.edgeContext(scope);
+    for (const [key, value] of Object.entries(contributed)) {
+      if (BUILT_IN_EDGE_CONTEXT_KEYS.includes(key)) {
+        throw new Error(
+          `extension "${extension.name}" contributed edgeContext key "${key}", which collides with a built-in EdgeContext field`,
+        );
+      }
+      if (key in merged) {
+        throw new Error(
+          `two extensions contributed the same edgeContext key "${key}" — ambiguous merge, rename one`,
+        );
+      }
+      merged[key] = value;
+    }
+  }
+  return merged;
+}
+
+/** Builds the `EdgeContext` an edge's `run` function is called with — the built-in `scope`/`appendEvent` fields, plus every registered extension's `edgeContext(scope)` contribution merged on top (see `mergeExtensionEdgeContext`). */
+function buildEdgeContext(runtime: Runtime, threadId: ThreadId): EdgeContext {
+  const scope = makeEdgeExecutionScope(runtime, threadId);
+  const extensionFields = mergeExtensionEdgeContext(runtime.extensions, scope);
+  const context: EdgeContext = {
+    scope: threadId,
+    appendEvent: (payload, type) => {
+      scope.appendEvent(payload, type);
+    },
+  };
+  return Object.assign(context, extensionFields);
+}
+
+/**
+ * Runs the followed edge's `run` function, if it has one — exactly once, since this is only
+ * ever called from `commitRoute` (the moment a route genuinely commits live), never from the
+ * bare `route()` a replay reconstruction uses to recognize an already-logged event without
+ * redoing the work that produced it. Returns `output` unchanged when the edge carries no `run`.
+ */
+function runEdgeFn(
+  runtime: Runtime,
+  threadId: ThreadId,
+  edges: readonly EdgeDefinition[],
+  from: NodeId,
+  output: unknown,
+): unknown {
+  const edge = selectEdge(edges, from, output);
+  const run = edge?.options?.run;
+  if (!run) return output;
+  return run(output, buildEdgeContext(runtime, threadId));
+}
+
+/**
+ * Logs a step's output and routes from it, in one step — `route`, plus the log line
+ * `commitOutput` folds in on top of `advance`. This is the ONE call site that fires an edge's
+ * `run` function (see `runEdgeFn`): every other path that recovers a route already followed —
+ * `route()` alone, used throughout `tick.ts`'s `replayPosition` to recognize an already-logged
+ * event without redoing the work that produced it — never runs it again.
+ */
 export function commitRoute(
   runtime: Runtime,
   threadId: ThreadId,
@@ -132,8 +221,9 @@ export function commitRoute(
   thread: Thread,
 ): RouteResult {
   const edge = commitOutput(runtime, threadId, edges, from, output, step);
+  const input = runEdgeFn(runtime, threadId, edges, from, output);
   const followed = follow(edge, thread, runtime);
-  return { thread: followed.thread, input: output, reason: edge.reason, to: followed.to };
+  return { thread: followed.thread, input, reason: edge.reason, to: followed.to };
 }
 
 /** Returns a new thread with `message` appended to both its assembled view and its full history — never mutates the thread passed in. The shared tail of every path that folds one in. */
