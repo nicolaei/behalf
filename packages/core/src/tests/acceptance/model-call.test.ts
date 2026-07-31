@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText } from "../../index.js";
+import { ai, defineGraph, runtime, userText } from "../../index.js";
 import type { Message, ModelCallResult, Profile } from "../../index.js";
-import { fakePort } from "@behalf-js/testing";
+import { fakePort, runToCompletion } from "@behalf-js/testing";
 import { memoryStore } from "@behalf-js/stores";
 import { fakePortRuntime, loggedEventTypes, loggedEventAt } from "./support.js";
 
@@ -25,7 +25,7 @@ describe("a step that calls the model", () => {
   }
 
   it("appends the model's reply to the thread and reports no tool use", async () => {
-    const { result, reply } = (await runFlow(
+    const { result, reply } = (await runToCompletion(
       respondOnceGraph(),
       userText("hi"),
       await fakePortRuntime(),
@@ -45,7 +45,7 @@ describe("a step that calls the model", () => {
       extensions: [ai({ models: () => fakePort, bindings: [] })],
     });
 
-    await runFlow(respondOnceGraph(), userText("hi"), ready);
+    await runToCompletion(respondOnceGraph(), userText("hi"), ready);
 
     expect(loggedEventTypes(store)).toEqual(["input", "message", "output"]);
     expect(loggedEventAt(store, 1).event).toMatchObject({ message: { role: "assistant" } });

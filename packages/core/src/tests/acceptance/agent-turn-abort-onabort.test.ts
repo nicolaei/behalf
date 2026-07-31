@@ -13,7 +13,6 @@ import {
   ai,
   defineGraph,
   driveFlow,
-  runFlow,
   runtime,
   agentTurn,
   userInput,
@@ -28,6 +27,7 @@ import {
   awaitAssistantMessage,
   loggedEnvelopes,
 } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 /**
  * A chatGraph-shaped graph (turn <-> waitForPrompt, flow.onAbort(waitForPrompt))
@@ -179,7 +179,7 @@ describe("flow.onAbort backward compatibility", () => {
 
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: () => port, bindings: [] })] });
-    const done = runFlow(graph, userText("hi"), ready);
+    const done = runToCompletion(graph, userText("hi"), ready);
 
     sendAbort(store);
 

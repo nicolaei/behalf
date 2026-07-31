@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { ai, defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Waitable, WaitForResult } from "../../index.js";
 import { neverCalled } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // The unified message-or-signal pending queue and the signal Event kind
 // don't exist yet — `store.receive` isn't implemented. Written now so the
@@ -44,7 +45,7 @@ describe("waitFor on a signal-based Waitable resumes with the right value", () =
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    const done = runFlow(flow, userText("go"), ready);
+    const done = runToCompletion(flow, userText("go"), ready);
     // Simulates an external WaitableSource adapter pushing a fact onto the
     // log — no test code touches the inbox directly here, matching how a
     // real timer/webhook source would notify the engine.
@@ -65,7 +66,7 @@ describe("waitFor on a signal-based Waitable resumes with the right value", () =
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
-    const done = runFlow(flow, userText("go"), ready);
+    const done = runToCompletion(flow, userText("go"), ready);
     store.receive({ kind: "signal", name: "ping", payload: { pong: "hello" } });
 
     // Only the initial userText("go") — the signal never joined the thread.

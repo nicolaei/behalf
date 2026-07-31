@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText, RetryableError } from "../../index.js";
+import { ai, defineGraph, runtime, userText, RetryableError } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { ErrorHandler, ModelCallResult, ModelPort, Profile } from "../../index.js";
 import { loggedEnvelopes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // A model port's own thrown error carries no `retryable` hint by itself —
 // only the raiser (e.g. a ModelPort catching a real Anthropic 429) actually
@@ -57,7 +58,7 @@ describe("a thrown RetryableError carries its own retryability", () => {
       extensions: [ai({ models: () => port, bindings: [] })],
     });
 
-    const result = await runFlow(modelCallGraph(profile), userText("go"), ready);
+    const result = await runToCompletion(modelCallGraph(profile), userText("go"), ready);
 
     expect(calls()).toBe(2);
     expect((result as ModelCallResult).usedTools).toBe(false);
@@ -75,7 +76,7 @@ describe("a thrown RetryableError carries its own retryability", () => {
       extensions: [ai({ models: () => port, bindings: [] })],
     });
 
-    await runFlow(modelCallGraph(profile), userText("go"), ready);
+    await runToCompletion(modelCallGraph(profile), userText("go"), ready);
 
     const errorEnvelope = loggedEnvelopes(store).find((e) => e.type === "error");
     expect(errorEnvelope?.event).toMatchObject({ retryable: true });
@@ -90,7 +91,7 @@ describe("a thrown RetryableError carries its own retryability", () => {
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: () => port, bindings: [] })] });
 
-    await expect(runFlow(modelCallGraph(profile), userText("go"), ready)).rejects.toThrow();
+    await expect(runToCompletion(modelCallGraph(profile), userText("go"), ready)).rejects.toThrow();
 
     const errorEnvelope = loggedEnvelopes(store).find((e) => e.type === "error");
     expect(errorEnvelope?.event).toMatchObject({ retryable: false });

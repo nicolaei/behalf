@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, join, outputs } from "../../index.js";
+import { defineGraph, userText, join, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("a used subgraph that itself fans out", () => {
   const inner = defineGraph("use-fan-out-inner", (flow) => {
@@ -24,7 +25,7 @@ describe("a used subgraph that itself fans out", () => {
   });
 
   it("runs the subgraph's own fan-out and returns its joined result as the use node's output", async () => {
-    const result = await runFlow(outer, userText("go"), await storeOnlyRuntime());
+    const result = await runToCompletion(outer, userText("go"), await storeOnlyRuntime());
 
     expect(result).toEqual(expect.arrayContaining(["a", "b"]));
     expect(result).toHaveLength(2);

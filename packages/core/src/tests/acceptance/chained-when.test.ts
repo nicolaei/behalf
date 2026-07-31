@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, outputs } from "../../index.js";
+import { defineGraph, userText, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("chained `when` conditions before `otherwise`", () => {
   function classifyTo(value: number) {
@@ -22,19 +23,19 @@ describe("chained `when` conditions before `otherwise`", () => {
   }
 
   it("takes the first `when` when it matches, ignoring the rest", async () => {
-    const result = await runFlow(classifyTo(1), userText("go"), await storeOnlyRuntime());
+    const result = await runToCompletion(classifyTo(1), userText("go"), await storeOnlyRuntime());
 
     expect(result).toBe("low");
   });
 
   it("takes the second `when` when the first doesn't match but the second does", async () => {
-    const result = await runFlow(classifyTo(200), userText("go"), await storeOnlyRuntime());
+    const result = await runToCompletion(classifyTo(200), userText("go"), await storeOnlyRuntime());
 
     expect(result).toBe("high");
   });
 
   it("takes `otherwise` when neither `when` condition matches", async () => {
-    const result = await runFlow(classifyTo(50), userText("go"), await storeOnlyRuntime());
+    const result = await runToCompletion(classifyTo(50), userText("go"), await storeOnlyRuntime());
 
     expect(result).toBe("other");
   });

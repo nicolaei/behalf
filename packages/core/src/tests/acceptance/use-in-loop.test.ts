@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { ai, defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { textOf, neverCalled } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("re-entering a subgraph after waitFor (the chat pattern)", () => {
   const turn = defineGraph("turn", (flow) => {
@@ -24,7 +25,7 @@ describe("re-entering a subgraph after waitFor (the chat pattern)", () => {
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
-    const done = runFlow(twoTurnChat, userText("first"), ready);
+    const done = runToCompletion(twoTurnChat, userText("first"), ready);
     store.receive({
       kind: "message",
       message: {

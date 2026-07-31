@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, join, outputs } from "../../index.js";
+import { defineGraph, userText, join, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("fan-out with a multi-step branch", () => {
   const flowDef = defineGraph("multi-step-branch", (flow) => {
@@ -19,7 +20,7 @@ describe("fan-out with a multi-step branch", () => {
   });
 
   it("lets one branch run more than one step before joining", async () => {
-    const result = await runFlow(flowDef, userText("go"), await storeOnlyRuntime());
+    const result = await runToCompletion(flowDef, userText("go"), await storeOnlyRuntime());
 
     expect(result).toEqual(expect.arrayContaining(["a1-a2", "b"]));
     expect(result).toHaveLength(2);

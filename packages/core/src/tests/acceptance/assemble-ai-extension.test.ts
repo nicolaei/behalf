@@ -5,10 +5,11 @@
 // tool executor, and folds both into the thread correctly.
 
 import { describe, it, expect } from "vitest";
-import { ai, agentTurn, provide, runFlow, runtime, tool, userText } from "../../index.js";
+import { ai, agentTurn, provide, runtime, tool, userText } from "../../index.js";
 import type { ModelPort, Profile } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { assistantText, assistantToolCall, loggedEventTypes, textOf } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("ai() assembles model calls, the tool executor, and thread folding into one extension", () => {
   it("runs a model turn, a real tool call, and a final reply through runtime({ extensions: [ai(...)] })", async () => {
@@ -41,7 +42,7 @@ describe("ai() assembles model calls, the tool executor, and thread folding into
     });
 
     const flow = agentTurn(profile);
-    const result = await runFlow(flow, userText("look this up"), ready);
+    const result = await runToCompletion(flow, userText("look this up"), ready);
 
     // The model call happened (twice: the tool-requesting turn, then the
     // final reply) and the decoupled tool executor actually resolved the

@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Message, WaitForResult } from "../../index.js";
 import { textOf } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // Flow.forEach throws notImplemented and tick()/drive.ts have no support for
 // the forEach NodeKind yet. Written now so the shape is pinned before
@@ -43,7 +44,7 @@ describe("forEach runs a single dynamically-produced branch, end-to-end", () => 
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    const done = runFlow(flow, userText("go"), ready);
+    const done = runToCompletion(flow, userText("go"), ready);
     store.receive({
       kind: "message",
       message: {

@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "@behalf-js/core";
+import { ai, defineGraph, runtime, provide, tool, userText } from "@behalf-js/core";
 import type { Graph, ModelPort, Profile, AssistantMessage, SessionStore } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { foldRun } from "../../eval/run.js";
+import { runToCompletion } from "../../index.js";
 
 /** A scripted assistant message with a single text block. */
 function assistantText(text: string): AssistantMessage {
@@ -63,7 +64,7 @@ async function runAgentOnce(): Promise<{ store: SessionStore; latencyInput: numb
       }),
     ],
   });
-  await runFlow(agentGraph(profile), userText("find x"), ready);
+  await runToCompletion(agentGraph(profile), userText("find x"), ready);
   return { store, latencyInput: 42 };
 }
 
@@ -167,7 +168,7 @@ describe("foldRun on a run with no tool calls", () => {
       store,
       extensions: [ai({ models: () => scriptedPort, bindings: [] })],
     });
-    await runFlow(agentGraph(profile), userText("hi"), ready);
+    await runToCompletion(agentGraph(profile), userText("hi"), ready);
     return store;
   }
 

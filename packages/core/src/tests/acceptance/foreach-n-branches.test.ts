@@ -4,6 +4,12 @@ import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Message, WaitForResult } from "../../index.js";
 import { textOf, neverCalled } from "./support.js";
 
+// Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep): tick's
+// branch runner throws `fan-out branch node kind "use" is not implemented yet`
+// for these branch bodies. See the tracked problem "tick's branch runner has two
+// declared notImplemented gaps". (The two skipped cases below are a different,
+// already-tracked problem — the concurrent-branch scope race.)
+
 // Story 2 proved forEach works for exactly one item whose branch is a bare
 // waitFor node. This story generalizes both axes at once: (1) a dynamic
 // *number* of branches — 1, 2, and 5 — and (2) a branch that's a real

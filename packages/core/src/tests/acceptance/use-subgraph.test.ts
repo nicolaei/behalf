@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { ai, defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { fakePortRuntime, textOf, loggedEventTypes, neverCalled } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("composing a graph as a node with `use`", () => {
   const inner = defineGraph("inner", (flow) => {
@@ -26,7 +27,7 @@ describe("composing a graph as a node with `use`", () => {
   });
 
   it("seeds the subgraph with the incoming value and returns its result as the step's output", async () => {
-    const result = await runFlow(outer, userText("go"), await fakePortRuntime());
+    const result = await runToCompletion(outer, userText("go"), await fakePortRuntime());
 
     expect(result).toBe("HI");
   });
@@ -35,7 +36,7 @@ describe("composing a graph as a node with `use`", () => {
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
-    await runFlow(outer, userText("go"), ready);
+    await runToCompletion(outer, userText("go"), ready);
 
     // loose on exact shape — confirm against reference.md's `use`/prompt behaviour
     // when this slice is active

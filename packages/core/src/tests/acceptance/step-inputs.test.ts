@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, outputs } from "../../index.js";
+import { defineGraph, userText, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("a step reading its predecessor's output via context.inputs", () => {
   const pipeline = defineGraph("pipeline", (flow) => {
@@ -12,7 +13,7 @@ describe("a step reading its predecessor's output via context.inputs", () => {
   });
 
   it("receives the exact upstream output value, not a thread message", async () => {
-    const result = await runFlow(pipeline, userText("go"), await storeOnlyRuntime());
+    const result = await runToCompletion(pipeline, userText("go"), await storeOnlyRuntime());
 
     expect(result).toEqual({ value: 42 });
   });

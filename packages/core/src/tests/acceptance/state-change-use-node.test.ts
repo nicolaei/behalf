@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { stateChanges } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("stateChange on a `use` node's own state", () => {
   it("emits for the use node's own state before its subgraph runs", async () => {
@@ -21,7 +22,7 @@ describe("stateChange on a `use` node's own state", () => {
 
     const store = memoryStore();
     const ready = await runtime({ store });
-    const result = await runFlow(graph, userText("go"), ready);
+    const result = await runToCompletion(graph, userText("go"), ready);
 
     expect(result).toBe("echoed");
     expect(stateChanges(store)).toEqual([{ to: "red" }]);

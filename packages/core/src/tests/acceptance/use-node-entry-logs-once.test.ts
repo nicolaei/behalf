@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText } from "../../index.js";
+import { defineGraph, runtime, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { loggedEnvelopes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // seedUseNode unconditionally re-commits a real Message input to the log.
 // When a `use` node is the graph's own entry, its input was already
@@ -24,7 +25,7 @@ describe("a use node as the graph's own entry", () => {
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    await runFlow(outer, userText("hi"), ready);
+    await runToCompletion(outer, userText("hi"), ready);
 
     const inputEvents = loggedEnvelopes(store).filter((e) => e.type === "input");
     expect(inputEvents).toHaveLength(1);

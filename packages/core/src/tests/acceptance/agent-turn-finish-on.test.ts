@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, agentTurn, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, agentTurn, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Model, ModelPort, Profile } from "../../index.js";
 import { assistantToolCall, assistantText } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // agentTurn's default finish condition is [{ on: "finalMessage" }] — the turn
 // used no tools. `finishOn` overrides that with one or more conditions; the
@@ -47,7 +48,7 @@ describe("agentTurn finishOn", () => {
       ],
     });
 
-    const result = await runFlow(
+    const result = await runToCompletion(
       agentTurn(profile, { finishOn: [{ on: "toolCall", name: "submitSpec" }] }),
       userText("what page?"),
       ready,
@@ -92,7 +93,7 @@ describe("agentTurn finishOn", () => {
       ],
     });
 
-    const result = await runFlow(
+    const result = await runToCompletion(
       agentTurn(profile, { finishOn: [{ on: "toolCall", name: "submitSpec" }] }),
       userText("what page?"),
       ready,
@@ -124,7 +125,7 @@ describe("agentTurn finishOn", () => {
       ],
     });
 
-    const result = await runFlow(
+    const result = await runToCompletion(
       agentTurn(profile, {
         finishOn: [
           { on: "toolCall", name: "submitSpec" },
@@ -161,7 +162,7 @@ describe("agentTurn finishOn", () => {
       ],
     });
 
-    const result = await runFlow(
+    const result = await runToCompletion(
       agentTurn(profile, { finishOn: [{ on: "toolCall", name: "submitSpec" }] }),
       userText("hi"),
       ready,
@@ -181,7 +182,7 @@ describe("agentTurn finishOn", () => {
       extensions: [ai({ models: () => port, bindings: [] })],
     });
 
-    const result = await runFlow(agentTurn(profile), userText("hi"), ready);
+    const result = await runToCompletion(agentTurn(profile), userText("hi"), ready);
 
     expect(result).toEqual({ finishedBy: "finalMessage", text: "hello" });
   });

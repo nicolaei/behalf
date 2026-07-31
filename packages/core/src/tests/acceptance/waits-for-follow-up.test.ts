@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { ai, defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { textOf, loggedEventTypes, neverCalled } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("a graph that waits for the next prompt", () => {
   const twoTurns = defineGraph("two-turns", (flow) => {
@@ -22,7 +23,7 @@ describe("a graph that waits for the next prompt", () => {
     // NOTE: submit timing here is a known open concern — `waitFor` must check the
     // inbox reactively so this resolves regardless of when `submit` is called,
     // not because of lucky ordering.
-    const done = runFlow(twoTurns, userText("first"), ready);
+    const done = runToCompletion(twoTurns, userText("first"), ready);
     store.receive({
       kind: "message",
       message: {
@@ -40,7 +41,7 @@ describe("a graph that waits for the next prompt", () => {
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
-    const done = runFlow(twoTurns, userText("first"), ready);
+    const done = runToCompletion(twoTurns, userText("first"), ready);
     store.receive({
       kind: "message",
       message: {

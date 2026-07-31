@@ -4,6 +4,12 @@ import { memoryStore } from "@behalf-js/stores";
 import type { Waitable } from "../../index.js";
 import { loggedEventTypes } from "./support.js";
 
+// Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep):
+// tick's `peekingMessageSource` throws on a signal-based interrupt, and even
+// once that throw is fixed it never classifies a signal winner, so these
+// cases would park forever on the event-sourced path. See the tracked problem
+// "peekingMessageSource throws on a signal-based interrupt".
+
 // An interrupt still only races against a message-based waitFor by flattening
 // every armed Waitable into a message-kind list — a signal-based interrupt
 // makes that flattening throw instead of racing. Written now so the priority

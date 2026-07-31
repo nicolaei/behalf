@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, outputs, join } from "../../index.js";
+import { defineGraph, userText, outputs, join } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("fan-out join() validation", () => {
   it("rejects when the convergence node is not tagged with join()", async () => {
@@ -21,9 +22,9 @@ describe("fan-out join() validation", () => {
       converge.then(flow.finish);
     });
 
-    await expect(runFlow(badGraph, userText("go"), await storeOnlyRuntime())).rejects.toThrow(
-      "was not defined with join()",
-    );
+    await expect(
+      runToCompletion(badGraph, userText("go"), await storeOnlyRuntime()),
+    ).rejects.toThrow("was not defined with join()");
   });
 
   it("rejects when a join()-tagged step is reached as a plain, single-input step", async () => {
@@ -39,8 +40,8 @@ describe("fan-out join() validation", () => {
       converge.then(flow.finish);
     });
 
-    await expect(runFlow(badGraph, userText("go"), await storeOnlyRuntime())).rejects.toThrow(
-      "is tagged with join() but was reached as a plain step",
-    );
+    await expect(
+      runToCompletion(badGraph, userText("go"), await storeOnlyRuntime()),
+    ).rejects.toThrow("is tagged with join() but was reached as a plain step");
   });
 });

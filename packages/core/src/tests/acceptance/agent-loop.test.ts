@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   ai,
   defineGraph,
-  runFlow,
   runtime,
   provide,
   tool,
@@ -20,6 +19,7 @@ import type {
   WaitForResult,
 } from "../../index.js";
 import { assistantText, assistantToolCall, loggedEventTypes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // Rewritten for the non-blocking modelCall contract (Story 6 of the
 // decoupled model/tool-calls epic): modelCall no longer waits for tool calls
@@ -108,7 +108,7 @@ describe("the agent loop", () => {
       ],
     });
 
-    const result = await runFlow(agentLoop, userText("find x"), ready);
+    const result = await runToCompletion(agentLoop, userText("find x"), ready);
 
     // called twice — once producing a tool call, once finishing
     expect(callCount()).toBe(2);
@@ -128,7 +128,7 @@ describe("the agent loop", () => {
       ],
     });
 
-    await runFlow(agentLoop, userText("find x"), ready);
+    await runToCompletion(agentLoop, userText("find x"), ready);
 
     const types = loggedEventTypes(store);
     expect(types).toContain("toolCall");

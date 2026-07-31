@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { ai, defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { textOf, loggedEventTypes, neverCalled } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("invalidate reruns a node out of band", () => {
   // A fresh counter per test, so `planRuns` starts at zero each time.
@@ -35,7 +36,7 @@ describe("invalidate reruns a node out of band", () => {
       extensions: [ai({ models: neverCalled, bindings: [] })],
     });
 
-    const result = await runFlow(graph, userText("go"), ready);
+    const result = await runToCompletion(graph, userText("go"), ready);
 
     // plan reran with the reason, and implement finished on the new draft
     expect(result).toBe("implemented:draft-2");
@@ -46,7 +47,7 @@ describe("invalidate reruns a node out of band", () => {
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     // loose on exact position — confirm against reference.md's invalidate behaviour
     // when this slice is active
@@ -80,7 +81,7 @@ describe("invalidate reruns a node out of band", () => {
       implement.then(flow.finish);
     });
 
-    const result = (await runFlow(
+    const result = (await runToCompletion(
       graph,
       userText("go"),
       await runtime({
@@ -116,6 +117,14 @@ describe("invalidate reruns a node out of band", () => {
       implement.then(flow.finish);
     });
 
+    // Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep):
+    // a payload-less fork leaves no event tagged with the minted scope, so
+    // tick's replay silently falls back to the original thread and the rerun
+    // never escapes it. The sibling case above passes under either driver only
+    // because its `reason` payload happens to get logged on the new scope. See
+    // the tracked problem "invalidate with threadAction 'fork' loses the forked
+    // scope under tick" — flagged production-relevant, since driveFlow is what
+    // live sessions run on.
     const result = (await runFlow(
       graph,
       userText("go"),
@@ -153,7 +162,7 @@ describe("invalidate reruns a node out of band", () => {
       implement.then(flow.finish);
     });
 
-    const result = await runFlow(
+    const result = await runToCompletion(
       graph,
       userText("go"),
       await runtime({

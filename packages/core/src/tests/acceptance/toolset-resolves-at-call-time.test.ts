@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText, toolset, expand } from "../../index.js";
+import { ai, defineGraph, runtime, userText, toolset, expand } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { ModelPort, Profile } from "../../index.js";
 import { assistantToolCall, assistantText, loggedEventTypes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // Needs runtime() to eagerly expand every toolset binding's discover() once,
 // merging it with direct tool bindings into one name-keyed lookup that
@@ -48,7 +49,7 @@ describe("a model calling a tool that came from an expanded toolset", () => {
     });
 
     // if this doesn't throw "no tool binding for search", the toolset member was found and called
-    await runFlow(agentLoop, userText("find x"), ready);
+    await runToCompletion(agentLoop, userText("find x"), ready);
   });
 
   it("appends the toolset member's tool call and result to the session log", async () => {
@@ -59,7 +60,7 @@ describe("a model calling a tool that came from an expanded toolset", () => {
       extensions: [ai({ models: () => scriptedPort, bindings: [binding] })],
     });
 
-    await runFlow(agentLoop, userText("find x"), ready);
+    await runToCompletion(agentLoop, userText("find x"), ready);
 
     const types = loggedEventTypes(store);
     expect(types).toContain("toolCall");

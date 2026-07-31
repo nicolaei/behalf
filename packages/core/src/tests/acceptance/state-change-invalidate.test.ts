@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { stateChanges } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("stateChange and invalidate: same thread suppresses, a forked/new thread starts fresh", () => {
   it("does not refire when the invalidated node reruns on the same thread", async () => {
@@ -25,7 +26,7 @@ describe("stateChange and invalidate: same thread suppresses, a forked/new threa
 
     const store = memoryStore();
     const ready = await runtime({ store });
-    const result = await runFlow(graph, userText("go"), ready);
+    const result = await runToCompletion(graph, userText("go"), ready);
 
     expect(planRuns).toBe(2);
     expect(result).toBe("done");
@@ -54,7 +55,7 @@ describe("stateChange and invalidate: same thread suppresses, a forked/new threa
 
     const store = memoryStore();
     const ready = await runtime({ store });
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     // a forked thread is a fresh context: its own first "red" fires clean,
     // with no `from`, exactly like a brand-new thread's own first state

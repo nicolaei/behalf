@@ -1,9 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "@behalf-js/core";
+import { ai, defineGraph, runtime, provide, tool, userText } from "@behalf-js/core";
 import type { Model, Profile, Envelope, EventType, SessionStore } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { createAnthropicPort } from "./index.js";
 import type Anthropic from "@anthropic-ai/sdk";
+import { runToCompletion } from "@behalf-js/testing";
 
 type CommittedEnvelope = Extract<Envelope, { type: EventType }>;
 
@@ -96,7 +97,7 @@ describe("the real Anthropic port runs a tool call end to end", () => {
       ],
     });
 
-    await runFlow(graph, userText("what's the weather?"), ready);
+    await runToCompletion(graph, userText("what's the weather?"), ready);
 
     expect(handlerRan).toBe(true);
     const events = loggedEnvelopes(store);

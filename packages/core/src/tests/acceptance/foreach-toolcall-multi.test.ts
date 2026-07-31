@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   ai,
   defineGraph,
-  runFlow,
   runtime,
   provide,
   tool,
@@ -13,6 +12,7 @@ import {
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, ModelCallResult, ModelPort, Profile, WaitForResult } from "../../index.js";
 import { assistantToolCalls, loggedEventTypes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // Story 8 of the decoupled model/tool-calls epic: several real tool calls
 // requested in one model turn, resolved out of order by the decoupled
@@ -98,7 +98,7 @@ describe("multiple real tool calls in one turn", () => {
       ],
     });
 
-    const resultPromise = runFlow(flow, userText("go"), ready);
+    const resultPromise = runToCompletion(flow, userText("go"), ready);
 
     // Resolve out of request order: 3, then 1, then 2.
     gates["3"].resolve({ n: 30 });

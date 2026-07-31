@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, defineGraph, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, textOf } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("a tool handler spawning a child flow", () => {
   // Deferred to a factory, not built at describe-scope: `tool()` isn't real
@@ -45,7 +46,7 @@ describe("a tool handler spawning a child flow", () => {
       ],
     });
 
-    const result = await runFlow(parent, userText("go"), ready);
+    const result = await runToCompletion(parent, userText("go"), ready);
 
     expect(result).toBe("answered: what is x");
   });
@@ -81,7 +82,7 @@ describe("a tool handler spawning a child flow", () => {
       ],
     });
 
-    await runFlow(parent, userText("go"), ready);
+    await runToCompletion(parent, userText("go"), ready);
 
     expect(childParentThreadId).toBe(parentThreadId);
   });

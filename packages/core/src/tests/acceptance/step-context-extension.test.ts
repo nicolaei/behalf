@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runtime, runFlow, userText, outputs } from "../../index.js";
+import { defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { EngineExtension } from "../../index.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // Test-only extension — not shipped. Proves `EngineExtension.stepContext` gets merged into
 // every `StepContext` the runtime builds, alongside the built-in fields (inputs, thread,
@@ -30,7 +31,7 @@ describe("EngineExtension.stepContext merges a contributed method into StepConte
       extensions: [extension],
     });
 
-    const result = await runFlow(flow, userText("go"), ready);
+    const result = await runToCompletion(flow, userText("go"), ready);
 
     expect(result).toBe("debug-label-value");
   });

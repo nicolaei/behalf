@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
-import { fakePort } from "@behalf-js/testing";
+import { ai, defineGraph, runtime, provide, tool, userText } from "../../index.js";
+import { fakePort, runToCompletion } from "@behalf-js/testing";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, assistantToolCall } from "./support.js";
 
@@ -44,7 +44,7 @@ describe("a tool handler sees its own call's correlationId", () => {
       ],
     });
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     const toolCallEnvelope = store
       .events()
@@ -85,7 +85,7 @@ describe("a tool handler sees its own call's correlationId", () => {
       ],
     });
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     expect(typeof seenCorrelationId).toBe("string");
     expect(seenCorrelationId?.length).toBeGreaterThan(0);

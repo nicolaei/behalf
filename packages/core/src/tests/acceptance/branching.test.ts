@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { storeOnlyRuntime, loggedEventTypes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("branching on a step's output", () => {
   function branchOn(classifyValue: boolean) {
@@ -18,7 +19,7 @@ describe("branching on a step's output", () => {
   }
 
   it("routes to the matching `when` edge, not the fallthrough", async () => {
-    const result = await runFlow(branchOn(true), userText("hi"), await storeOnlyRuntime());
+    const result = await runToCompletion(branchOn(true), userText("hi"), await storeOnlyRuntime());
 
     expect(result).toBe("yes");
   });
@@ -26,7 +27,7 @@ describe("branching on a step's output", () => {
   it("routes to `otherwise` when no `when` condition matches", async () => {
     // this is the case a routing implementation that just picks the first
     // declared edge would get wrong — the `when` condition here is false
-    const result = await runFlow(branchOn(false), userText("hi"), await storeOnlyRuntime());
+    const result = await runToCompletion(branchOn(false), userText("hi"), await storeOnlyRuntime());
 
     expect(result).toBe("no");
   });
@@ -35,7 +36,7 @@ describe("branching on a step's output", () => {
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    await runFlow(branchOn(true), userText("hi"), ready);
+    await runToCompletion(branchOn(true), userText("hi"), ready);
 
     // only `classify` and `onTrue` run — `onFalse` never fires
     expect(loggedEventTypes(store)).toEqual(["input", "output", "output"]);

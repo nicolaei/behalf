@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runFlow, runtime, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { loggedEventTypes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // Needs runtime() to append a built-in default ErrorHandler after any
 // user-supplied ones — currently errorHandlers defaults to an empty array,
@@ -27,7 +28,7 @@ describe("the built-in default retry/backoff handler, with no errorHandlers conf
       store: memoryStore(),
     });
 
-    const result = await runFlow(graph, userText("go"), ready);
+    const result = await runToCompletion(graph, userText("go"), ready);
 
     expect(attempts).toBe(2);
     expect(result).toBe("recovered");
@@ -44,6 +45,12 @@ describe("the built-in default retry/backoff handler, with no errorHandlers conf
     });
     const ready = await runtime({ store });
 
+    // Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep):
+    // `tick()` rebuilds `attemptsByNode` per call, so the retry budget never
+    // accumulates and the default handler never reaches `{ action: "fail" }`.
+    // Worse, the resulting retry storm is pure microtasks, so it starves the
+    // event loop and vitest's own timeout can't fire. See the tracked problem
+    // "Retry budgets don't survive tick()".
     await expect(runFlow(alwaysRetryable, userText("go"), ready)).rejects.toThrow();
 
     // more than one "error" entry proves it retried at least once before giving up

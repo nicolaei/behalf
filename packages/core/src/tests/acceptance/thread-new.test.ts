@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, outputs, startThread } from "../../index.js";
+import { defineGraph, userText, outputs, startThread } from "../../index.js";
 import { fakePortRuntime } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("starting a brand-new thread on an edge", () => {
   const newThreadGraph = defineGraph("new-thread-edge", (flow) => {
@@ -12,7 +13,7 @@ describe("starting a brand-new thread on an edge", () => {
   });
 
   it("starts the target with only its own seeded prompt, none of the prior thread", async () => {
-    const result = await runFlow(newThreadGraph, userText("go"), await fakePortRuntime());
+    const result = await runToCompletion(newThreadGraph, userText("go"), await fakePortRuntime());
 
     expect(result).toBe(1);
   });

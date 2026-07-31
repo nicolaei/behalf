@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, outputs, join } from "../../index.js";
+import { defineGraph, userText, outputs, join } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("fan-in waits for the slower branch", () => {
   const fanOutAsync = defineGraph("fan-out-async", (flow) => {
@@ -22,7 +23,7 @@ describe("fan-in waits for the slower branch", () => {
   });
 
   it("runs the join exactly once, once the slower branch also finishes", async () => {
-    const result = await runFlow(fanOutAsync, userText("go"), await storeOnlyRuntime());
+    const result = await runToCompletion(fanOutAsync, userText("go"), await storeOnlyRuntime());
 
     expect(result).toEqual(expect.arrayContaining(["fast", "slow"]));
     expect(result).toHaveLength(2);

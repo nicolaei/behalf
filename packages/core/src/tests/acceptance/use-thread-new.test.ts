@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, outputs, startThread } from "../../index.js";
+import { defineGraph, userText, outputs, startThread } from "../../index.js";
 import { fakePortRuntime } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("a `use` node reached via ctx.thread.start on the reaching edge", () => {
   const inner = defineGraph("inner-fresh", (flow) => {
@@ -18,7 +19,7 @@ describe("a `use` node reached via ctx.thread.start on the reaching edge", () =>
   });
 
   it("starts the subgraph on a brand-new thread when the reaching edge says so", async () => {
-    const result = await runFlow(outer, userText("go"), await fakePortRuntime());
+    const result = await runToCompletion(outer, userText("go"), await fakePortRuntime());
 
     expect(result).toBe(1);
   });

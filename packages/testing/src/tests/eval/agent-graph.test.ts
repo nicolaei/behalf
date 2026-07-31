@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, runFlow, runtime, provide, tool, userText } from "@behalf-js/core";
+import { ai, runtime, provide, tool, userText } from "@behalf-js/core";
 import type { ModelPort, Profile, AssistantMessage, ModelCallResult } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { agentGraph } from "../../eval/harness/agent-graph.js";
+import { runToCompletion } from "../../index.js";
 
 function assistantText(text: string): AssistantMessage {
   return {
@@ -42,7 +43,11 @@ describe("agentGraph", () => {
       extensions: [ai({ models: () => scriptedPort, bindings: [] })],
     });
 
-    const result = (await runFlow(agentGraph(profile), userText("hi"), ready)) as ModelCallResult;
+    const result = (await runToCompletion(
+      agentGraph(profile),
+      userText("hi"),
+      ready,
+    )) as ModelCallResult;
 
     expect(calls).toBe(1);
     expect(result.usedTools).toBe(false);
@@ -70,7 +75,7 @@ describe("agentGraph", () => {
       ],
     });
 
-    const result = (await runFlow(
+    const result = (await runToCompletion(
       agentGraph(profile),
       userText("find x"),
       ready,
@@ -102,7 +107,7 @@ describe("agentGraph", () => {
       ],
     });
 
-    await runFlow(agentGraph(profile), userText("find x"), ready);
+    await runToCompletion(agentGraph(profile), userText("find x"), ready);
 
     expect(calls).toBe(3);
   });

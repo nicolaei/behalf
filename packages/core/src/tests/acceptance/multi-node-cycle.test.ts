@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, outputs } from "../../index.js";
+import { defineGraph, userText, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("a cycle through a distinct intermediate node", () => {
   // A fresh counter per test — this graph isn't a self-loop like the agent
@@ -23,7 +24,7 @@ describe("a cycle through a distinct intermediate node", () => {
   }
 
   it("loops A -> B -> A until the condition holds, then finishes with A's last output", async () => {
-    const result = await runFlow(cycleGraph(), userText("go"), await storeOnlyRuntime());
+    const result = await runToCompletion(cycleGraph(), userText("go"), await storeOnlyRuntime());
 
     expect(result).toBe(3);
   });

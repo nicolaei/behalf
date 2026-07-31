@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { loggedEnvelopes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("an interrupt node's own label is preserved on its output envelope", () => {
   it("stamps stepName with the interrupt's declared label, same as any other node kind", async () => {
@@ -24,7 +25,7 @@ describe("an interrupt node's own label is preserved on its output envelope", ()
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    const done = runFlow(graph, userText("go"), ready);
+    const done = runToCompletion(graph, userText("go"), ready);
     store.receive({
       kind: "message",
       message: { role: "user", intent: "standard", kind: "cancel", content: [] },

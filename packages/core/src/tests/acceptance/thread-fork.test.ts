@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText, outputs, forkThread } from "../../index.js";
+import { ai, defineGraph, runtime, userText, outputs, forkThread } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("forking a thread on an edge", () => {
   const forkGraph = defineGraph("fork-edge", (flow) => {
@@ -23,7 +24,7 @@ describe("forking a thread on an edge", () => {
       store: memoryStore(),
       extensions: [ai({ models: neverCalled, bindings: [] })],
     });
-    const result = (await runFlow(forkGraph, userText("go"), ready)) as {
+    const result = (await runToCompletion(forkGraph, userText("go"), ready)) as {
       startThreadId: unknown;
       forkedThreadId: unknown;
       forkedFrom?: { thread: unknown; at: number };

@@ -3,6 +3,12 @@ import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js
 import { memoryStore } from "@behalf-js/stores";
 import { stateChanges } from "./support.js";
 
+// Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep): under
+// tick, concurrent branches sharing the parent's scope fail to dedupe their
+// stateChange emits (two `processing` events instead of one). Same family as
+// the tracked problem "Concurrent forEach branches sharing one scope id race
+// on live thread reads (post-B2.8 thread extraction)".
+
 describe("stateChange inside forEach branches", () => {
   // Unlike a static fan-out branch, a forEach branch runs on the PARENT's own
   // thread, not a forked one (see foreach-branch-finish-thread.test.ts, which

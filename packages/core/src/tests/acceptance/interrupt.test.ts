@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { SessionStore } from "../../index.js";
 import { loggedEventTypes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("interrupt fires wherever the graph currently is", () => {
   const withInterrupt = defineGraph("with-interrupt", (flow) => {
@@ -28,7 +29,7 @@ describe("interrupt fires wherever the graph currently is", () => {
 
     // parked at `waitFor("resume")`; a "cancel" message (the interrupt's kind) arrives instead
     // NOTE: submit timing is the same known open concern as waitFor's own test.
-    done = runFlow(withInterrupt, userText("go"), ready);
+    done = runToCompletion(withInterrupt, userText("go"), ready);
     store.receive({
       kind: "message",
       message: { role: "user", intent: "standard", kind: "cancel", content: [] },

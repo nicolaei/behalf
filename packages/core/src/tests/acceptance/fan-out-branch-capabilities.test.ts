@@ -12,6 +12,7 @@ import {
 } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { storeOnlyRuntime, neverCalled, loggedEventTypes, loggedEnvelopes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // Every scenario here needs a fan-out branch's StepContext to have the same
 // capabilities as the main-loop's — currently callTool/compact/invalidate are
@@ -47,7 +48,7 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
       ],
     });
 
-    const result = await runFlow(graph, userText("go"), ready);
+    const result = await runToCompletion(graph, userText("go"), ready);
 
     // branches run in parallel on their own forked threads — assert membership, not order
     expect(result).toEqual(expect.arrayContaining([{ hits: ["behalf"] }, "other"]));
@@ -79,6 +80,10 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
       joinStep.then(flow.finish);
     });
 
+    // Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep):
+    // `advanceFanOutGroup` throws `tick: fan-out branch invalidate is not
+    // implemented yet`. See the tracked problem "tick's branch runner has two
+    // declared notImplemented gaps".
     await runFlow(graph, userText("go"), await storeOnlyRuntime());
 
     expect(attempts).toBe(2);
@@ -107,7 +112,7 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     // then the branch's compaction is logged, same as a main-path step's would be
     expect(loggedEventTypes(store)).toContain("compaction");
@@ -138,7 +143,7 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
       joinStep.then(flow.finish);
     });
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     const committed = loggedEnvelopes(store).find(
       (envelope) =>

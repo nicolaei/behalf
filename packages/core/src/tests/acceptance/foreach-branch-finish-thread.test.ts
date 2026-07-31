@@ -14,6 +14,11 @@ import { memoryStore } from "@behalf-js/stores";
 import type { Graph, ModelCallResult, ModelPort, Profile, WaitForResult } from "../../index.js";
 import { assistantToolCall, loggedEnvelopes } from "./support.js";
 
+// Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep): under
+// tick the branch's finish-fold `output` lands on a second thread, so this
+// invariant holds only on the blocking path. See the tracked problem "forEach
+// branch finish-fold lands on a second thread under tick".
+
 // Reproduces a stray thread id observed live in examples/multi-step-agent: every
 // time a forEach tool-call branch subgraph reaches its own internal `finish`,
 // the engine folds it back into the outer flow via a "output" event (see

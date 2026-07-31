@@ -10,6 +10,7 @@ import {
   orphanedToolCallIds,
   at,
 } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // agentTurn is the library's own reusable "run a model, wait for every tool
 // call it made, fold their results into one combined message, loop" graph —
@@ -66,7 +67,7 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
       ],
     });
 
-    const result = await runFlow(agentTurn(profile), userText("go"), ready);
+    const result = await runToCompletion(agentTurn(profile), userText("go"), ready);
 
     expect(result).toEqual({ finishedBy: "finalMessage", text: "done" });
     expect(call).toBe(2);
@@ -95,7 +96,7 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
       ],
     });
 
-    await runFlow(agentTurn(profile), userText("go"), ready);
+    await runToCompletion(agentTurn(profile), userText("go"), ready);
 
     const toolMessages = loggedEnvelopes(store).filter(
       (e) => e.type === "message" && (e.event as { message: Message }).message.role === "tool",
@@ -138,6 +139,13 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
       ],
     });
 
+    // Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep):
+    // two agents on one store is exactly the case tick can't disambiguate —
+    // `replayPosition` reconstructs from `store.events()` with no per-run
+    // scoping key. See the tracked problem "Two concurrent agents sharing one
+    // store can't be driven by tick", and `runFlow`'s own doc comment, which
+    // names this test and points at the one-store-per-spawned-agent model that
+    // replaces the pattern.
     const [resultA, resultB] = await Promise.all([
       runFlow(agentTurn(profileA), userText("go A"), ready),
       runFlow(agentTurn(profileB), userText("go B"), ready),

@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, defineGraph, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Message, ModelCallResult, ModelPort, Profile, Tool } from "../../index.js";
 import { loggedEnvelopes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // runModelCall still executes every requested tool call inline, synchronously
 // (unchanged from today) — this story is only about the request side:
@@ -61,7 +62,7 @@ describe("runModelCall commits toolCall events and outputs correlationIds", () =
       extensions: [ai({ models: () => scriptedPort, bindings: bindingsFor(echo, shout) })],
     });
 
-    await runFlow(flow, userText("go"), ready);
+    await runToCompletion(flow, userText("go"), ready);
 
     const toolCallEvents = loggedEnvelopes(store).filter(
       (envelope) => envelope.type === "toolCall",
@@ -79,7 +80,7 @@ describe("runModelCall commits toolCall events and outputs correlationIds", () =
       extensions: [ai({ models: () => scriptedPort, bindings: bindingsFor(echo, shout) })],
     });
 
-    const result = (await runFlow(flow, userText("go"), ready)) as ModelCallResult;
+    const result = (await runToCompletion(flow, userText("go"), ready)) as ModelCallResult;
 
     expect(result.toolCalls).toEqual([
       { correlationId: "call-a", name: "echo" },

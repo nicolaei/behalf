@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, defineGraph, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { ModelCallResult, ModelPort, Profile } from "../../index.js";
 import { assistantToolCall, loggedEventTypes, awaitEventType } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // Story 5 kept runModelCall's tool execution inline and blocking — the model-
 // call step doesn't return until every requested tool call is done. That
@@ -46,7 +47,7 @@ describe("a decoupled executor resolves tool calls independently of modelCall", 
     });
 
     const resolved = awaitEventType(store, "toolResult");
-    const result = (await runFlow(flow, userText("go"), ready)) as ModelCallResult;
+    const result = (await runToCompletion(flow, userText("go"), ready)) as ModelCallResult;
 
     // modelCall's own promise already settled — the tool handler is still
     // gated shut, so nothing has resolved it yet.

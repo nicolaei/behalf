@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { storeOnlyRuntime, loggedEventTypes, loggedEventAt } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("a graph with a single step", () => {
   const echo = defineGraph("echo", (flow) => {
@@ -11,7 +12,7 @@ describe("a graph with a single step", () => {
   });
 
   it("resolves with the step's output", async () => {
-    const result = await runFlow(echo, userText("hi"), await storeOnlyRuntime());
+    const result = await runToCompletion(echo, userText("hi"), await storeOnlyRuntime());
 
     expect(result).toBe("done");
   });
@@ -20,7 +21,7 @@ describe("a graph with a single step", () => {
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    await runFlow(echo, userText("hi"), ready);
+    await runToCompletion(echo, userText("hi"), ready);
 
     expect(loggedEventTypes(store)).toEqual(["input", "output"]);
     expect(loggedEventAt(store, 1).event).toEqual({ value: "done" });

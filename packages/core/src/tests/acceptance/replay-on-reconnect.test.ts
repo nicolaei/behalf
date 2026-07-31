@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { loggedEnvelopes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("a late reader replays the full committed log", () => {
   const graph = defineGraph("two-events", (flow) => {
@@ -14,7 +15,7 @@ describe("a late reader replays the full committed log", () => {
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     // a "late reader" — connects only now, after the flow has already finished
     const replay = loggedEnvelopes(store);

@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs, join } from "../../index.js";
+import { defineGraph, runtime, userText, outputs, join } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { storeOnlyRuntime, loggedEventTypes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("fan-out and fan-in", () => {
   const fanOut = defineGraph("fan-out", (flow) => {
@@ -20,7 +21,7 @@ describe("fan-out and fan-in", () => {
   });
 
   it("runs each branch once, joins with one input per branch", async () => {
-    const result = await runFlow(fanOut, userText("go"), await storeOnlyRuntime());
+    const result = await runToCompletion(fanOut, userText("go"), await storeOnlyRuntime());
 
     // branches run in parallel on their own forked threads, so the spec gives
     // no ordering guarantee across them — assert membership, not order
@@ -32,7 +33,7 @@ describe("fan-out and fan-in", () => {
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    await runFlow(fanOut, userText("go"), ready);
+    await runToCompletion(fanOut, userText("go"), ready);
 
     // then the log holds the initial input and five outputs (start, 3 branches, join)
     const types = loggedEventTypes(store);

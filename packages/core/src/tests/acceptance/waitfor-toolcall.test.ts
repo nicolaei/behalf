@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs, toolCall } from "../../index.js";
+import { defineGraph, runtime, userText, outputs, toolCall } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { WaitForResult } from "../../index.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // toolCall(correlationId)'s match() throws notImplemented — it's still a
 // Story 1 stub. Written now, isolated from forEach entirely, so the
@@ -22,7 +23,7 @@ describe("toolCall(correlationId) Waitable resolves via a committed toolResult",
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    const done = runFlow(flow, userText("go"), ready);
+    const done = runToCompletion(flow, userText("go"), ready);
     store.append({ correlationId: "call-1", output: { celsius: 21 } }, { type: "toolResult" });
 
     const result = (await done) as WaitForResult<{ celsius: number }>;
@@ -33,7 +34,7 @@ describe("toolCall(correlationId) Waitable resolves via a committed toolResult",
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    const done = runFlow(flow, userText("go"), ready);
+    const done = runToCompletion(flow, userText("go"), ready);
     store.append(
       { correlationId: "some-other-call", output: "irrelevant" },
       { type: "toolResult" },

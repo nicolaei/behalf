@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { ai, defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { textOf, loggedEventTypes, neverCalled } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("waitFor(userInput(kind)) behaves identically to today's waitFor(kind)", () => {
   const twoTurns = defineGraph("two-turns-userinput", (flow) => {
@@ -18,7 +19,7 @@ describe("waitFor(userInput(kind)) behaves identically to today's waitFor(kind)"
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
-    const done = runFlow(twoTurns, userText("first"), ready);
+    const done = runToCompletion(twoTurns, userText("first"), ready);
     store.receive({
       kind: "message",
       message: {
@@ -36,7 +37,7 @@ describe("waitFor(userInput(kind)) behaves identically to today's waitFor(kind)"
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
-    const done = runFlow(twoTurns, userText("first"), ready);
+    const done = runToCompletion(twoTurns, userText("first"), ready);
     store.receive({
       kind: "message",
       message: {

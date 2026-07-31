@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, defineGraph, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, loggedEnvelopes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // Needs ToolContext.openStream to be wired for real — currently a
 // notImplemented stub in buildToolContext. Mirrors StepContext.openStream's
@@ -33,7 +34,7 @@ describe("a tool handler opening its own stream", () => {
       ],
     });
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     const committed = loggedEnvelopes(store).find(
       (envelope) =>
@@ -71,7 +72,7 @@ describe("a tool handler opening its own stream", () => {
       ],
     });
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     const committed = loggedEnvelopes(store).find(
       (envelope) =>

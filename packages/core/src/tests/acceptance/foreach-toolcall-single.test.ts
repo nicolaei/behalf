@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   ai,
   defineGraph,
-  runFlow,
   runtime,
   provide,
   tool,
@@ -13,6 +12,7 @@ import {
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, ModelCallResult, ModelPort, Profile, WaitForResult } from "../../index.js";
 import { assistantToolCall, loggedEventTypes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // Story 7 of the decoupled model/tool-calls epic: forEach + toolCall resolve
 // a real, registered tool call end-to-end, genuinely parked (not resolved by
@@ -74,7 +74,7 @@ describe("forEach + toolCall resolve one real tool call", () => {
       ],
     });
 
-    const resultPromise = runFlow(flow, userText("find x"), ready);
+    const resultPromise = runToCompletion(flow, userText("find x"), ready);
 
     // Give the executor a turn to run — it should find nothing to resolve
     // yet, since the handler is still gated shut. The flow must not have

@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText } from "../../index.js";
+import { defineGraph, runtime, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { loggedEventTypes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 // Every scenario here needs context.openStream to be real — it's currently a
 // notImplemented stub in both the main-loop and branch StepContext builders.
@@ -22,7 +23,7 @@ describe("a step can open its own stream", () => {
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     // then the log holds the initial input, the step's own committed stream,
     // and the step's routed output — three distinct committed events
@@ -54,7 +55,7 @@ describe("a step can open its own stream", () => {
       throw new Error("changes() completed without yielding a delta envelope");
     })();
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     // then a delta pushed via context.openStream reaches a changes() subscriber,
     // and the delta itself never lands in the committed log

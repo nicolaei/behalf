@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, userText, join, outputs } from "../../index.js";
+import { defineGraph, userText, join, outputs } from "../../index.js";
 import { storeOnlyRuntime } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("a fan-out branch that itself fans out", () => {
   const flowDef = defineGraph("nested-fan-out", (flow) => {
@@ -23,8 +24,8 @@ describe("a fan-out branch that itself fans out", () => {
   });
 
   it("throws notImplemented rather than silently mishandling it", async () => {
-    await expect(runFlow(flowDef, userText("go"), await storeOnlyRuntime())).rejects.toThrow(
-      /fan-out branch that itself fans out/,
-    );
+    await expect(
+      runToCompletion(flowDef, userText("go"), await storeOnlyRuntime()),
+    ).rejects.toThrow(/fan-out branch that itself fans out/);
   });
 });

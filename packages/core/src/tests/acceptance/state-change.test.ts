@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { stateChanges } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("stateChange: fires only when a node's declared `state` differs from the last one seen", () => {
   // Four nodes: two share "red" (proving the event collapses repeats), one
@@ -35,7 +36,7 @@ describe("stateChange: fires only when a node's declared `state` differs from th
   it("fires once entering a state, not once per node that shares it", async () => {
     const store = memoryStore();
     const ready = await runtime({ store });
-    await runFlow(trafficLight, userText("go"), ready);
+    await runToCompletion(trafficLight, userText("go"), ready);
 
     const redChanges = stateChanges(store).filter((change) => change.to === "red");
     expect(redChanges).toHaveLength(1);
@@ -44,7 +45,7 @@ describe("stateChange: fires only when a node's declared `state` differs from th
   it("omits `from` on the very first state a run enters", async () => {
     const store = memoryStore();
     const ready = await runtime({ store });
-    await runFlow(trafficLight, userText("go"), ready);
+    await runToCompletion(trafficLight, userText("go"), ready);
 
     expect(stateChanges(store)[0]).toEqual({ to: "red" });
   });
@@ -52,7 +53,7 @@ describe("stateChange: fires only when a node's declared `state` differs from th
   it("fires again on a real transition, carrying the prior state as `from`", async () => {
     const store = memoryStore();
     const ready = await runtime({ store });
-    await runFlow(trafficLight, userText("go"), ready);
+    await runToCompletion(trafficLight, userText("go"), ready);
 
     expect(stateChanges(store)).toEqual([{ to: "red" }, { from: "red", to: "green" }]);
   });
@@ -63,7 +64,7 @@ describe("stateChange: fires only when a node's declared `state` differs from th
     // an in-progress phase.
     const store = memoryStore();
     const ready = await runtime({ store });
-    await runFlow(trafficLight, userText("go"), ready);
+    await runToCompletion(trafficLight, userText("go"), ready);
 
     expect(stateChanges(store)).toHaveLength(2);
   });
@@ -92,7 +93,7 @@ describe("stateChange works on any node kind, not just step", () => {
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    const done = runFlow(approvalGate, userText("go"), ready);
+    const done = runToCompletion(approvalGate, userText("go"), ready);
     store.receive({
       kind: "message",
       message: {

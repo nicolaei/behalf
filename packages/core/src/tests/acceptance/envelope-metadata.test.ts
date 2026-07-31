@@ -1,8 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { SessionStore } from "../../index.js";
 import { loggedEnvelopes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("envelope metadata: sequence, at, stepId, stepName, threadId", () => {
   // Two steps, not one — a single-envelope run can't tell "consistent across
@@ -23,7 +24,7 @@ describe("envelope metadata: sequence, at, stepId, stepName, threadId", () => {
   beforeEach(async () => {
     store = memoryStore();
     const ready = await runtime({ store });
-    await runFlow(labeled, userText("go"), ready);
+    await runToCompletion(labeled, userText("go"), ready);
   });
 
   it("stamps a strictly increasing, unique sequence on every envelope", () => {

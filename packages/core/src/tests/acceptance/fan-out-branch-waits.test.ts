@@ -1,16 +1,8 @@
 import { describe, it, expect } from "vitest";
-import {
-  ai,
-  defineGraph,
-  runFlow,
-  runtime,
-  userText,
-  join,
-  outputs,
-  userInput,
-} from "../../index.js";
+import { ai, defineGraph, runtime, userText, join, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { textOf, submitApproval, neverCalled } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("a fan-out branch that waits for a message before joining", () => {
   const flow = defineGraph("fan-out-branch-waits", (flowBuilder) => {
@@ -33,7 +25,7 @@ describe("a fan-out branch that waits for a message before joining", () => {
     const store = memoryStore();
     const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
-    const done = runFlow(flow, userText("go"), ready);
+    const done = runToCompletion(flow, userText("go"), ready);
     submitApproval(store);
 
     const result = await done;

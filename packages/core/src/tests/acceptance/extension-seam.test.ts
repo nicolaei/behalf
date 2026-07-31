@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runtime, runFlow, userText, outputs } from "../../index.js";
+import { defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Waitable, WaitForResult, WaitableSource, EngineExtension } from "../../index.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 function pingSignal(): Waitable<{ pong: string }> {
   return {
@@ -48,7 +49,7 @@ describe("runtime({ extensions }) folds an extension's waitables into its regist
       extensions: [extension],
     });
 
-    const result = await runFlow(flow, userText("go"), ready);
+    const result = await runToCompletion(flow, userText("go"), ready);
 
     expect(result).toBe("hi");
   });

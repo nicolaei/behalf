@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText } from "../../index.js";
+import { defineGraph, runtime, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { ErrorHandler, Graph, SessionStore } from "../../index.js";
 import { loggedEventTypes } from "./support.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("a step error and its retry handler", () => {
   // A fresh attempt counter per test, and a fresh graph name (defineGraph
@@ -38,7 +39,7 @@ describe("a step error and its retry handler", () => {
     const { graph, retryOnce, attempts } = flakyFixture("flaky");
     const ready = await runtimeFor(memoryStore(), retryOnce);
 
-    const result = await runFlow(graph, userText("go"), ready);
+    const result = await runToCompletion(graph, userText("go"), ready);
 
     expect(attempts()).toBe(2);
     expect(result).toBe("recovered");
@@ -49,7 +50,7 @@ describe("a step error and its retry handler", () => {
     const store = memoryStore();
     const ready = await runtimeFor(store, retryOnce);
 
-    await runFlow(graph, userText("go"), ready);
+    await runToCompletion(graph, userText("go"), ready);
 
     expect(loggedEventTypes(store)).toEqual(["input", "error", "output"]);
   });
@@ -66,6 +67,6 @@ describe("a step error and its retry handler", () => {
       store: memoryStore(),
     });
 
-    await expect(runFlow(alwaysFails, userText("go"), ready)).rejects.toThrow();
+    await expect(runToCompletion(alwaysFails, userText("go"), ready)).rejects.toThrow();
   });
 });

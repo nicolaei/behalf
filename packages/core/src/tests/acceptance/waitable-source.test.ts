@@ -1,16 +1,9 @@
 import { describe, it, expect } from "vitest";
-import {
-  defineGraph,
-  runFlow,
-  runtime,
-  userText,
-  outputs,
-  satisfiesFlows,
-  userInput,
-} from "../../index.js";
+import { defineGraph, runtime, userText, outputs, satisfiesFlows, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Waitable, WaitForResult, WaitableSource } from "../../index.js";
 import { FlowNotReadyError } from "../../index.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 function pingSignal(): Waitable<{ pong: string }> {
   return {
@@ -54,7 +47,7 @@ describe("a registered WaitableSource satisfies a flow end-to-end", () => {
     const ready = await runtime({ store });
 
     fakeSource.start(store);
-    const result = await runFlow(flow, userText("go"), ready);
+    const result = await runToCompletion(flow, userText("go"), ready);
 
     expect(result).toBe("hi");
   });

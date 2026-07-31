@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("the inbox reflects pending and consumed input", () => {
   // Deliberately store-level, no graph: this is SessionStore's own contract
@@ -25,7 +26,7 @@ describe("the inbox reflects pending and consumed input", () => {
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    const done = runFlow(consumeInbox, userText("go"), ready);
+    const done = runToCompletion(consumeInbox, userText("go"), ready);
     store.receive({
       kind: "message",
       message: {

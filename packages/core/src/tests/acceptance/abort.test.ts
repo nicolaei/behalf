@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText } from "../../index.js";
+import { ai, defineGraph, runtime, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { ModelPort } from "../../index.js";
+import { runToCompletion } from "@behalf-js/testing";
 
 describe("aborting an in-flight run", () => {
   // Deliberately one `it`, not a graph/log pair: the aborted flag on the log
@@ -35,7 +36,7 @@ describe("aborting an in-flight run", () => {
     // an abort is submitted before the model call resolves
     // (best-effort design — confirm the exact abort/streaming contract against
     // reference.md's Gateway behaviour when this slice is active)
-    const done = runFlow(graph, userText("hi"), ready).catch(() => undefined);
+    const done = runToCompletion(graph, userText("hi"), ready).catch(() => undefined);
     store.receive({ kind: "message", message: { role: "user", intent: "abort", content: [] } });
     await done;
 
