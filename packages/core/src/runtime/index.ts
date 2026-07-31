@@ -7,7 +7,7 @@ export type { EngineExtension, ExecutionScope, ScopeStateReducer } from "./exten
 export type { ErrorContext, ErrorDecision, ErrorHandler } from "./errors.js";
 export { RetryableError } from "./errors.js";
 export type { Runtime } from "./runtime.js";
-export { runtime, runFlow, driveFlow, seed } from "./runtime.js";
+export { runtime, driveFlow, seed } from "./runtime.js";
 export type { StepIdentity } from "./routing.js";
 export { stepIdentity } from "./routing.js";
 export { freshCorrelationId, freshScopeId } from "./ids.js";

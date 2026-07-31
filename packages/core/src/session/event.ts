@@ -1,6 +1,6 @@
 // Session store — Event. See docs/reference.md § "Event".
 
-import type { ScopeAction } from "../graph/thread.js";
+import type { ScopeAction, ScopeId } from "../graph/thread.js";
 import type { NodeId } from "../graph/graph.js";
 
 /**
@@ -47,7 +47,19 @@ export interface Event {
   // separate constructions of the "same" graph — see freshNodeId), so replay
   // can't trust it and must re-derive the target from its OWN flow.onAbort
   // instead (see applyInvalidationEvent).
-  invalidation: { target: NodeId; action?: ScopeAction; payload?: unknown; cause?: "abort" };
+  //
+  // The envelope's own `threadId` is the scope the rerun CONTINUES on — the
+  // freshly minted one when `action` is `"fork"`/`"new"`, so replay resyncs to
+  // it from the envelope alone and a payload-less fork isn't silently lost.
+  // `from` records the scope that was invalidated, which `threadId` used to
+  // carry.
+  invalidation: {
+    target: NodeId;
+    action?: ScopeAction;
+    from?: ScopeId;
+    payload?: unknown;
+    cause?: "abort";
+  };
   error: { type: string; message: string; retryable?: boolean; cause?: unknown };
 }
 

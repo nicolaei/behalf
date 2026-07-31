@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   ai,
   defineGraph,
-  runFlow,
   runtime,
   userText,
   outputs,
@@ -80,11 +79,7 @@ describe("a fan-out branch step has full StepContext capabilities", () => {
       joinStep.then(flow.finish);
     });
 
-    // Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep):
-    // `advanceFanOutGroup` throws `tick: fan-out branch invalidate is not
-    // implemented yet`. See the tracked problem "tick's branch runner has two
-    // declared notImplemented gaps".
-    await runFlow(graph, userText("go"), await storeOnlyRuntime());
+    await runToCompletion(graph, userText("go"), await storeOnlyRuntime());
 
     expect(attempts).toBe(2);
   });

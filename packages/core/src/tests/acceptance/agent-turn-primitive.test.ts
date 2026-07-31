@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ai, agentTurn, runFlow, runtime, provide, tool, userText } from "../../index.js";
+import { ai, agentTurn, runtime, provide, tool, userText } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Message, Model, ModelPort, Profile, Tool } from "../../index.js";
 import {
@@ -111,7 +111,7 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
     expect(at(toolMessages, 0).threadId).toBeDefined();
   });
 
-  it("keeps each thread's collected results on its own thread, even when correlationIds collide", async () => {
+  it("keeps each concurrent agent's collected results in its own session, even when correlationIds collide", async () => {
     const tools = toolsFor(count);
     const scriptFor = (): ModelPort["respond"] => {
       let call = 0;
@@ -120,49 +120,49 @@ describe.each(CALL_COUNTS)("agentTurn, %i simultaneous tool call(s)", (count) =>
         return Promise.resolve(call === 1 ? (firstReply(tools) as never) : assistantText("done"));
       };
     };
-    const respondA = scriptFor();
-    const respondB = scriptFor(); // both scripts reuse correlationIds "1"/"2" — deliberate collision
     const profileA: Profile = { model: MODEL, system: "agent-A", tools };
     const profileB: Profile = { model: MODEL, system: "agent-B", tools };
 
-    const store = memoryStore();
-    const ready = await runtime({
-      store,
-      extensions: [
-        ai({
-          models: () => ({
-            model: MODEL,
-            respond: (p, m, s) => (p.system === "agent-A" ? respondA(p, m, s) : respondB(p, m, s)),
+    // Two concurrent agents are two SESSIONS, each with its own store — the
+    // model `spawnAgent` gives a spawned child (see the AgentSpawner port).
+    // Sharing one log between two independently-driven agents isn't a
+    // supported shape any more: `tick()` reconstructs position from the whole
+    // log, so two runs on one store would read each other's events as their
+    // own. What this case actually protects is that colliding correlationIds
+    // across concurrent agents never merge their tool results — which the
+    // per-session store enforces structurally.
+    async function runAgent(profile: Profile): Promise<{
+      result: unknown;
+      store: ReturnType<typeof memoryStore>;
+    }> {
+      const respond = scriptFor();
+      const store = memoryStore();
+      const ready = await runtime({
+        store,
+        extensions: [
+          ai({
+            models: () => ({ model: MODEL, respond }),
+            bindings: tools.map((t) => provide(t, () => Promise.resolve({ ok: true }))),
           }),
-          bindings: tools.map((t) => provide(t, () => Promise.resolve({ ok: true }))),
-        }),
-      ],
-    });
+        ],
+      });
+      const result = await runToCompletion(agentTurn(profile), userText(profile.system), ready);
+      return { result, store };
+    }
 
-    // Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep):
-    // two agents on one store is exactly the case tick can't disambiguate —
-    // `replayPosition` reconstructs from `store.events()` with no per-run
-    // scoping key. See the tracked problem "Two concurrent agents sharing one
-    // store can't be driven by tick", and `runFlow`'s own doc comment, which
-    // names this test and points at the one-store-per-spawned-agent model that
-    // replaces the pattern.
-    const [resultA, resultB] = await Promise.all([
-      runFlow(agentTurn(profileA), userText("go A"), ready),
-      runFlow(agentTurn(profileB), userText("go B"), ready),
-    ]);
+    const [runA, runB] = await Promise.all([runAgent(profileA), runAgent(profileB)]);
 
-    expect([resultA, resultB]).toEqual([
+    expect([runA.result, runB.result]).toEqual([
       { finishedBy: "finalMessage", text: "done" },
       { finishedBy: "finalMessage", text: "done" },
     ]);
 
-    const toolMessages = loggedEnvelopes(store).filter(
-      (e) => e.type === "message" && (e.event as { message: Message }).message.role === "tool",
-    );
-    expect(toolMessages).toHaveLength(2); // one per thread, never merged
-    expect(new Set(toolMessages.map((e) => e.threadId)).size).toBe(2);
-    for (const envelope of toolMessages) {
-      const message = (envelope.event as { message: Message }).message;
+    for (const run of [runA, runB]) {
+      const toolMessages = loggedEnvelopes(run.store).filter(
+        (e) => e.type === "message" && (e.event as { message: Message }).message.role === "tool",
+      );
+      expect(toolMessages).toHaveLength(1); // one per session, never merged
+      const message = (at(toolMessages, 0).event as { message: Message }).message;
       expect(message.content.filter((b) => b.type === "toolResult")).toHaveLength(count);
     }
   });

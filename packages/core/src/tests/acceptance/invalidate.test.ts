@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText, outputs } from "../../index.js";
+import { ai, defineGraph, runtime, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { textOf, loggedEventTypes, neverCalled } from "./support.js";
 import { runToCompletion } from "@behalf-js/testing";
@@ -117,15 +117,7 @@ describe("invalidate reruns a node out of band", () => {
       implement.then(flow.finish);
     });
 
-    // Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep):
-    // a payload-less fork leaves no event tagged with the minted scope, so
-    // tick's replay silently falls back to the original thread and the rerun
-    // never escapes it. The sibling case above passes under either driver only
-    // because its `reason` payload happens to get logged on the new scope. See
-    // the tracked problem "invalidate with threadAction 'fork' loses the forked
-    // scope under tick" — flagged production-relevant, since driveFlow is what
-    // live sessions run on.
-    const result = (await runFlow(
+    const result = (await runToCompletion(
       graph,
       userText("go"),
       await runtime({

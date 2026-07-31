@@ -1,6 +1,5 @@
-// Fan-out machinery: running one branch node, walking a branch's full chain
-// to its join (runFlow's own fan-out path), and reconstructing/advancing an
-// in-flight fan-out group one branch-step at a time (tick's own path).
+// Fan-out machinery: running one branch node, and reconstructing/advancing an
+// in-flight fan-out group one branch-step at a time (tick's only path).
 
 import type { Graph, NodeId, EdgeDefinition } from "../graph/graph.js";
 import type { ScopeId } from "../graph/thread.js";
@@ -25,17 +24,12 @@ import { callTool } from "../ai/tool-executor.js";
 import {
   findInterruptNodes,
   runWaitForNode,
-  blockingMessageSource,
   peekingMessageSource,
   type MessageSource,
   type WaitContext,
 } from "./drive.js";
 import type { CursorState, TickOutcome } from "./tick.js";
 
-/** What running one fan-out branch to completion settled with — a normal reach of its convergence node, or a nested `invalidate` emit that means the fan-out step itself must be rerun instead of joining. */
-export type BranchResult =
-  | { kind: "output"; output: unknown }
-  | { kind: "invalidate"; emit: Extract<Emit, { invalidate: NodeId }> };
 
 /**
  * Walks each branch's linear .then() chain to find the node where all
@@ -110,7 +104,6 @@ export async function runBranchNode(
   nodeId: NodeId,
   input: unknown,
   ctx: ExecutionContext,
-  waitMode: "block" | "peek" = "peek",
 ): Promise<
   | { kind: "invalidate"; emit: Extract<Emit, { invalidate: NodeId }>; scope: ScopeId }
   | { kind: "output"; output: unknown; scope: ScopeId }
@@ -165,8 +158,7 @@ export async function runBranchNode(
 
   if (nodeDef.kind === "waitFor") {
     const interrupts = findInterruptNodes(flow);
-    const source: MessageSource =
-      waitMode === "block" ? blockingMessageSource(runtime) : peekingMessageSource(runtime);
+    const source: MessageSource = peekingMessageSource(runtime);
     const wait: WaitContext = {
       interrupts,
       context: branchContext,
@@ -204,66 +196,8 @@ export async function runBranchNode(
   return { kind: "output", output: stepOutput, scope };
 }
 
-/**
- * Runs one fan-out branch to completion on its own forked scope, walking
- * every step in its linear .then() chain until reaching `joinNodeId`.
- * `callTool`/`compact`/`invalidate`/`error` behave the same as the main loop
- * at every step; `invalidate` bubbles up to the caller instead of being acted
- * on locally (see the fan-out handling in `driveStepEmit`), and errors go
- * through the same retry-or-fail path. `step` and `waitFor` nodes are
- * supported inside a branch — a `waitFor` genuinely blocks this branch (via
- * `runBranchNode`'s `"block"` mode) until a matching message arrives, same
- * as the top-level drive loop's own `waitFor` handling, but scoped to this
- * branch's own forked scope; `use` or a nested fan-out are notImplemented.
- * Each node's own work is delegated to `runBranchNode`, shared with tick's
- * per-call branch advance so both drive the exact same node logic.
- */
-export async function runBranch(
-  startNode: NodeId,
-  input: unknown,
-  joinNodeId: NodeId,
-  ctx: ExecutionContext,
-): Promise<BranchResult> {
-  const { flow } = ctx;
-  let currentNode = startNode;
-  let currentScope = ctx.scope;
-  let currentInput = input;
 
-  for (;;) {
-    const nodeDef = flow.nodes.get(currentNode);
-    if (!nodeDef) throw new Error(`graph "${flow.name}" has no node "${currentNode}"`);
-    if (nodeDef.kind !== "step" && nodeDef.kind !== "waitFor")
-      notImplemented(`fan-out branch node kind "${nodeDef.kind}"`);
 
-    const result = await runBranchNode(
-      currentNode,
-      currentInput,
-      { ...ctx, scope: currentScope },
-      "block",
-    );
-    currentScope = result.scope;
-    if (result.kind === "invalidate") return result;
-    if (result.kind === "parked") unreachable("runBranch: blocking waitFor reported parked");
-
-    if (result.kind === "routed") {
-      // driveWaitForMessage already resolved the routed edge (this node's own,
-      // or an armed interrupt's) — nothing left to look up.
-      if (result.to === joinNodeId) return { kind: "output", output: result.input };
-      currentNode = result.to;
-      currentInput = result.input;
-      continue;
-    }
-
-    // Follow the step's single outgoing then edge.
-    const thenEdge = findSingleThenEdge(flow.edges, currentNode);
-
-    if (thenEdge.to === joinNodeId) return { kind: "output", output: result.output };
-
-    // Advance to the next step in this branch.
-    currentNode = thenEdge.to;
-    currentInput = result.output;
-  }
-}
 
 /** Applies a branch step's resolved `then` edge (or an already-resolved `{ from, to }` pair, e.g. a `waitFor`'s routed target): reaching the join marks the branch done, holding its output and settling `current` on the step that just produced it (`from` — the node the caller just ran) so it stays there per `BranchReplay.current`'s own contract ("once done, it stays at the last chain node the branch actually ran"); otherwise advances `current`/`currentInput` to `to`. Shared by `runBranch`'s own loop state, `replayBranchOutput`/`replayBranchMessage`, and `advanceFanOutGroup` — every place a branch's step-to-step edge gets resolved — so all of them settle a branch reaching its join the same way. */
 function applyBranchEdge(

@@ -4,7 +4,8 @@
 // "rows x runs" shape both harnesses drive before scoring diverges.
 // Not exported from eval/index.ts — an implementation detail.
 
-import { ai, runtime, runFlow } from "@behalf-js/core";
+import { ai, runtime } from "@behalf-js/core";
+import { runToCompletion } from "../../index.js";
 import type { Profile } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import type { Example } from "../fixtures.js";
@@ -31,7 +32,7 @@ export async function runRow<World, Output>(
     store: memoryStore(),
     extensions: [ai({ models: () => models, bindings: fixtures.bindings })],
   });
-  await runFlow(agentGraph(profile), row.input, ready);
+  await runToCompletion(agentGraph(profile), row.input, ready);
   const latency = Date.now() - started;
   return foldRun<World, Output>(ready.store.events(), world, latency);
 }

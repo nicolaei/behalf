@@ -7,7 +7,7 @@
 import type { NodeId } from "../graph/graph.js";
 import type { ScopeId } from "../graph/thread.js";
 import type { Runtime, StepIdentity } from "../runtime/index.js";
-import { runFlow, stepIdentity, freshCorrelationId } from "../runtime/index.js";
+import { seed, driveFlow, stepIdentity, freshCorrelationId } from "../runtime/index.js";
 import type { Tool, ToolContext, ToolHandler, Binding } from "./tool.js";
 import type { Model } from "./model.js";
 import type { ModelPort } from "./model-port.js";
@@ -61,8 +61,11 @@ export function buildToolContext(
     appendEvent: (payload, type) => {
       runtime.store.append(payload, { type, threadId: scope });
     },
-    runFlow: (flow, initialPrompt) =>
-      runFlow(flow, initialPrompt, runtime, { parentThreadId: scope }),
+    // TODO(B2.10): replaced by spawnAgent behind the AgentSpawner port.
+    runFlow: (flow, initialPrompt) => {
+      seed(flow, initialPrompt, runtime);
+      return driveFlow(flow, runtime);
+    },
   };
 }
 

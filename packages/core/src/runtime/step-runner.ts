@@ -27,50 +27,44 @@ import { RetryableError } from "./errors.js";
 import { StateTracker } from "./routing.js";
 
 /**
- * Bundles the two pieces of per-branching-construct bookkeeping that used to
- * travel as separate `ExecutionContext` fields — the per-node retry counter
- * (`attemptsByNode`) and the `stateChange` dedup tracker (`stateTracker`) —
- * and names the two lifecycle rules a branching construct picks between,
- * replacing the "sometimes pass `ctx.stateTracker`, sometimes construct
- * `new StateTracker()`" pattern that used to live only in comments at each
- * construction site (driveStepEmit's fan-out, fan-out.ts's `runBranch`/
- * `advanceFanOutGroup`, foreach.ts's `advanceForEachGroup`).
+ * The `stateChange` dedup tracker, plus the two lifecycle rules a branching
+ * construct picks between — replacing the "sometimes pass `ctx.stateTracker`,
+ * sometimes construct `new StateTracker()`" pattern that used to live only in
+ * comments at each construction site.
  *
- * `fork()` — a branch that gets its OWN new scope (a static fan-out
- * branch, forked off the parent's scope): fresh `stateTracker`, since a
- * `state` declared inside it must not dedupe against the parent scope's
- * already-tracked state — it's genuinely a different scope now. Does NOT
- * fork `attemptsByNode`: a retry budget has never had a forking distinction
- * anywhere in this engine (every branching construct shares one counter per
- * node id), and this refactor preserves that rather than changing it as a
- * side effect.
+ * `fork()` — a branch that gets its OWN new scope (a static fan-out branch,
+ * forked off the parent's scope): fresh `stateTracker`, since a `state`
+ * declared inside it must not dedupe against the parent scope's
+ * already-tracked state — it's genuinely a different scope now.
  *
- * `descend()` — a branch that continues on the SAME (unforked) scope, just
- * a new call/frame scope (a `use` node's subgraph, a `forEach` branch):
- * shares the parent's `stateTracker`, since two such branches (or a branch
- * and the scope it shares) declaring the same `state` must dedupe into one
+ * `descend()` — a branch that continues on the SAME (unforked) scope, just a
+ * new call/frame scope (a `use` node's subgraph, a `forEach` branch): shares
+ * the parent's `stateTracker`, since two such branches (or a branch and the
+ * scope it shares) declaring the same `state` must dedupe into one
  * `stateChange` — they're really the same scope's own history.
+ *
+ * Retry budgets used to live here too, as an in-memory `attemptsByNode` map.
+ * They don't any more: an attempt count is derived from the committed log
+ * (see `attemptsSoFar`), the only state that survives between `tick()` calls.
  */
 export class ExecutionScope {
-  readonly attemptsByNode: Map<NodeId, number>;
   readonly stateTracker: StateTracker;
 
-  constructor(attemptsByNode: Map<NodeId, number>, stateTracker: StateTracker) {
-    this.attemptsByNode = attemptsByNode;
+  constructor(stateTracker: StateTracker) {
     this.stateTracker = stateTracker;
   }
 
-  /** A fresh root scope — no attempts recorded yet, no state seen yet. */
+  /** A fresh root scope — no state seen yet. */
   static create(): ExecutionScope {
-    return new ExecutionScope(new Map(), new StateTracker());
+    return new ExecutionScope(new StateTracker());
   }
 
   fork(): ExecutionScope {
-    return new ExecutionScope(this.attemptsByNode, new StateTracker());
+    return new ExecutionScope(new StateTracker());
   }
 
   descend(): ExecutionScope {
-    return new ExecutionScope(this.attemptsByNode, this.stateTracker);
+    return new ExecutionScope(this.stateTracker);
   }
 }
 
@@ -118,18 +112,44 @@ export function assertJoinTagging(nodeId: NodeId, run: Step, inputs: unknown[]):
 }
 
 /**
- * Handles a step's `error` emit: logs it, consults the runtime's error
- * handlers, and either decides to retry the node (bumping its attempt count)
- * or throws to fail the whole run. Shared by the main-loop and branch paths
- * since both drive a step's error the same way.
+ * How many times node `nodeId` has already errored on `scope`, according to
+ * the committed log alone — the retry budget's only durable home.
+ *
+ * `tick()` rebuilds every scrap of in-memory state on each call by design, so
+ * an in-memory attempt counter always read zero and a default retry handler
+ * never reached its cap. Every attempt already leaves a durable trace: an
+ * `error` event, now tagged with the failing node's own `stepId`. Counting
+ * those — for this node, on this scope — is therefore the log-derived
+ * definition of "attempts so far", and it agrees across replays, restarts, and
+ * fresh `Runtime` objects sharing one store.
+ *
+ * Counted BEFORE this attempt's own error event is appended, so the first
+ * failure reports 0 attempts, exactly as the in-memory counter did.
+ */
+export function attemptsSoFar(runtime: Runtime, nodeId: NodeId, scope: ScopeId): number {
+  let count = 0;
+  for (const envelope of runtime.store.events()) {
+    if (envelope.form !== "committed") continue;
+    if (envelope.type !== "error") continue;
+    if (envelope.stepId !== nodeId) continue;
+    if (envelope.threadId !== scope) continue;
+    count += 1;
+  }
+  return count;
+}
+
+/**
+ * Handles a step's `error` emit: logs it (tagged with the failing node, so
+ * `attemptsSoFar` can count it later), consults the runtime's error handlers,
+ * and either decides to retry the node or throws to fail the whole run.
  */
 export async function handleStepError(
   emit: Extract<Emit, { error: StepError }>,
   nodeId: NodeId,
   ctx: ExecutionContext,
 ): Promise<{ kind: "retry" }> {
-  const { runtime, scope, execScope } = ctx;
-  const { attemptsByNode } = execScope;
+  const { runtime, scope } = ctx;
+  const attempts = attemptsSoFar(runtime, nodeId, scope);
   runtime.store.append(
     {
       type: emit.error.type,
@@ -137,10 +157,9 @@ export async function handleStepError(
       ...(emit.error.retryable !== undefined ? { retryable: emit.error.retryable } : {}),
       ...(emit.error.cause !== undefined ? { cause: emit.error.cause } : {}),
     },
-    { type: "error", threadId: scope },
+    { type: "error", threadId: scope, stepId: nodeId },
   );
 
-  const attempts = attemptsByNode.get(nodeId) ?? 0;
   const errorContext: ErrorContext = {
     step: { id: nodeId },
     thread: scope,
@@ -163,7 +182,6 @@ export async function handleStepError(
     throw new Error(emit.error.message, { cause: emit.error });
   }
 
-  attemptsByNode.set(nodeId, attempts + 1);
   if (decision.after) await new Promise((resolve) => setTimeout(resolve, decision.after));
   return { kind: "retry" };
 }

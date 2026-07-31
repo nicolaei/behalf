@@ -806,12 +806,11 @@ function routeAbort(
  * fan-out node as its parent.
  */
 export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> {
-  const attemptsByNode = new Map<NodeId, number>();
   // No state may survive between separate tick() calls except what's in the
   // log itself — same reconstruct-from-the-log discipline `replayPosition`
   // applies to cursor position (see `replayStateTracker`'s own doc comment).
   const stateTracker = replayStateTracker(runtime.store.events());
-  const execScope = new ExecutionScope(attemptsByNode, stateTracker);
+  const execScope = new ExecutionScope(stateTracker);
   const position = replayPosition(flow, runtime);
 
   // No `input` event committed yet: the session has no starting cursor at

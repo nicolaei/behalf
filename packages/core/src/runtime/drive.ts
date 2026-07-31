@@ -1,10 +1,9 @@
-// The drive loop: runs a graph node by node from its entry to its `finish`
-// node, handling `use`, `waitFor`, invalidate, compact, step errors, and
-// fan-out along the way. This is the whole engine loop — shared by the
-// top-level runFlow drive and any `use` node's inline subgraph drive — and
-// tick()'s own live execution reuses several of its pieces (buildDriveContext,
-// findInterruptNodes, driveStepEmit, runWaitForNode, commitInvalidation) to
-// drive one node at a time instead of to completion.
+// Node-level drive machinery: the pieces `tick()` composes to advance a graph
+// one node at a time — the StepContext every step runs with
+// (buildDriveContext), the armed-interrupt scan (findInterruptNodes), the
+// shared waitFor handling (runWaitForNode/driveWaitForMessage), the emit fold
+// (driveStepEmit), and invalidation commits (commitInvalidation). There is no
+// blocking drive loop any more: `tick()` is the engine's only driver.
 
 import { type Graph, type NodeId, type NodeKind, nodeOptionFields } from "../graph/graph.js";
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): driveWaitForMessage folds ai-shaped Message/MessageKind/UserMessage; the "message" event's own structural role (a waitFor's own consumption) predates this task and stays out of its scope — see task notes.
@@ -25,7 +24,6 @@ import {
   type RouteResult,
   type StateTracker,
   stepIdentity,
-  appendOutput,
   route,
   commitRoute,
   thenEdges,
@@ -34,23 +32,14 @@ import {
   runStep,
   makeStepContext,
   withInputs,
-  assertJoinTagging,
   handleStepError,
-  ExecutionScope,
   type ExecutionContext,
 } from "./step-runner.js";
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): runModelCall/callTool live in ai/; modelCall/callTool remain built-in StepContext fields per this task's own scoping (see fork-1 decision in task notes) — not yet routed through the generic stepContext extension seam.
 import { runModelCall } from "../ai/model-call.js";
 // eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): see runModelCall's import note above; same reasoning for callTool.
 import { callTool } from "../ai/tool-executor.js";
-import {
-  waitForSignal,
-  waitForRace,
-  peekMessageFromInbox,
-  peekSignalMatch,
-  type RaceWinner,
-} from "./execution.js";
-import { findJoinNode, runBranch, type BranchResult } from "./fan-out.js";
+import { peekMessageFromInbox, peekSignalMatch, type RaceWinner } from "./execution.js";
 
 export interface InterruptNode {
   id: NodeId;
@@ -75,73 +64,6 @@ export function findInterruptNodes(flow: Graph): InterruptNode[] {
   return interrupts;
 }
 
-/** Runs a `use` node: drives its subgraph inline to its own `finish` on the reaching edge's own (unforked) scope, and follows the reaching edge with its result. Any scope transition (`ctx.thread.start`/`fork`, from the ai extension) already happened on the reaching edge's own `run` function, before this node is ever entered — a `use` node itself has no notion of threads, prompts, or messages; it just passes `currentInput` through as the subgraph's own entry input. Descends into `ctx.execScope` (shares its `stateTracker`) rather than forking: a `use` node's subgraph runs on the reaching edge's own scope by default, so a state declared inside it must dedupe against the outer scope's already-tracked state, the same reasoning `driveForEachNode` applies to its branches. */
-async function driveUseNode(
-  node: Extract<NodeKind, { kind: "use" }>,
-  nodeId: NodeId,
-  currentInput: unknown,
-  ctx: ExecutionContext,
-): Promise<RouteResult> {
-  const { flow, runtime, execScope } = ctx;
-
-  const result = await driveGraph(
-    node.subgraph,
-    runtime,
-    ctx.scope,
-    currentInput,
-    execScope.descend(),
-  );
-
-  return commitRoute(
-    runtime,
-    result.scope,
-    flow.edges,
-    nodeId,
-    result.output,
-    stepIdentity(nodeId),
-  );
-}
-
-/**
- * Runs a `forEach` node: computes its items from the prior step's output,
- * builds one branch `Graph` per item via `node.branch` (a dynamic, runtime-
- * sized fan-out — unlike a static `.then([a, b])` fan-out, the branch count
- * and shape aren't known until this node actually runs), drives each branch
- * as a first-class subgraph on the PARENT's own unforked scope — not a
- * forked one, unlike a static fan-out branch — and folds every branch's own
- * result back into an array as this node's single output. Because branches
- * share one real scope, each branch descends into `ctx.execScope` (sharing
- * its `stateTracker`) rather than being given a fresh one per branch: two
- * branches declaring the same `state` must dedupe into one `stateChange`,
- * the same as any other repeat entry on one scope. Branches run
- * concurrently (`Promise.all`), same as a static fan-out's `driveStepEmit`
- * runs its branches (which DO fork, and so DO get an independent tracker
- * each) — but unlike a fork, sharing one scope id means every branch's own
- * `context.thread` reads a live fold of that shared scope's committed log,
- * so a sibling's concurrently-committed message IS visible mid-flight.
- * KNOWN GAP (tracked): pre-B2.8, each branch carried its own in-memory
- * `Thread` value, so siblings' concurrent appends were mutually invisible
- * until the join; post-extraction that value-isolation is gone and
- * concurrent same-scope branches race on live thread reads. See the
- * reported problem "Concurrent forEach branches sharing one scope id race
- * on live thread reads (post-B2.8 thread extraction)" and the two
- * explicitly-skipped cases in foreach-n-branches.test.ts.
- */
-async function driveForEachNode(
-  node: Extract<NodeKind, { kind: "forEach" }>,
-  nodeId: NodeId,
-  currentInput: unknown,
-  ctx: ExecutionContext,
-): Promise<RouteResult> {
-  const { flow, runtime, scope, execScope } = ctx;
-  const items = node.items(currentInput);
-  const results = await Promise.all(
-    items.map((item) => driveGraph(node.branch(item), runtime, scope, item, execScope.descend())),
-  );
-  const outputs = results.map((result) => result.output);
-
-  return commitRoute(runtime, scope, flow.edges, nodeId, outputs, stepIdentity(nodeId));
-}
 
 /**
  * The 5 things every `waitFor`/`interrupt` call site always carries
@@ -240,76 +162,88 @@ export async function driveWaitForMessage(
 
 /**
  * How a waitFor node's own Waitable (and any armed interrupt racing it) gets
- * satisfied — the ONE real behavioral difference between `driveGraph` (which
- * blocks until satisfied) and `tick()` (which peeks once, non-blockingly, and
- * reports "parked" if nothing's ready yet, returning control to its caller
- * instead of waiting). Everything else about handling a waitFor node —
- * folding the winning message in, deciding whether it belongs to this node or
- * an armed interrupt, running the interrupt's own step — is identical
- * regardless of which `MessageSource` is in play; see `runWaitForNode`, the
- * one shared implementation both `driveGraph` and `tick()` drive through now,
- * replacing what used to be two separately-written waitFor handlers.
+ * satisfied. Only one implementation survives — `peekingMessageSource`, which
+ * takes a single non-blocking look and reports nothing when nothing is ready
+ * yet — but the seam stays named, because "how the winner is obtained" is the
+ * one thing a waitFor call site ever varies; everything after that (folding
+ * the winning message in, deciding whether it belongs to this node or an armed
+ * interrupt, running the interrupt's own step) is `runWaitForNode`'s job.
  */
 export interface MessageSource {
   /**
    * Resolves a message-based waitFor node's own race against its armed
-   * interrupts. The blocking variant awaits `waitForRace` (which also races
-   * every signal-based interrupt, alongside the message-based ones). The
-   * peeking variant only checks the pending inbox for a message of
-   * `waitKind` or a message-based interrupt's own kind — mirroring tick()'s
-   * pre-existing contract exactly, asymmetry included: it never considers a
-   * signal-based interrupt a candidate winner on this path, so (like tick()
-   * always has) it throws via `messageKindOf` if any armed interrupt isn't
-   * message-based. Resolves to `undefined` only from the peeking variant,
-   * when nothing is ready yet.
+   * interrupts — message-based (matched by kind against the pending inbox) and
+   * signal-based (matched by their own `match()` against the committed log)
+   * alike. Resolves to `undefined` when nothing is ready yet.
    */
   race(waitKind: string, interrupts: readonly InterruptNode[]): Promise<RaceWinner | undefined>;
 
   /**
    * Resolves a non-message Waitable (e.g. a signal-based one) directly — no
-   * interrupt racing on this path either way, matching both existing
-   * implementations. The blocking variant awaits `waitForSignal`; the
-   * peeking variant checks `match()` once (draining at most one pending
-   * signal first) and resolves to `undefined` if still unmatched.
+   * interrupt racing on this path. Checks `match()` once (draining at most one
+   * pending signal first) and resolves to `undefined` if still unmatched.
    */
   signal<T>(waitable: Waitable<T>, scope: ScopeId): Promise<T | undefined>;
 }
 
-/** The `MessageSource` `driveGraph` drives every `waitFor` node through: blocks until its Waitable (or an armed interrupt's) is satisfied, via `waitForRace`/`waitForSignal`. */
-export function blockingMessageSource(runtime: Runtime): MessageSource {
-  return {
-    race: (waitKind, interrupts) =>
-      waitForRace(
-        runtime.store,
-        waitKind,
-        interrupts.map((interrupt) => ({
-          id: interrupt.id,
-          waitable: interrupt.waitable,
-          messageKind: tryMessageKindOf(interrupt.waitable),
-        })),
-      ),
-    signal: (waitable, scope) => waitForSignal(runtime.store, waitable, scope),
-  };
+
+/** What a parked `waitFor` reports it is still waiting for: a message-based Waitable contributes its message kind, a signal-based one its own display `label` (see `CursorState.waitingFor`'s note on that overload). */
+function waitingForLabel(waitable: Waitable<unknown>): string {
+  return tryMessageKindOf(waitable) ?? waitable.label;
 }
 
-/** The `MessageSource` `tick()` drives every `waitFor` node through: takes one non-blocking look via `peekMessageFromInbox`/`peekSignalMatch`, never parking this call — the caller reports "parked" itself when this resolves to `undefined`. */
+/**
+ * The `MessageSource` `tick()` drives every `waitFor` node through: takes one
+ * non-blocking look, never parking this call — the caller reports "parked"
+ * itself when this resolves to `undefined`.
+ *
+ * `race` handles a heterogeneous field the same way the blocking driver used
+ * to: message-based candidates (this node's own kind, plus every message-based
+ * interrupt's) are peeked out of the pending inbox first; if none is queued,
+ * every signal-based interrupt's own `match()` is checked against the
+ * committed log — draining at most one pending signal entry, exactly as
+ * `peekSignalMatch` does for a signal-based waitFor node. A signal-based
+ * interrupt used to make this throw (`messageKindOf` on a Waitable that has no
+ * message kind); it is now a first-class candidate winner, so an armed signal
+ * interrupt actually fires under `tick()` rather than parking forever.
+ */
 export function peekingMessageSource(runtime: Runtime): MessageSource {
   return {
     race: (waitKind, interrupts) => {
-      const kinds = [waitKind, ...interrupts.map((interrupt) => messageKindOf(interrupt.waitable))];
-      const message = peekMessageFromInbox(runtime.store, kinds);
-      if (!message) return Promise.resolve(undefined);
-      const interrupt = interrupts.find(
-        (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,
+      const messageInterrupts = interrupts.filter(
+        (candidate) => tryMessageKindOf(candidate.waitable) !== undefined,
       );
-      const winner: RaceWinner = interrupt
-        ? {
-            kind: "interrupt",
-            interrupt: { id: interrupt.id, waitable: interrupt.waitable },
-            value: message,
-          }
-        : { kind: "self", message };
-      return Promise.resolve(winner);
+      const kinds = [
+        waitKind,
+        ...messageInterrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
+      ];
+      const message = peekMessageFromInbox(runtime.store, kinds);
+      if (message) {
+        const interrupt = messageInterrupts.find(
+          (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,
+        );
+        const winner: RaceWinner = interrupt
+          ? {
+              kind: "interrupt",
+              interrupt: { id: interrupt.id, waitable: interrupt.waitable },
+              value: message,
+            }
+          : { kind: "self", message };
+        return Promise.resolve(winner);
+      }
+
+      for (const interrupt of interrupts) {
+        if (tryMessageKindOf(interrupt.waitable) !== undefined) continue;
+        const matched = peekSignalMatch(runtime.store, interrupt.waitable);
+        if (matched === undefined) continue;
+        return Promise.resolve({
+          kind: "interrupt",
+          interrupt: { id: interrupt.id, waitable: interrupt.waitable },
+          value: matched,
+        } satisfies RaceWinner);
+      }
+
+      return Promise.resolve(undefined);
     },
     signal: (waitable, scope) => Promise.resolve(peekSignalMatch(runtime.store, waitable, scope)),
   };
@@ -321,19 +255,16 @@ export type WaitForOutcome =
   | { kind: "parked"; waitingFor: string[] };
 
 /**
- * Runs a `waitFor` node against whichever `MessageSource` the caller gives
- * it — the one shared implementation `driveGraph` and `tick()` both drive
- * every `waitFor` node through now. A message-based Waitable races `source`
- * against every armed `interrupt` — message-based or signal-based alike —
- * and folds in whichever wins via `driveWaitForMessage` (a message win,
- * whether this node's own or a message-based interrupt's) or the
- * signal-interrupt path below (a signal-based interrupt's own `match()` won
- * instead — reachable only through a blocking `source`, since the peeking
- * one never classifies a winner that way, matching tick()'s pre-existing
- * scope). Any other provider for this node's own Waitable (e.g. a
- * signal-based one) has no message to fold and no interrupt-arming yet (out
- * of scope for this slice, see waitable.ts); `source.signal` resolves it
- * directly, and its result routes off the `Waitable`'s own `match()` value.
+ * Runs a `waitFor` node against the `MessageSource` the caller gives it. A
+ * message-based Waitable races `source` against every armed `interrupt` —
+ * message-based or signal-based alike — and folds in whichever wins via
+ * `driveWaitForMessage` (a message win, whether this node's own or a
+ * message-based interrupt's) or the signal-interrupt path below (a
+ * signal-based interrupt's own `match()` won instead). Any other provider for
+ * this node's own Waitable (e.g. a signal-based one) has no message to fold
+ * and no interrupt-arming yet (out of scope for this slice, see waitable.ts);
+ * `source.signal` resolves it directly, and its result routes off the
+ * `Waitable`'s own `match()` value.
  */
 export async function runWaitForNode(
   node: Extract<NodeKind, { kind: "waitFor" }>,
@@ -358,7 +289,7 @@ export async function runWaitForNode(
 
   const winner = await source.race(waitKind, interrupts);
   if (winner === undefined) {
-    const kinds = [waitKind, ...interrupts.map((interrupt) => messageKindOf(interrupt.waitable))];
+    const kinds = [waitKind, ...interrupts.map((interrupt) => waitingForLabel(interrupt.waitable))];
     return { kind: "parked", waitingFor: kinds };
   }
 
@@ -431,10 +362,17 @@ export function commitInvalidation(
     {
       target: emit.invalidate,
       ...(emit.action ? { action: emit.action } : {}),
+      ...(nextScope === invalidatedScope ? {} : { from: invalidatedScope }),
       ...(emit.payload !== undefined ? { payload: emit.payload } : {}),
       ...(cause ? { cause } : {}),
     },
-    { type: "invalidation", threadId: invalidatedScope },
+    // Tagged with the scope the rerun CONTINUES on, not the one being left
+    // behind: replay resyncs its current scope from each envelope's own tag,
+    // so a forked rerun with no payload (nothing else ever committed on the
+    // minted scope) would otherwise fall straight back onto the old scope and
+    // the fork would exist only in the live process. `from` keeps the
+    // invalidated scope recorded.
+    { type: "invalidation", threadId: nextScope },
   );
   seedScope(runtime.extensions, nextScope, emit.payload, (payload, type) => {
     runtime.store.append(payload, { type, threadId: nextScope });
@@ -447,16 +385,14 @@ export function commitInvalidation(
   };
 }
 
-/** The nodes a step's output can fan out into — more than one `then` edge means a fan-out. Shared by `driveStepEmit` (which runs every branch to completion) and tick() (which must detect a fan-out before `driveStepEmit` runs, since it drives one branch per call instead of `Promise.all`). */
+/** The nodes a step's output can fan out into — more than one `then` edge means a fan-out. `tick()` must detect a fan-out before `driveStepEmit` folds the emit, since it drives one branch per call. */
 export function fanOutTargets(flow: Graph, nodeId: NodeId): NodeId[] {
   return thenEdges(flow.edges, nodeId).map((edge) => edge.to);
 }
 
 /**
- * Handles the `Emit` a `step` node produced: invalidate, error, a
- * fan-out (more than one `then` edge), or a plain routed output. Each case
- * decides the next node and, for fan-out, the per-branch inputs the join
- * node receives.
+ * Handles the `Emit` a `step` node produced: invalidate, error, or a plain
+ * routed output.
  */
 export async function driveStepEmit(
   emit: Emit,
@@ -479,45 +415,9 @@ export async function driveStepEmit(
 
   const branchTargets: NodeId[] = fanOutTargets(flow, nodeId);
   if (branchTargets.length > 1) {
-    appendOutput(runtime, scope, emit.output, stepIdentity(nodeId, node.label));
-    // Resolve the convergence node before spawning branches — findJoinNode
-    // validates linearity (no nested fan-out) and that all branches share a
-    // single common join, replacing the old per-branch joinEdge lookup.
-    const joinNodeId = findJoinNode(branchTargets, nodeId, flow);
-    const results: BranchResult[] = await Promise.all(
-      branchTargets.map((branch: NodeId) =>
-        runBranch(branch, emit.output, joinNodeId, {
-          ...ctx,
-          scope: freshScopeId(runtime),
-          // Each fan-out branch forks its own scope, so it gets its own
-          // fresh stateChange tracker rather than sharing the parent's.
-          execScope: ctx.execScope.fork(),
-        }),
-      ),
+    unreachable(
+      `driveStepEmit: fan-out from "${nodeId}" must be detected by tick before the emit is folded`,
     );
-
-    // A branch that invalidated a node instead of joining means the fan-out
-    // step itself must be rerun — same as the main-loop's own invalidate
-    // handling, using the pre-fork scope so the rerun lands back on the
-    // shared line, not any one branch's forked copy.
-    const invalidated = results.find(
-      (result): result is Extract<BranchResult, { kind: "invalidate" }> =>
-        result.kind === "invalidate",
-    );
-    if (invalidated) return commitInvalidation(runtime, scope, invalidated.emit);
-
-    const outputs = results.filter(
-      (result): result is Extract<BranchResult, { kind: "output" }> => result.kind === "output",
-    );
-    if (!outputs.length) throw new Error(`fan-out from "${nodeId}" produced no branches`);
-    // findJoinNode already ensured all branches converge on joinNodeId.
-    return {
-      kind: "advance",
-      scope,
-      input: undefined,
-      pendingInputs: outputs.map((result) => result.output),
-      to: joinNodeId,
-    };
   }
 
   return {
@@ -531,12 +431,6 @@ export async function driveStepEmit(
       stepIdentity(nodeId, node.label),
     ),
   };
-}
-
-/** What driving a graph to its `finish` node settled with — the final scope and the terminal value. */
-interface DriveResult {
-  scope: ScopeId;
-  output: unknown;
 }
 
 /** Guards that a node is currently running (`current` is set) and looks up its identity — shared by `driveGraph`'s `openStream` and `modelCall`, whose "no running node" guards differ only in their error message. */
@@ -628,165 +522,3 @@ export function buildDriveContext(
   return context;
 }
 
-/**
- * Drives one graph from its entry node to its `finish` node: runs each step,
- * follows the edge its output selects, mutates the scope as edges and
- * emits dictate, and handles `waitFor`, `interrupt`, `invalidate`, `compact`,
- * and step errors along the way. This is the whole engine loop, factored out
- * so a `use` node can point the same machinery at a subgraph, inline — same
- * scope, same runtime, same log — and resume the outer drive with the
- * subgraph's result once it reaches its own `finish`.
- *
- * `input` is the value the entry node sees, exactly like `initialPrompt` at
- * the top level: usually a `Message` (the flow's or the subgraph's seed), but
- * any node reachable as an entry may read it via `context.inputs[0]`.
- *
- * `execScope` bundles the caller's `stateTracker` (see `ExecutionScope`) — a
- * `use` node's subgraph and a `forEach` branch both `descend()` into their
- * caller's own scope so their state dedupes against it. `attemptsByNode`,
- * however, is always fresh here regardless of what `execScope` carries: it's
- * scoped to this one call's own `while` loop and discarded when it returns —
- * a "retry" outcome always re-enters this SAME loop via `continue`, never
- * needing to survive past it, so a recursive `driveGraph` call (a `use`
- * subgraph, a `forEach` branch) never needs its caller's own attempt counts.
- */
-export async function driveGraph(
-  flow: Graph,
-  runtime: Runtime,
-  scope: ScopeId,
-  input: unknown,
-  execScope: ExecutionScope = ExecutionScope.create(),
-  parentScope?: ScopeId,
-): Promise<DriveResult> {
-  // The live current scope — reassigned (not mutated) by `invalidate`, a
-  // `use` node, or a scope transition when it forks or resets. `context.scope`
-  // reads it through a getter so every consumer (modelCall, tool calls,
-  // invalidate itself) sees the same, up-to-date scope rather than a
-  // snapshot captured once at the top.
-  let currentScope: ScopeId = scope;
-
-  let current: NodeId | undefined = flow.entry;
-  const context = buildDriveContext(
-    flow,
-    runtime,
-    () => current,
-    () => currentScope,
-    (next) => {
-      currentScope = next;
-    },
-    parentScope,
-  );
-
-  const interrupts = findInterruptNodes(flow);
-  let currentInput: unknown = input;
-  // Set only when the previous step joined a fan-out group — one entry per
-  // branch, in declared order — so the next step's `inputs` isn't wrapped a
-  // second time around a single `input`.
-  let pendingInputs: unknown[] | undefined;
-  // See this function's own doc comment: always fresh, never inherited from
-  // `execScope`, regardless of caller.
-  const localScope = new ExecutionScope(new Map<NodeId, number>(), execScope.stateTracker);
-  const messageSource = blockingMessageSource(runtime);
-
-  while (current) {
-    const node = flow.nodes.get(current);
-    if (!node) throw new Error(`graph "${flow.name}" has no node "${current}"`);
-
-    // A state-less node is invisible to the state machine; a declared
-    // `state` fires (or not) exactly once per node visit here, before
-    // dispatching to this node's own kind-specific handling below — so a
-    // retried step (which re-enters this loop without changing `current`)
-    // re-checks the same already-seen state and stays a no-op.
-    localScope.stateTracker.maybeEmit(
-      runtime,
-      currentScope,
-      node.state,
-      stepIdentity(current, node.label),
-    );
-    // Consumed by whichever node runs next, regardless of its kind — a join's
-    // pendingInputs must never survive past the node it was meant for.
-    const inputs = pendingInputs ?? [currentInput];
-    pendingInputs = undefined;
-
-    if (node.kind === "finish") return { scope: currentScope, output: currentInput };
-
-    if (node.kind === "use") {
-      const routed = await driveUseNode(node, current, currentInput, {
-        flow,
-        runtime,
-        scope: currentScope,
-        execScope: localScope,
-      });
-      currentScope = routed.scope;
-      currentInput = routed.input;
-      current = routed.to;
-      continue;
-    }
-
-    if (node.kind === "forEach") {
-      const routed = await driveForEachNode(node, current, currentInput, {
-        flow,
-        runtime,
-        scope: currentScope,
-        execScope: localScope,
-      });
-      currentScope = routed.scope;
-      currentInput = routed.input;
-      current = routed.to;
-      continue;
-    }
-
-    if (node.kind === "waitFor") {
-      const outcome = await runWaitForNode(
-        node,
-        current,
-        {
-          interrupts,
-          context,
-          flow,
-          runtime,
-          setScope: (next) => {
-            currentScope = next;
-          },
-          stateTracker: localScope.stateTracker,
-        },
-        messageSource,
-      );
-      // The blocking MessageSource (see `blockingMessageSource`) never
-      // resolves to "parked" — it awaits until satisfied — so this can only
-      // ever be reached by a genuine bug in that contract.
-      if (outcome.kind === "parked")
-        unreachable("driveGraph: blockingMessageSource reported parked");
-      currentScope = outcome.scope;
-      currentInput = outcome.input;
-      current = outcome.to;
-      continue;
-    }
-
-    // The only remaining declared kind is "interrupt", which is never a
-    // routing target — it's only ever entered via `runWaitForNode` above.
-    if (node.kind !== "step") notImplemented(`node kind "${node.kind}"`);
-
-    // Validate JoinStep tagging: a join()-tagged step must receive multiple
-    // inputs (from fan-out pendingInputs); see assertJoinTagging.
-    assertJoinTagging(current, node.run, inputs);
-
-    const stepContext: StepContext = withInputs(context, inputs);
-    const emit = await runStep(node.run, stepContext);
-
-    const outcome = await driveStepEmit(emit, node, current, {
-      flow,
-      runtime,
-      scope: currentScope,
-      execScope: localScope,
-    });
-    if (outcome.kind === "retry") continue;
-
-    currentScope = outcome.scope;
-    currentInput = outcome.input;
-    pendingInputs = outcome.pendingInputs;
-    current = outcome.to;
-  }
-
-  return { scope: currentScope, output: currentInput };
-}

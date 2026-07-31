@@ -1,19 +1,16 @@
-// Systems running flows — runtime / runFlow. See docs/reference.md.
+// Systems running flows — the `Runtime` builder, `seed()`, and `driveFlow()`.
+// See docs/reference.md.
 //
-// This file is the thin coordinator: the `Runtime` builder and `runFlow`'s
-// own seed-and-drive tail live here. Everything else — routing, fan-out,
-// tool/model execution, id generation, the drive loop, and tick/replay —
-// lives alongside this file in src/runtime/ and is re-exported below so
+// This file is the thin coordinator; everything else — routing, fan-out,
+// tool/model execution, id generation, the node-level drive machinery, and
+// tick/replay — lives alongside it in src/runtime/ and is re-exported below so
 // `import ... from "./runtime/runtime.js"` keeps resolving exactly as before.
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): runFlow's initialPrompt is a Message; removed when a session starts from its first event instead of runFlow seeding a prompt.
-import type { Message } from "../ai/message.js";
 import type { Graph } from "../graph/graph.js";
 import type { ScopeId } from "../graph/thread.js";
 import type { SessionStore } from "../session/session-store.js";
 import type { EngineExtension } from "./extension.js";
 import { defaultErrorHandler, type ErrorHandler } from "./errors.js";
-import { driveGraph } from "./drive.js";
 import { idFactories, freshScopeId } from "./ids.js";
 import { tickUntilSuspended } from "./tick.js";
 
@@ -85,54 +82,13 @@ export function runtime(config: {
  * `replayPosition`), and an extension's `state()` fold only sees events
  * tagged with the scope it's asked about, so an untagged seed would be
  * invisible to (e.g.) ai's own thread fold. Returns the minted scope so
- * `runFlow` drives on the same one instead of minting a second.
- *
- * `runFlow` calls this too (see below), so every session — whether driven by
- * `runFlow`'s own blocking loop or by `seed()` + `driveFlow` — durably logs
- * the same starting fact under the same event type.
+ * `seed()`'s own caller drives on the same one instead of minting a second.
  * @public
  */
 export function seed(flow: Graph, input: unknown, runtime: Runtime): ScopeId {
   const scope = freshScopeId(runtime);
   runtime.store.append({ node: flow.entry, value: input }, { type: "input", threadId: scope });
   return scope;
-}
-
-/**
- * Seeds a new session with a user message, drives it to completion, and
- * resolves with the terminal output. A `parentScope` makes it a child —
- * how a tool spawns a sub-agent.
- *
- * Internally: `seed()` first, appending the durable `input` event any later
- * `driveFlow`/`tick` call on this store would replay from — then drives via
- * the existing `driveGraph` loop, unconverted, exactly as before `seed()`
- * existed. Not routed through `tick`'s own replay: `tick`/`replayPosition`
- * reconstruct position from `runtime.store.events()` with no per-run scoping
- * key, which is correct under one-Runtime-is-one-session (see `runtime()`'s
- * own doc comment) but doesn't hold for two concurrent `runFlow` calls
- * sharing one store (see `agent-turn-primitive.test.ts`'s two-agents-one-log
- * case) — a pattern the target architecture replaces with one store per
- * spawned agent (see docs/restructure plan's `AgentSpawner`), not one this
- * task should teach `tick` to disambiguate.
- * @public
- */
-export async function runFlow(
-  flow: Graph,
-  initialPrompt: Message,
-  runtime: Runtime,
-  options?: { parentThreadId?: ScopeId },
-): Promise<unknown> {
-  const scope = seed(flow, initialPrompt, runtime);
-
-  const result = await driveGraph(
-    flow,
-    runtime,
-    scope,
-    initialPrompt,
-    undefined,
-    options?.parentThreadId,
-  );
-  return result.output;
 }
 
 /**
@@ -156,9 +112,7 @@ export async function runFlow(
  * a wake makes no promise about what changed, and a caller just re-checks and, if nothing new,
  * goes back to sleep).
  *
- * Deliberately a thin wrapper around `tick()`'s own one-step primitive — not a
- * reimplementation of `driveGraph`'s separate per-node dispatch loop, which already owns this
- * logic correctly for the seed-and-drive-once shape `runFlow` needs. `driveFlow` instead suits
+ * A thin wrapper around `tick()`'s own one-step primitive — the engine's only driver.
  * a long-lived session: no initial prompt required (a fresh flow parks at its own entry
  * `waitFor` until a message arrives), and it keeps resuming across as many turns as the caller
  * needs, in one call, until the flow's root cursor reports `done`.

@@ -1,14 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
+import { runToCompletion } from "@behalf-js/testing";
 import type { Waitable } from "../../index.js";
 import { loggedEventTypes } from "./support.js";
-
-// Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep):
-// tick's `peekingMessageSource` throws on a signal-based interrupt, and even
-// once that throw is fixed it never classifies a signal winner, so these
-// cases would park forever on the event-sourced path. See the tracked problem
-// "peekingMessageSource throws on a signal-based interrupt".
 
 // An interrupt still only races against a message-based waitFor by flattening
 // every armed Waitable into a message-kind list — a signal-based interrupt
@@ -49,7 +44,7 @@ describe("a signal-based interrupt wins over a userInput waitFor when it fires f
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    const done = runFlow(withSignalInterrupt, userText("go"), ready);
+    const done = runToCompletion(withSignalInterrupt, userText("go"), ready);
     store.receive({ kind: "signal", name: "ping", payload: { pong: "hi" } });
 
     expect(await done).toBe("cancelled");
@@ -59,7 +54,7 @@ describe("a signal-based interrupt wins over a userInput waitFor when it fires f
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    const done = runFlow(withSignalInterrupt, userText("go"), ready);
+    const done = runToCompletion(withSignalInterrupt, userText("go"), ready);
     store.receive({ kind: "signal", name: "ping", payload: { pong: "hi" } });
     await done;
 
@@ -70,7 +65,7 @@ describe("a signal-based interrupt wins over a userInput waitFor when it fires f
     const store = memoryStore();
     const ready = await runtime({ store });
 
-    const done = runFlow(withSignalInterrupt, userText("go"), ready);
+    const done = runToCompletion(withSignalInterrupt, userText("go"), ready);
     store.receive({
       kind: "message",
       message: { role: "user", intent: "standard", kind: "resume", content: [] },

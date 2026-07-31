@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import {
   ai,
   defineGraph,
-  runFlow,
   runtime,
   provide,
   tool,
@@ -11,13 +10,9 @@ import {
   toolCall,
 } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
+import { runToCompletion } from "@behalf-js/testing";
 import type { Graph, ModelCallResult, ModelPort, Profile, WaitForResult } from "../../index.js";
 import { assistantToolCall, loggedEnvelopes } from "./support.js";
-
-// Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep): under
-// tick the branch's finish-fold `output` lands on a second thread, so this
-// invariant holds only on the blocking path. See the tracked problem "forEach
-// branch finish-fold lands on a second thread under tick".
 
 // Reproduces a stray thread id observed live in examples/multi-step-agent: every
 // time a forEach tool-call branch subgraph reaches its own internal `finish`,
@@ -74,7 +69,7 @@ describe("forEach tool-call branch completion stays on the flow's own thread", (
       ],
     });
 
-    await runFlow(flow, userText("find x"), ready);
+    await runToCompletion(flow, userText("find x"), ready);
 
     // Every committed envelope that carries a threadId belongs to the one
     // real conversation thread — no stray thread id should appear anywhere in

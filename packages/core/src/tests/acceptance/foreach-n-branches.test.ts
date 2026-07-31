@@ -1,14 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { ai, defineGraph, runFlow, runtime, userText, outputs, userInput } from "../../index.js";
+import { ai, defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
+import { runToCompletion } from "@behalf-js/testing";
 import type { Graph, Message, WaitForResult } from "../../index.js";
 import { textOf, neverCalled } from "./support.js";
-
-// Deliberately still on `runFlow`, not `runToCompletion` (B2.9's sweep): tick's
-// branch runner throws `fan-out branch node kind "use" is not implemented yet`
-// for these branch bodies. See the tracked problem "tick's branch runner has two
-// declared notImplemented gaps". (The two skipped cases below are a different,
-// already-tracked problem — the concurrent-branch scope race.)
 
 // Story 2 proved forEach works for exactly one item whose branch is a bare
 // waitFor node. This story generalizes both axes at once: (1) a dynamic
@@ -84,7 +79,7 @@ describe("forEach runs N branches, each a multi-node graph (step -> waitFor -> u
           extensions: [ai({ models: neverCalled, bindings: [] })],
         });
 
-        const done = runFlow(flow, userText("go"), ready);
+        const done = runToCompletion(flow, userText("go"), ready);
 
         // Resolve in reverse item order — proves folding isn't dependent on
         // resolution order.
