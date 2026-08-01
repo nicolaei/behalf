@@ -10,6 +10,9 @@ import type { StepContext } from "../packages/core/src/graph/step.js";
 import type { Profile } from "../packages/core/src/ai/profile.js";
 import { graphToMermaid } from "./graph-to-mermaid.js";
 import { forkThread } from "../packages/core/src/ai/thread.js";
+// Side-effect: registers ai's StepContext augmentation (thread/modelCall/…),
+// which the persona-step fixture below exercises.
+import "../packages/core/src/ai/context.js";
 
 /** Finds the one node of `kind` a test graph is known to have, or fails loudly. */
 function nodeIdOf(graph: Graph, kind: NodeKind["kind"]): NodeId {

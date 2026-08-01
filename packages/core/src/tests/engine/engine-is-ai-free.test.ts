@@ -15,14 +15,11 @@
 // specifier crossing into `ai/` from the four engine directories and requires
 // zero. An eslint-disable comment has no effect on it.
 //
-// SKIPPED, pending B3.0. Unskip to confirm red: it currently reports 14
-// crossings — three in graph/step.ts, one each in session/session-store.ts
-// and gateway/gateway.ts, and ten in runtime/ (of which four, the
-// runModelCall/callTool pairs in drive.ts and fan-out.ts, are value imports
-// rather than types, and are what make the split impossible today). B3.0
-// routes modelCall/callTool/compact through the extension seam and
-// genericizes the inbox; this turns green when it lands, and B3.1's package
-// extraction depends on it.
+// GREEN as of B3.0: `modelCall`/`callTool`/`compact` are contributed through
+// the `stepContext` extension seam, the inbox deals in a structural
+// `InboxMessage`, and a consumed message is committed by whichever extension
+// owns its vocabulary (`EngineExtension.commitInboxMessage`). B3.1's package
+// extraction depends on this staying at zero.
 
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
@@ -56,7 +53,7 @@ function aiImportsIn(source: string): string[] {
   return specifiers.filter((specifier) => /(^|\/)ai\//.test(specifier));
 }
 
-describe.skip("the engine layer is ai-free", () => {
+describe("the engine layer is ai-free", () => {
   for (const dir of ENGINE_DIRS) {
     it(`${dir}/ imports nothing from ai/`, () => {
       const offenders: string[] = [];

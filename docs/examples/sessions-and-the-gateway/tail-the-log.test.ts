@@ -1,9 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runtime, userText, userInput } from "@behalf-js/core";
+import { ai, defineGraph, runtime, userText, userInput } from "@behalf-js/core";
 import type { Envelope, SessionId, SessionStore, UserMessage } from "@behalf-js/core";
 import { memoryStore } from "@behalf-js/stores";
 import { describeEnvelope, tailCommitted, reconnect, createGateway } from "./tail-the-log.js";
 import { runToCompletion } from "@behalf-js/testing";
+
+// These flows park on `userInput`, which is ai vocabulary: the ai extension is
+// what commits a consumed inbox message to the log (see
+// `EngineExtension.commitInboxMessage`). No model is ever called, so the model
+// resolver is one that refuses to be.
+function neverCalled(): never {
+  throw new Error("no model call expected in this example");
+}
 
 // A one-step graph with no stream of its own: a plain turn a client's history
 // already holds by the time it reconnects.
@@ -54,7 +62,7 @@ async function settledCount(store: SessionStore, count: number): Promise<void> {
 describe("Event and Envelope", () => {
   it("carries no type on the event itself; the envelope names it", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
     await runToCompletion(greet, userText("hi"), ready);
 
     const [message] = store.events();
@@ -68,7 +76,7 @@ describe("Event and Envelope", () => {
 describe("tailing the log", () => {
   it("yields only committed envelopes from a real running flow, in order", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     const seen: Envelope[] = [];
     let resolveDone: (() => void) | undefined;
@@ -92,7 +100,7 @@ describe("tailing the log", () => {
 describe("reconnecting", () => {
   it("replays the committed log, then streams in-progress, a delta, and new commits live", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     // Drive the session's first turn and leave it parked at its follow-up
     // wait — the history a reconnecting client needs to catch up on. Kept
@@ -143,7 +151,7 @@ describe("reconnecting", () => {
 describe("Gateway", () => {
   it("connect replays the log then streams live envelopes; submit puts a message in the inbox", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
     const done = runToCompletion(session, userText("hi"), ready);
     await settledCount(store, 2);
 

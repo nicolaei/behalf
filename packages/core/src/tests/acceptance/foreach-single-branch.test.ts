@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
+import { ai, defineGraph, runtime, userText, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { Graph, Message, WaitForResult } from "../../index.js";
-import { textOf } from "./support.js";
+import { neverCalled, textOf } from "./support.js";
 import { runToCompletion } from "@behalf-js/testing";
 
 // Flow.forEach throws notImplemented and tick()/drive.ts have no support for
@@ -42,7 +42,7 @@ describe("forEach runs a single dynamically-produced branch, end-to-end", () => 
 
   it("parks on the one dynamically-produced branch and folds its result", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     const done = runToCompletion(flow, userText("go"), ready);
     store.receive({

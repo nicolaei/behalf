@@ -130,6 +130,7 @@ function makeEdgeExecutionScope(
     get scope() {
       return getScope();
     },
+    runtime,
     events,
     state(extension: string): unknown {
       return foldExtensionState(

@@ -2,15 +2,42 @@
 // including its abort race. Physically relocated out of runtime/execution.ts
 // (B2.7) — see tool-executor.ts for the tool half.
 
-import type { UserMessage, AssistantMessage, ContentBlock } from "./message.js";
+import type { UserMessage, AssistantMessage, ContentBlock, Usage } from "./message.js";
 import type { Profile } from "./profile.js";
-import type { StepContext, ModelCallResult } from "../graph/step.js";
-import { ModelCallAbortedError } from "../graph/step.js";
-import type { Runtime } from "../runtime/index.js";
-import type { ScopeId } from "../graph/thread.js";
+import type { ThreadContext } from "./thread.js";
+import type { StepExecutionScope } from "../runtime/index.js";
+import { StepAbortedError } from "../runtime/index.js";
 import type { SessionStore } from "../session/index.js";
 import { modelResolvers } from "./tool-executor.js";
-import "./context.js"; // side-effect: registers the StepContext/EdgeContext.thread declaration merge
+import "./context.js"; // side-effect: registers the StepContext/EdgeContext ai declaration merge
+
+/** Summary of a model call — whether tools were used and token usage. @public */
+export interface ModelCallResult {
+  usedTools: boolean;
+  usage: Usage;
+  toolCalls: { correlationId: string; name: string }[]; // requested this turn, in reply order
+}
+
+/**
+ * Thrown by `context.modelCall` when a user message with `intent: "abort"`
+ * preempts the in-flight call. What streamed so far is already committed to
+ * the log, marked aborted (see `Stream.abort()`) — this is purely the signal
+ * that the step itself didn't get a reply. Named so a flow author (e.g.
+ * `agentTurn`'s own `respond` step) can catch it specifically and end the
+ * turn gracefully, instead of it falling through runStep's generic
+ * catch-all and failing the whole run as an ordinary, non-retryable error.
+ *
+ * Extends the engine's own `StepAbortedError`, which is how `tick` recognizes
+ * an aborted step and routes it to the nearest declared `onAbort` target
+ * without core ever naming a model call.
+ * @public
+ */
+export class ModelCallAbortedError extends StepAbortedError {
+  constructor() {
+    super("model call aborted");
+    this.name = "ModelCallAbortedError";
+  }
+}
 
 /** Parks until an abort message reaches the inbox — stops the moment `isCancelled` says the
  * race that started it has already been decided some other way. */
@@ -21,9 +48,10 @@ async function waitForAbort(
   for (;;) {
     if (isCancelled()) return undefined;
     const entry = store.consume(
-      (candidate) => candidate.kind === "message" && candidate.message.intent === "abort",
+      (candidate) =>
+        candidate.kind === "message" && (candidate.message as UserMessage).intent === "abort",
     );
-    if (entry?.kind === "message") return entry.message;
+    if (entry?.kind === "message") return entry.message as UserMessage;
     await store.awaitReceive();
   }
 }
@@ -47,11 +75,15 @@ function isToolCall(block: ContentBlock): block is Extract<ContentBlock, { type:
  */
 export async function runModelCall(
   profile: Profile,
-  context: StepContext,
-  runtime: Runtime,
-  setScope: (scope: ScopeId) => void,
+  scope: StepExecutionScope,
+  thread: ThreadContext,
 ): Promise<ModelCallResult> {
-  void setScope; // reserved: a model call never itself transitions scope today
+  // Same guard the built-in `modelCall` field used to carry: a model call only
+  // ever runs while a node is being processed, and `identity` throws with this
+  // message when it isn't. The identity itself is unused — runModelCall no
+  // longer runs a tool call inline, so it has nothing to attribute.
+  scope.identity("modelCall called outside a running node");
+  const runtime = scope.runtime;
   const resolveModel = modelResolvers.get(runtime);
   if (!resolveModel) {
     throw new Error(
@@ -59,12 +91,12 @@ export async function runModelCall(
     );
   }
   const port = resolveModel(profile.model);
-  const stream = context.openStream("message");
+  const stream = scope.openStream("message");
   const controller = new AbortController();
 
   let modelSettled = false;
   const replyPromise = port
-    .respond(profile, context.thread.messages, stream, controller.signal)
+    .respond(profile, thread.messages, stream, controller.signal)
     .then((message): { kind: "reply"; message: AssistantMessage } => {
       modelSettled = true;
       return { kind: "reply", message };
@@ -92,7 +124,7 @@ export async function runModelCall(
 
   const toolCalls = reply.content.filter(isToolCall);
   for (const call of toolCalls) {
-    context.appendEvent(
+    scope.appendEvent(
       { correlationId: call.correlationId, name: call.name, input: call.input },
       "toolCall",
     );

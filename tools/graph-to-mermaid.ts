@@ -10,7 +10,8 @@
 // built "behalf" package, since it's in-repo tooling, not a consumer.
 
 import type { Graph, NodeId, NodeKind, EdgeDefinition } from "../packages/core/src/graph/graph.js";
-import type { PersonaStep, JoinStep } from "../packages/core/src/graph/step.js";
+import type { JoinStep } from "../packages/core/src/graph/step.js";
+import type { PersonaStep } from "../packages/core/src/ai/profile.js";
 
 function escapeLabel(label: string): string {
   return label.replace(/"/g, "&quot;");

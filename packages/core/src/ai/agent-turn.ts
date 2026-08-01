@@ -20,7 +20,8 @@
 import { defineGraph } from "../graph/graph.js";
 import type { Graph } from "../graph/graph.js";
 import { outputs } from "../graph/step.js";
-import type { ModelCallResult, WaitForResult } from "../graph/step.js";
+import type { WaitForResult } from "../graph/step.js";
+import type { ModelCallResult } from "./model-call.js";
 import { toolCall } from "./waitable.js";
 import type { Profile } from "./profile.js";
 import type { Message, ContentBlock } from "./message.js";

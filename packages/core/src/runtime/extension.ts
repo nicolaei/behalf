@@ -2,9 +2,11 @@
 
 import type { ScopeId, ScopeAction } from "../graph/thread.js";
 import type { Event, EventType } from "../session/event.js";
-import type { CommittedEnvelope } from "../session/envelope.js";
+import type { CommittedEnvelope, Stream } from "../session/envelope.js";
+import type { InboxMessage } from "../session/session-store.js";
 import type { WaitableSource } from "./waitable-source.js";
 import type { Runtime } from "./runtime.js";
+import type { StepIdentity } from "./routing.js";
 import { freshScopeId } from "./ids.js";
 
 /**
@@ -14,6 +16,9 @@ import { freshScopeId } from "./ids.js";
  */
 export interface ExecutionScope {
   readonly scope: ScopeId;
+  /** The runtime this scope belongs to — an extension needs it to reach the store and
+   * whatever per-runtime state of its own it keyed off it (ai's model/tool resolvers). */
+  readonly runtime: Runtime;
   /** This scope's slice of the committed log, in log order. */
   events(): readonly CommittedEnvelope[];
   /**
@@ -45,6 +50,26 @@ export interface ExecutionScope {
 }
 
 /**
+ * An `ExecutionScope` for a scope that has a currently-running NODE — what an
+ * extension's `stepContext` hook gets, as opposed to `edgeContext`'s (an edge
+ * has no single running node to attribute anything to).
+ *
+ * The two extra exposures are what let a capability build its own
+ * node-attributed operations through the seam instead of the engine holding
+ * them as built-in `StepContext` fields: `openStream` opens a logged stream
+ * tagged with the running node (ai's model reply), and `identity` names the
+ * running node so a call can be attributed to it (ai's tool call).
+ * @public
+ */
+export interface StepExecutionScope extends ExecutionScope {
+  /** Opens a fresh stream on this scope, attributed to the currently-running node. */
+  openStream(type: EventType): Stream;
+  /** The currently-running node's identity. Throws `purpose` as its message when no node is
+   * running — `purpose` is the caller's own "X called outside a running node" wording. */
+  identity(purpose: string): StepIdentity;
+}
+
+/**
  * The seam through which a capability (ai, timers, …) attaches to a `Runtime` without the
  * engine knowing its vocabulary.
  * @public
@@ -58,7 +83,7 @@ export interface EngineExtension {
    * `StepContext` field, is a real ambiguity — the runtime throws rather than silently
    * picking a last-writer-wins policy.
    */
-  stepContext?(scope: ExecutionScope): Record<string, unknown>;
+  stepContext?(scope: StepExecutionScope): Record<string, unknown>;
   /**
    * Merged into every `EdgeContext` the runtime builds for an edge whose `run` function
    * fires — alongside the built-in `scope`/`appendEvent` fields. Same collision rule as
@@ -86,6 +111,23 @@ export interface EngineExtension {
   seedScope?(
     scope: ScopeId,
     payload: unknown,
+    appendEvent: <T extends EventType>(payload: Event[T], type: T) => void,
+  ): void;
+  /**
+   * Called once a `waitFor`/`interrupt` node has consumed a pending inbox entry, so the
+   * extension that OWNS that entry's vocabulary can commit it to the log under its own
+   * event type. The engine has no event type for a consumed message: `InboxMessage` is a
+   * bare `{ kind?: string }` as far as core is concerned, and how it becomes a durable
+   * fact is the claiming extension's decision (ai commits it as its own `"message"`
+   * event, which its `messageReducer` folds back onto the thread).
+   *
+   * This is the same shape as `seedScope`: core decides WHEN a fact is committed and on
+   * which scope; the extension decides WHAT is committed. A no-op for an extension that
+   * registers none — an engine with no extension claiming the entry consumes it and
+   * commits nothing, since there is nothing it could honestly write.
+   */
+  commitInboxMessage?(
+    message: InboxMessage,
     appendEvent: <T extends EventType>(payload: Event[T], type: T) => void,
   ): void;
   /** Park conditions this extension can satisfy — each is started the same way `runtime()`
@@ -150,6 +192,17 @@ export function seedScope(
   if (payload === undefined) return;
   for (const extension of extensions) {
     extension.seedScope?.(scope, payload, appendEvent);
+  }
+}
+
+/** Offers a consumed inbox entry to every registered extension's own `commitInboxMessage` hook — the shared tail `driveWaitForMessage` calls once a `waitFor`/`interrupt` has taken a message off the inbox. A no-op when no extension registers the hook. */
+export function commitInboxMessage(
+  extensions: readonly EngineExtension[],
+  message: InboxMessage,
+  appendEvent: <T extends EventType>(payload: Event[T], type: T) => void,
+): void {
+  for (const extension of extensions) {
+    extension.commitInboxMessage?.(message, appendEvent);
   }
 }
 

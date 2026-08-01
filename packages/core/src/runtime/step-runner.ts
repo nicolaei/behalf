@@ -3,25 +3,20 @@
 // tagging, and folding the compact/error emits every step-running path
 // handles the same way.
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): commitCompaction takes an ai-shaped Message/compaction payload; compact stays a built-in StepContext field per this task's own scoping (see task notes).
-import type { Message } from "../ai/message.js";
 import type { NodeId, Graph } from "../graph/graph.js";
 import type { ScopeId, ScopeAction } from "../graph/thread.js";
-import type { Step, StepContext, Emit, ModelCallResult, StepError } from "../graph/step.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): StepContextConfig.callTool takes a Tool; kept built-in per this task's own scoping.
-import type { Tool } from "../ai/tool.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): StepContextConfig.modelCall takes a Profile; same reasoning as callTool's note above.
-import type { Profile } from "../ai/profile.js";
+import type { Step, StepContext, Emit, StepError } from "../graph/step.js";
 import type { Stream, CommittedEnvelope } from "../session/envelope.js";
 import type { Event, EventType } from "../session/event.js";
 import type { Runtime } from "./runtime.js";
 import {
   type EngineExtension,
-  type ExecutionScope as ScopeHandle,
+  type StepExecutionScope,
   foldExtensionState,
   makeDeriveScope,
   seedScope,
 } from "./extension.js";
+import type { StepIdentity } from "./routing.js";
 import { type ErrorContext, type ErrorDecision, unreachable } from "./errors.js";
 import { RetryableError } from "./errors.js";
 import { StateTracker } from "./routing.js";
@@ -196,9 +191,7 @@ export interface StepContextConfig {
   inputs: unknown[];
   openStream: (type: EventType) => Stream; // on-demand stream factory model calls and steps use to create a logged event
   appendEvent: <T extends EventType>(payload: Event[T], type: T) => void; // commits a standalone event to this scope
-  modelCall: (profile: Profile) => Promise<ModelCallResult>;
-  callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) => Promise<Output>;
-  compact: (input: { task?: Message; summary: Message; keepLast: number }) => Promise<void>;
+  identity: (purpose: string) => StepIdentity; // the currently-running node, for anything that must be attributed to it
   getEvents: () => readonly CommittedEnvelope[]; // this scope's slice of the committed log, backing ExecutionScope.events()
   extensions: EngineExtension[]; // registered extensions whose stepContext() is merged into the built StepContext
 }
@@ -209,16 +202,13 @@ const BUILT_IN_STEP_CONTEXT_KEYS = [
   "inputs",
   "openStream",
   "appendEvent",
-  "modelCall",
-  "callTool",
   "output",
-  "compact",
   "invalidate",
   "fail",
 ];
 
-/** Builds the `ExecutionScope` handle passed to each extension's `stepContext(scope)` — `state(name)` folds this scope's events through `name`'s own registered `reducers` (see `foldExtensionState`), independently for every extension name a caller asks for. */
-function makeExecutionScope(config: StepContextConfig): ScopeHandle {
+/** Builds the `StepExecutionScope` handle passed to each extension's `stepContext(scope)` — `state(name)` folds this scope's events through `name`'s own registered `reducers` (see `foldExtensionState`), independently for every extension name a caller asks for. `openStream`/`identity` are what let an extension build a node-attributed operation of its own (ai's `modelCall`/`callTool`) instead of the engine holding one as a built-in field. */
+function makeExecutionScope(config: StepContextConfig): StepExecutionScope {
   return {
     get scope() {
       return config.getScope();
@@ -232,6 +222,9 @@ function makeExecutionScope(config: StepContextConfig): ScopeHandle {
       );
     },
     appendEvent: config.appendEvent,
+    runtime: config.runtime,
+    openStream: config.openStream,
+    identity: config.identity,
     deriveScope: makeDeriveScope(config.runtime, config.getScope, config.setScope),
     ...(config.getLabel ? { label: config.getLabel } : {}),
   };
@@ -240,7 +233,7 @@ function makeExecutionScope(config: StepContextConfig): ScopeHandle {
 /** Merges every registered extension's `stepContext(scope)` contribution into one object. Throws on a key that collides with a built-in field, or with another extension's contribution — a real ambiguity, never resolved by silent last-writer-wins. */
 function mergeExtensionStepContext(
   extensions: EngineExtension[],
-  scope: ScopeHandle,
+  scope: StepExecutionScope,
 ): Record<string, unknown> {
   const merged: Record<string, unknown> = {};
   for (const extension of extensions) {
@@ -284,12 +277,9 @@ export function makeStepContext(config: StepContextConfig): StepContext {
     inputs: config.inputs,
     openStream: config.openStream,
     appendEvent: config.appendEvent,
-    modelCall: config.modelCall,
-    callTool: config.callTool,
     output<Result>(value: Result): Emit<Result> {
       return { output: value };
     },
-    compact: config.compact,
     invalidate(target: NodeId, options?: { action?: ScopeAction; payload?: unknown }): Emit<never> {
       return {
         invalidate: target,
@@ -328,12 +318,7 @@ export function withInputs(context: StepContext, inputs: unknown[]): StepContext
     appendEvent: (payload: Event[EventType], type: EventType) => {
       context.appendEvent(payload, type);
     },
-    modelCall: (profile: Profile) => context.modelCall(profile),
-    callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) =>
-      context.callTool(tool, input),
     output: <Result>(value: Result) => context.output(value),
-    compact: (input: { task?: Message; summary: Message; keepLast: number }) =>
-      context.compact(input),
     invalidate: (
       target: Parameters<StepContext["invalidate"]>[0],
       options?: Parameters<StepContext["invalidate"]>[1],

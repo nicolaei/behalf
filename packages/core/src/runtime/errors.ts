@@ -60,3 +60,22 @@ export class RetryableError extends Error {
     this.retryable = options.retryable;
   }
 }
+
+/**
+ * A step failed because something it was waiting on was deliberately aborted,
+ * rather than because it went wrong. The engine treats this as a routing
+ * decision, not an error: `tick` sends such a failure to the nearest declared
+ * `onAbort` target instead of failing the run.
+ *
+ * Engine-generic on purpose. Core has no notion of WHAT was aborted — the ai
+ * extension's own `ModelCallAbortedError` (a preempted model call) extends this,
+ * and any future capability with an abortable operation can do the same without
+ * core learning its vocabulary.
+ * @public
+ */
+export class StepAbortedError extends Error {
+  constructor(message = "step aborted") {
+    super(message);
+    this.name = "StepAbortedError";
+  }
+}

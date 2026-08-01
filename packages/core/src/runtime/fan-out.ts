@@ -17,10 +17,6 @@ import {
   type ExecutionContext,
   ExecutionScope,
 } from "./step-runner.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): runModelCall/callTool live in ai/; kept as a runtime→ai import per this task's own scoping (see drive.ts's matching note).
-import { runModelCall } from "../ai/model-call.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): see runModelCall's import note above; same reasoning for callTool.
-import { callTool } from "../ai/tool-executor.js";
 import {
   commitInvalidation,
   findInterruptNodes,
@@ -144,12 +140,7 @@ export async function runBranchNode(
         ...(ctx.branchId ? { branchId: ctx.branchId } : {}),
       });
     },
-    modelCall: (profile) => runModelCall(profile, branchContext, runtime, setScope),
-    callTool: (tool, toolInput) => callTool(tool, toolInput, scope, runtime, nodeIdentity),
-    compact: (input) => {
-      runtime.store.append(input, { type: "compaction", threadId: scope });
-      return Promise.resolve();
-    },
+    identity: () => nodeIdentity,
     getEvents: () =>
       runtime.store
         .events()

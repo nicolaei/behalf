@@ -4,12 +4,17 @@
 // runtime({ extensions: [ai({ models, bindings })] }).
 
 import "./context.js"; // side-effect: registers the StepContext/EdgeContext.thread declaration merge
-import type { EngineExtension, ExecutionScope } from "../runtime/index.js";
+import type { EngineExtension, ExecutionScope, StepExecutionScope } from "../runtime/index.js";
 import type { Model } from "./model.js";
 import type { ModelPort } from "./model-port.js";
 import type { Binding } from "./tool.js";
 import type { AgentSpawner } from "./agent-spawner.js";
 import type { Message } from "./message.js";
+import type { Profile } from "./profile.js";
+import type { Tool } from "./tool.js";
+import type { CompactionInput } from "./context.js";
+import { runModelCall } from "./model-call.js";
+import { callTool } from "./tool-executor.js";
 import { createAiWorkers } from "./tool-executor.js";
 import {
   messageReducer,
@@ -51,8 +56,30 @@ export function ai(config: AiConfig): EngineExtension {
       compaction: compactionReducer,
       threadGenesis: threadGenesisReducer,
     },
-    stepContext(scope: ExecutionScope) {
-      return { thread: buildThreadContext(scope, () => scope.label?.()) };
+    stepContext(scope: StepExecutionScope) {
+      const thread = buildThreadContext(scope, () => scope.label?.());
+      return {
+        thread,
+        // The three operations that used to be built-in `StepContext` fields.
+        // Each is built here, from the engine-generic exposures on `scope`, so
+        // nothing under graph/ or runtime/ has to name a Profile, a Tool, or a
+        // Message. `scope`'s own getters stay live, which is what keeps a
+        // fan-out branch's calls attributed to the BRANCH (its forked scope,
+        // its node identity, its branchId) rather than the parent's.
+        modelCall: (profile: Profile) => runModelCall(profile, scope, thread),
+        callTool: <Input, Output>(tool: Tool<Input, Output>, input: Input) =>
+          callTool(
+            tool,
+            input,
+            scope.scope,
+            scope.runtime,
+            scope.identity("callTool called outside a running node"),
+          ),
+        compact: (input: CompactionInput) => {
+          scope.appendEvent(input, "compaction");
+          return Promise.resolve();
+        },
+      };
     },
     edgeContext(scope: ExecutionScope) {
       return { thread: buildThreadContext(scope) };
@@ -61,6 +88,14 @@ export function ai(config: AiConfig): EngineExtension {
       const reason = (payload as InvalidatePayload | undefined)?.reason;
       if (!reason) return;
       appendEvent({ message: reason }, "message");
+    },
+    commitInboxMessage(message, appendEvent) {
+      // Core consumed a pending inbox entry at a waitFor/interrupt node and has
+      // no event type for it. ai does: its own `"message"`, which
+      // `messageReducer` folds straight back onto the thread. The cast is the
+      // seam's honest shape — core hands over a bare `{ kind?: string }`,
+      // and ai's `UserMessage` is what actually gets received here.
+      appendEvent({ message: message as Message }, "message");
     },
     workers: createAiWorkers(config),
   };

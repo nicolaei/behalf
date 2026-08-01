@@ -1,39 +1,17 @@
-// Flow authoring — Step, PersonaStep, StepContext, Emit. See docs/reference.md § "StepContext".
+// Flow authoring — Step, StepContext, Emit. See docs/reference.md § "StepContext".
+//
+// Deliberately ai-free (B3.0): nothing here names a Message, a Profile, or a
+// Tool. `modelCall`/`callTool`/`compact` are contributed by the ai extension
+// through the same `stepContext` seam `thread` already came through — see
+// `ai/context.ts`'s declaration merge and `ai/extension.ts`'s hook. The two
+// model-call types they used to need (`ModelCallResult`,
+// `ModelCallAbortedError`) live in `ai/model-call.ts`, and `PersonaStep` in
+// `ai/profile.ts`.
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): modelCall/callTool/compact stay built-in StepContext fields per this task's own scoping (see task notes) — only `thread` moved to the ai extension's declaration-merge contribution this step. Message/Usage are still needed for their signatures.
-import type { Message, Usage } from "../ai/message.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): see the note above — modelCall(profile) takes a Profile, kept built-in.
-import type { Profile } from "../ai/profile.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): see the note above — callTool(tool) takes a Tool, kept built-in.
-import type { Tool } from "../ai/tool.js";
 import type { ScopeId, ScopeAction } from "./thread.js";
 import type { NodeId } from "./graph.js";
 import type { Stream } from "../session/envelope.js";
 import type { Event, EventType } from "../session/event.js";
-
-/** Summary of a model call — whether tools were used and token usage. @public */
-export interface ModelCallResult {
-  usedTools: boolean;
-  usage: Usage;
-  toolCalls: { correlationId: string; name: string }[]; // requested this turn, in reply order
-}
-
-/**
- * Thrown by `context.modelCall` when a user message with `intent: "abort"`
- * preempts the in-flight call. What streamed so far is already committed to
- * the log, marked aborted (see `Stream.abort()`) — this is purely the signal
- * that the step itself didn't get a reply. Named so a flow author (e.g.
- * `agentTurn`'s own `respond` step) can catch it specifically and end the
- * turn gracefully, instead of it falling through runStep's generic
- * catch-all and failing the whole run as an ordinary, non-retryable error.
- * @public
- */
-export class ModelCallAbortedError extends Error {
-  constructor() {
-    super("model call aborted");
-    this.name = "ModelCallAbortedError";
-  }
-}
 
 /** A structured error a step can return instead of throwing. @public */
 export interface StepError {
@@ -68,30 +46,20 @@ export type Emit<Result = unknown> =
   | { invalidate: NodeId; action?: ScopeAction; payload?: unknown }
   | { error: StepError };
 
-/** What a step sees and does. Extensions merge in more (ai: `thread`). @public */
+/** What a step sees and does. Extensions merge in more (ai: `thread`, `modelCall`, `callTool`, `compact`). @public */
 export interface StepContext {
   readonly inputs: unknown[]; // upstream outputs; a join gets one per branch
   readonly scope: ScopeId;
   openStream(type: EventType): Stream; // open a fresh stream scoped to this step's own scope
   appendEvent<T extends EventType>(payload: Event[T], type: T): void; // commit a standalone event to this step's own scope
 
-  modelCall(profile: Profile): Promise<ModelCallResult>; // one request + its tools, appended to the log
-  callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output>;
-
   output<Result>(value: Result): Emit<Result>;
-  compact(input: { task?: Message; summary: Message; keepLast: number }): Promise<void>;
   invalidate(target: NodeId, options?: { action?: ScopeAction; payload?: unknown }): Emit<never>;
   fail(error: StepError): Emit<never>;
 }
 
 /** A function that runs one node in the graph and returns its outcome. @public */
 export type Step<Result = unknown> = (context: StepContext) => Promise<Emit<Result>>;
-
-/**
- * A step that uses a model — carries its `persona` so the graph sees it with no separate registration.
- * @public
- */
-export type PersonaStep<Result = unknown> = Step<Result> & { persona: Profile };
 
 /**
  * A step that sits at a fan-out join point — declares that it expects to receive

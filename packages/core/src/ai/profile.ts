@@ -1,5 +1,6 @@
-// Flow authoring — Profile. See docs/reference.md § "Profile".
+// AI authoring — Profile and PersonaStep. See docs/reference.md § "Profile".
 
+import type { Step } from "../graph/step.js";
 import type { Model, ReasoningLevel } from "./model.js";
 import type { Tool, Toolset } from "./tool.js";
 
@@ -10,3 +11,12 @@ export interface Profile {
   tools: (Tool | Toolset)[];
   reasoning?: ReasoningLevel; // must be in model.reasoning — checked with coverage
 }
+
+/**
+ * A step that uses a model — carries its `persona` so the graph sees it with no separate registration.
+ *
+ * Lives here rather than in `graph/step.ts` because a persona is ai vocabulary:
+ * the engine only ever sees a plain `Step`.
+ * @public
+ */
+export type PersonaStep<Result = unknown> = Step<Result> & { persona: Profile };

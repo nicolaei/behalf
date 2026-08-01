@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { defineGraph, runtime, userText, userInput } from "../../index.js";
+import { ai, defineGraph, runtime, userText, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { loggedEnvelopes } from "./support.js";
+import { loggedEnvelopes, neverCalled } from "./support.js";
 import { runToCompletion } from "@behalf-js/testing";
 
 // Mirrors examples/simple-chat's chat graph shape: a `use` node as the
@@ -27,7 +27,7 @@ describe("a use node looped back through a waitFor", () => {
     });
 
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
 
     // Fire-and-forget: this graph never finishes, so we never await it.
     runToCompletion(outer, userText("hi"), ready).catch(() => {

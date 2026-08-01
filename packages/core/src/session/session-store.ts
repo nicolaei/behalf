@@ -1,17 +1,35 @@
 // Systems running flows / Session store — SessionStore. See docs/reference.md § "SessionStore".
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 6: reducers + replay slot) PendingEntry's message kind is ai-shaped; removed when a pending message becomes a generic ai-registered inbox kind.
-import type { UserMessage } from "../ai/message.js";
 import type { ScopeId } from "../graph/thread.js";
 import type { Envelope, Event, EventType, Stream } from "./index.js";
 
 /**
- * A pending, not-yet-committed entry — either a real conversational message or a
+ * A message sitting in the inbox, as far as the engine is concerned: something that may
+ * carry a `kind`, which is the only property core ever reads (a `waitFor` node matches its
+ * armed `Waitable`'s message kind against it). Everything else about a message — role,
+ * content, intent — is the vocabulary of whichever extension owns it; ai's `UserMessage`
+ * satisfies this structurally, with no declared relationship in either direction.
+ *
+ * The index signature is load-bearing, not decoration: without it `kind` would be the only
+ * declared property and all of it optional, making this a WEAK type — TypeScript then
+ * rejects `store.receive({ kind: "message", message: { role, intent, content } })` for
+ * having nothing in common with it. Every existing call site passes exactly that shape, so
+ * saying "a message carries a `kind` the engine reads, plus whatever else its owner puts
+ * there" is both what core actually means and what keeps those call sites compiling.
+ * @public
+ */
+export interface InboxMessage {
+  readonly kind?: string;
+  readonly [property: string]: unknown;
+}
+
+/**
+ * A pending, not-yet-committed entry — either a message a `Waitable` can match by kind or a
  * non-conversational signal a `Waitable` can match on. Arrival order is preserved in
  * one shared queue regardless of kind. @public
  */
 export type PendingEntry =
-  { kind: "message"; message: UserMessage } | { kind: "signal"; name: string; payload?: unknown };
+  { kind: "message"; message: InboxMessage } | { kind: "signal"; name: string; payload?: unknown };
 
 /**
  * The log, the pending queue, and the delta stream. `receive` adds an entry

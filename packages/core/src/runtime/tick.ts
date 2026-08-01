@@ -6,7 +6,7 @@ import type { Graph, NodeId, NodeKind } from "../graph/graph.js";
 import type { ScopeId } from "../graph/thread.js";
 import { tryMessageKindOf } from "../graph/waitable.js";
 import type { StepContext, WaitForResult } from "../graph/step.js";
-import { ModelCallAbortedError } from "../graph/step.js";
+import { StepAbortedError } from "./errors.js";
 import type { Event } from "../session/event.js";
 import type { CommittedEnvelope, Envelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
@@ -996,7 +996,7 @@ export async function tick(flow: Graph, runtime: Runtime): Promise<TickOutcome> 
     // onAbort target instead of failing the run. `path` is this position's
     // frame stack innermost-first, so a use()'d subgraph that declares no
     // onAbort of its own bubbles out to its enclosing graph's declaration.
-    if ("error" in emit && emit.error.cause instanceof ModelCallAbortedError) {
+    if ("error" in emit && emit.error.cause instanceof StepAbortedError) {
       const routed = routeAbort(path, currentScope, runtime, getScope, setScope);
       if (routed) {
         currentScope = routed.scope;

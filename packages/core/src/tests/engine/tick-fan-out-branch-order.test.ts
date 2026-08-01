@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
-import { defineGraph, runtime, join, outputs, userInput } from "../../index.js";
+import { ai, defineGraph, runtime, join, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
-import { submitApproval } from "../acceptance/support.js";
+import { neverCalled, submitApproval } from "../acceptance/support.js";
 
 // Regression test for advanceFanOutGroup's branch-selection bug: it used to
 // pick the first not-done branch full stop (`Array.find`), so a branch
@@ -32,7 +32,7 @@ describe("ticking a fan-out group whose parked branch is declared before its liv
 
   it("advances the live sibling instead of retrying the parked branch forever", async () => {
     const store = memoryStore();
-    const ready = await runtime({ store });
+    const ready = await runtime({ store, extensions: [ai({ models: neverCalled, bindings: [] })] });
     seed(flow, undefined, ready);
 
     // If advanceFanOutGroup starves `a`, this call never returns (every

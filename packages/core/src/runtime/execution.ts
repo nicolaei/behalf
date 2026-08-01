@@ -7,12 +7,10 @@
 // machinery every drive-loop path (message- or signal-based alike) needs
 // regardless of whether the ai extension is even registered.
 
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8: thread extraction) waitForMessage/peekMessageFromInbox key off ai-shaped MessageKind/UserMessage; removed when message-kind waiting moves to ai's own reducers/waitables.
-import type { MessageKind, UserMessage } from "../ai/message.js";
 import type { Waitable } from "../graph/waitable.js";
 import type { NodeId } from "../graph/graph.js";
 import type { ScopeId } from "../graph/thread.js";
-import type { SessionStore } from "../session/session-store.js";
+import type { SessionStore, InboxMessage } from "../session/session-store.js";
 import { unreachable } from "./errors.js";
 
 /**
@@ -48,8 +46,8 @@ export function drainOnePendingSignal(store: SessionStore, threadId?: ScopeId): 
 /** Parks until the inbox has a message of the given kind. */
 export async function waitForMessage(
   store: SessionStore,
-  kinds: readonly MessageKind[],
-): Promise<UserMessage> {
+  kinds: readonly string[],
+): Promise<InboxMessage> {
   const entry = await pollInbox(store, () =>
     store.consume(
       (candidate) =>
@@ -66,8 +64,8 @@ export async function waitForMessage(
 /** Non-blocking counterpart to `waitForMessage`: checks whether a message of one of the given kinds is already sitting in the inbox, consuming and returning it if so — `undefined` otherwise, never parking. Shared by tick's own waitFor handling and `runBranchNode`'s `"peek"` mode, both of which must never block. */
 export function peekMessageFromInbox(
   store: SessionStore,
-  kinds: readonly MessageKind[],
-): UserMessage | undefined {
+  kinds: readonly string[],
+): InboxMessage | undefined {
   const entry = store.consume(
     (candidate) =>
       candidate.kind === "message" &&
@@ -125,18 +123,18 @@ export async function waitForSignal<T>(
 interface ArmedInterrupt {
   id: NodeId;
   waitable: Waitable<unknown>;
-  messageKind: MessageKind | undefined;
+  messageKind: string | undefined;
 }
 
 /** Which armed Waitable a race settled on: the waitFor node's own ("self"), or a specific `interrupt` node — never both, since `waitForRace` stops polling the instant either is satisfied. */
 export type RaceWinner =
-  | { kind: "self"; message: UserMessage }
+  | { kind: "self"; message: InboxMessage }
   | { kind: "interrupt"; interrupt: { id: NodeId; waitable: Waitable<unknown> }; value: unknown };
 
 /** Step (a) of `waitForRace`'s poll: consumes a pending message matching the waitFor node's own kind or any message-based interrupt's kind, and classifies which one it belongs to — the interrupt whose kind matches, or "self" (the waitFor node's own Waitable) when none does. `undefined` when no matching message is queued yet. */
 function consumeRaceMessage(
   store: SessionStore,
-  messageKinds: readonly MessageKind[],
+  messageKinds: readonly string[],
   interrupts: readonly ArmedInterrupt[],
 ): RaceWinner | undefined {
   const message = store.consume(
@@ -186,14 +184,14 @@ function checkSignalInterrupts(
  */
 export async function waitForRace(
   store: SessionStore,
-  waitKind: MessageKind,
+  waitKind: string,
   interrupts: readonly ArmedInterrupt[],
 ): Promise<RaceWinner> {
   const messageKinds = [
     waitKind,
     ...interrupts
       .map((interrupt) => interrupt.messageKind)
-      .filter((kind): kind is MessageKind => kind !== undefined),
+      .filter((kind): kind is string => kind !== undefined),
   ];
   const signalInterrupts = interrupts.filter((interrupt) => interrupt.messageKind === undefined);
 

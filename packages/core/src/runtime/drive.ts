@@ -6,19 +6,16 @@
 // blocking drive loop any more: `tick()` is the engine's only driver.
 
 import { type Graph, type NodeId, type NodeKind, nodeOptionFields } from "../graph/graph.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): driveWaitForMessage folds ai-shaped Message/MessageKind/UserMessage; the "message" event's own structural role (a waitFor's own consumption) predates this task and stays out of its scope — see task notes.
-import type { UserMessage } from "../ai/message.js";
+import type { InboxMessage } from "../session/session-store.js";
 import type { Waitable } from "../graph/waitable.js";
 import type { ScopeId, ScopeAction } from "../graph/thread.js";
 import { messageKindOf, tryMessageKindOf } from "../graph/waitable.js";
-import type { Step, StepContext, Emit, ModelCallResult, WaitForResult } from "../graph/step.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): buildDriveContext.callTool takes a Tool; kept built-in per this task's own scoping.
-import type { Tool } from "../ai/tool.js";
+import type { Step, StepContext, Emit, WaitForResult } from "../graph/step.js";
 import { isCommittedEnvelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
 import { freshCorrelationId, freshScopeId } from "./ids.js";
 import { notImplemented, unreachable } from "./errors.js";
-import { seedScope } from "./extension.js";
+import { seedScope, commitInboxMessage } from "./extension.js";
 import {
   type StepIdentity,
   type RouteResult,
@@ -35,10 +32,6 @@ import {
   handleStepError,
   type ExecutionContext,
 } from "./step-runner.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): runModelCall/callTool live in ai/; modelCall/callTool remain built-in StepContext fields per this task's own scoping (see fork-1 decision in task notes) — not yet routed through the generic stepContext extension seam.
-import { runModelCall } from "../ai/model-call.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 8 follow-up): see runModelCall's import note above; same reasoning for callTool.
-import { callTool } from "../ai/tool-executor.js";
 import { peekMessageFromInbox, peekSignalMatch, type RaceWinner } from "./execution.js";
 
 export interface InterruptNode {
@@ -106,7 +99,7 @@ export interface WaitContext {
  * budget.
  */
 export async function driveWaitForMessage(
-  message: UserMessage,
+  message: InboxMessage,
   nodeId: NodeId,
   wait: WaitContext,
 ): Promise<RouteResult & { ranInterruptStep: boolean }> {
@@ -115,14 +108,19 @@ export async function driveWaitForMessage(
   // becomes a log event and joins the scope's own history, then whichever
   // node was actually armed for its kind — the interrupt, or this waitFor
   // itself — runs and takes over routing.
-  runtime.store.append(
-    { message },
-    {
-      type: "message",
+  //
+  // Core has no event type of its own for a consumed message, and shouldn't:
+  // an `InboxMessage` is a bare `{ kind?: string }` here. Whichever extension
+  // owns this entry's vocabulary commits it under its OWN event type (ai's
+  // `"message"`), on this scope and this branch — see
+  // `EngineExtension.commitInboxMessage`.
+  commitInboxMessage(runtime.extensions, message, (payload, type) => {
+    runtime.store.append(payload, {
+      type,
       threadId: context.scope,
       ...(wait.branchId ? { branchId: wait.branchId } : {}),
-    },
-  );
+    });
+  });
 
   const interrupt = interrupts.find(
     (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,
@@ -300,13 +298,13 @@ export async function runWaitForNode(
 
   // A message win, whether the waitFor node's own or a message-based
   // interrupt's: both fold through `driveWaitForMessage` identically, so the
-  // `UserMessage` to fold is computed once regardless of which of the two
+  // message to fold is computed once regardless of which of the two
   // actually won the race.
-  const wonMessage: UserMessage | undefined =
+  const wonMessage: InboxMessage | undefined =
     winner.kind === "self"
       ? winner.message
       : tryMessageKindOf(winner.interrupt.waitable) !== undefined
-        ? (winner.value as UserMessage)
+        ? (winner.value as InboxMessage)
         : undefined;
 
   if (wonMessage !== undefined) {
@@ -438,7 +436,7 @@ export async function driveStepEmit(
   };
 }
 
-/** Guards that a node is currently running (`current` is set) and looks up its identity — shared by `openStream` and `modelCall`, whose "no running node" guards differ only in their error message. */
+/** Guards that a node is currently running (`current` is set) and looks up its identity — shared by `openStream` and whatever an extension attributes to the running node (ai's `modelCall`/`callTool`), whose "no running node" guards differ only in their error message. */
 function currentNodeIdentity(
   current: NodeId | undefined,
   flow: Graph,
@@ -452,10 +450,12 @@ function currentNodeIdentity(
 
 /**
  * Builds the `StepContext` every node `tick()` runs executes against:
- * `openStream`/`modelCall`/`callTool` all resolve the currently running node's
- * identity via `currentNodeIdentity`, reading the running node and its scope
- * through getters — `tick` closes over its own loop variables, so this sees
- * the live value on each call.
+ * `openStream` and `identity` both resolve the currently running node via
+ * `currentNodeIdentity`, reading the running node and its scope through
+ * getters — `tick` closes over its own loop variables, so this sees the live
+ * value on each call. `identity` is also what an extension's own
+ * node-attributed operations (ai's `modelCall`/`callTool`) reach through the
+ * `stepContext` seam.
  */
 export function buildDriveContext(
   flow: Graph,
@@ -464,7 +464,7 @@ export function buildDriveContext(
   getScope: () => ScopeId,
   setScope: (scope: ScopeId) => void,
 ): StepContext {
-  const context = makeStepContext({
+  return makeStepContext({
     runtime,
     getScope,
     setScope,
@@ -498,28 +498,6 @@ export function buildDriveContext(
     appendEvent: (payload, type) => {
       runtime.store.append(payload, { type, threadId: getScope() });
     },
-    modelCall(profile): Promise<ModelCallResult> {
-      // modelCall only ever runs while a node is being processed by the
-      // caller's drive loop, so getCurrent() is always set at that point. The
-      // identity itself is only needed for the guard's own error message —
-      // runModelCall no longer runs a tool call inline, so it has no need to
-      // attribute one to this node's identity.
-      if (!getCurrent()) throw new Error("modelCall called outside a running node");
-      return runModelCall(profile, context, runtime, setScope);
-    },
-    callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output> {
-      const identity = currentNodeIdentity(
-        getCurrent(),
-        flow,
-        "callTool called outside a running node",
-      );
-      return callTool(tool, input, getScope(), runtime, identity);
-    },
-    compact(input): Promise<void> {
-      const scope = getScope();
-      runtime.store.append(input, { type: "compaction", threadId: scope });
-      return Promise.resolve();
-    },
+    identity: (purpose) => currentNodeIdentity(getCurrent(), flow, purpose),
   });
-  return context;
 }

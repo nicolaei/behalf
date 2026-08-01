@@ -1,8 +1,7 @@
 // Gateway — the only thing clients touch. See docs/reference.md § "Gateway".
 
 import type { SessionId } from "../session/envelope.js";
-// eslint-disable-next-line no-restricted-imports -- TODO(B2 step 6: reducers + replay slot) Gateway.submit takes a UserMessage; removed when submit takes a generic PendingEntry instead.
-import type { UserMessage } from "../ai/message.js";
+import type { InboxMessage } from "../session/session-store.js";
 
 /**
  * Minimal shape the gateway needs from a socket. Swap for the real `ws` or
@@ -20,5 +19,5 @@ export interface WebSocketLike {
  */
 export interface Gateway {
   connect(session: SessionId, socket: WebSocketLike): void;
-  submit(session: SessionId, message: UserMessage): void;
+  submit(session: SessionId, message: InboxMessage): void;
 }

@@ -3,7 +3,7 @@
 // runtime/coverage.ts's satisfiesFlows; this is the model/binding-aware half.
 
 import type { Graph, NodeKind } from "../graph/graph.js";
-import type { PersonaStep } from "../graph/step.js";
+import type { PersonaStep } from "./profile.js";
 import type { Missing } from "../runtime/index.js";
 import { walkGraph } from "../runtime/index.js";
 import type { Profile } from "./profile.js";

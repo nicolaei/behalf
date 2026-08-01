@@ -18,7 +18,10 @@ export { userText } from "./message.js";
 export type { ReasoningLevel, Model } from "./model.js";
 export type { Tool, Toolset, ToolContext, ToolHandler, Binding } from "./tool.js";
 export { tool, toolset, provide, expand } from "./tool.js";
-export type { Profile } from "./profile.js";
+export type { Profile, PersonaStep } from "./profile.js";
+export type { ModelCallResult } from "./model-call.js";
+export { ModelCallAbortedError } from "./model-call.js";
+export type { CompactionInput } from "./context.js";
 export { agentTurn } from "./agent-turn.js";
 export type {
   FinishOn,
