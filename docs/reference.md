@@ -429,14 +429,23 @@ address.
 What a `waitFor`/`interrupt` node parks on. `provider` names which kind of thing can satisfy it
 (checked at boot by `satisfiesFlows` against registered `WaitableSource`s); `label` is a
 human-readable identity for logs/debugging; `match` is a pure function over the committed session
-log — no IO of its own. `userInput` is the one built-in `Waitable`: it parks until a message of the
-given `kind` arrives, so `waitFor(userInput(kind))` behaves exactly like the bare-`kind` form did
-before `Waitable` existed.
+log — no IO of its own.
+
+`inboxKind` is optional and opts the waitable into inbox-message waiting, naming the message kind
+the engine checks the pending inbox against.
+A waitable that omits it is resolved purely through its own `match()` against the committed log, and
+needs a registered `WaitableSource` for its provider.
+The engine reads this field and never a provider name, so any waitable factory — not just ai's — can
+ask for inbox-waiting.
+
+`userInput` is the one built-in `Waitable`: it parks until a message of the given `kind` arrives, so
+`waitFor(userInput(kind))` behaves exactly like the bare-`kind` form did before `Waitable` existed.
 
 ```ts
 interface Waitable<T> {
   readonly provider: string;
   readonly label: string;
+  readonly inboxKind?: string;
   match(events: readonly Envelope[]): T | undefined;
 }
 

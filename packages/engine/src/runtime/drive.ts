@@ -9,7 +9,7 @@ import { type Graph, type NodeId, type NodeKind, nodeOptionFields } from "../gra
 import type { InboxMessage } from "../session/session-store.js";
 import type { Waitable } from "../graph/waitable.js";
 import type { ScopeId, ScopeAction } from "../graph/thread.js";
-import { messageKindOf, tryMessageKindOf } from "../graph/waitable.js";
+import { requireInboxKind, inboxKindOf } from "../graph/waitable.js";
 import type { Step, StepContext, Emit, WaitForResult } from "../graph/step.js";
 import { isCommittedEnvelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
@@ -123,7 +123,7 @@ export async function driveWaitForMessage(
   });
 
   const interrupt = interrupts.find(
-    (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,
+    (candidate) => inboxKindOf(candidate.waitable) === message.kind,
   );
   if (interrupt) {
     stateTracker.maybeEmit(
@@ -192,7 +192,7 @@ export interface MessageSource {
 
 /** What a parked `waitFor` reports it is still waiting for: a message-based Waitable contributes its message kind, a signal-based one its own display `label` (see `CursorState.waitingFor`'s note on that overload). */
 function waitingForLabel(waitable: Waitable<unknown>): string {
-  return tryMessageKindOf(waitable) ?? waitable.label;
+  return inboxKindOf(waitable) ?? waitable.label;
 }
 
 /**
@@ -206,7 +206,7 @@ function waitingForLabel(waitable: Waitable<unknown>): string {
  * every signal-based interrupt's own `match()` is checked against the
  * committed log — draining at most one pending signal entry, exactly as
  * `peekSignalMatch` does for a signal-based waitFor node. A signal-based
- * interrupt used to make this throw (`messageKindOf` on a Waitable that has no
+ * interrupt used to make this throw (`requireInboxKind` on a Waitable that has no
  * message kind); it is now a first-class candidate winner, so an armed signal
  * interrupt actually fires under `tick()` rather than parking forever.
  */
@@ -214,16 +214,16 @@ export function peekingMessageSource(runtime: Runtime): MessageSource {
   return {
     race: (waitKind, interrupts) => {
       const messageInterrupts = interrupts.filter(
-        (candidate) => tryMessageKindOf(candidate.waitable) !== undefined,
+        (candidate) => inboxKindOf(candidate.waitable) !== undefined,
       );
       const kinds = [
         waitKind,
-        ...messageInterrupts.map((interrupt) => messageKindOf(interrupt.waitable)),
+        ...messageInterrupts.map((interrupt) => requireInboxKind(interrupt.waitable)),
       ];
       const message = peekMessageFromInbox(runtime.store, kinds);
       if (message) {
         const interrupt = messageInterrupts.find(
-          (candidate) => tryMessageKindOf(candidate.waitable) === message.kind,
+          (candidate) => inboxKindOf(candidate.waitable) === message.kind,
         );
         const winner: RaceWinner = interrupt
           ? {
@@ -236,7 +236,7 @@ export function peekingMessageSource(runtime: Runtime): MessageSource {
       }
 
       for (const interrupt of interrupts) {
-        if (tryMessageKindOf(interrupt.waitable) !== undefined) continue;
+        if (inboxKindOf(interrupt.waitable) !== undefined) continue;
         const matched = peekSignalMatch(runtime.store, interrupt.waitable);
         if (matched === undefined) continue;
         return Promise.resolve({
@@ -276,7 +276,7 @@ export async function runWaitForNode(
   source: MessageSource,
 ): Promise<WaitForOutcome> {
   const { interrupts, context, flow, runtime, stateTracker } = wait;
-  const waitKind = tryMessageKindOf(node.waitable);
+  const waitKind = inboxKindOf(node.waitable);
 
   if (waitKind === undefined) {
     const matched = await source.signal(node.waitable, context.scope);
@@ -303,7 +303,7 @@ export async function runWaitForNode(
   const wonMessage: InboxMessage | undefined =
     winner.kind === "self"
       ? winner.message
-      : tryMessageKindOf(winner.interrupt.waitable) !== undefined
+      : inboxKindOf(winner.interrupt.waitable) !== undefined
         ? (winner.value as InboxMessage)
         : undefined;
 

@@ -4,7 +4,7 @@
 
 import type { Graph, NodeId, NodeKind } from "../graph/graph.js";
 import type { ScopeId } from "../graph/thread.js";
-import { tryMessageKindOf } from "../graph/waitable.js";
+import { inboxKindOf } from "../graph/waitable.js";
 import type { StepContext, WaitForResult } from "../graph/step.js";
 import { StepAbortedError } from "./errors.js";
 import type { Event } from "../session/event.js";
@@ -334,7 +334,7 @@ function applySignalEvent(
   if (leaf.node.kind !== "step") return;
   const topFrame = leaf.node.frame;
   const node = leaf.flow.nodes.get(topFrame.current);
-  if (node?.kind !== "waitFor" || tryMessageKindOf(node.waitable) !== undefined) return;
+  if (node?.kind !== "waitFor" || inboxKindOf(node.waitable) !== undefined) return;
 
   const matched = node.waitable.match(runtime.store.events());
   if (matched === undefined) return;

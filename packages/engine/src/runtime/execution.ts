@@ -89,7 +89,7 @@ export function peekSignalMatch<T>(
 }
 
 /**
- * Parks until a non-`userInput` `Waitable` (a signal-based one, today's only
+ * Parks until a `Waitable` that declares no `inboxKind` (a signal-based one,
  * other provider) is satisfied: drains one pending `signal` entry at a time,
  * committing each as a `signal` event — a durable fact, never folded into
  * `thread.messages` — then re-checks the `Waitable`'s own `match()` against
@@ -119,7 +119,7 @@ export async function waitForSignal<T>(
   return result?.value as T;
 }
 
-/** One armed `interrupt` node together with its message kind, if it has one — precomputed once per race so `waitForRace` never calls `tryMessageKindOf` per poll tick. */
+/** One armed `interrupt` node together with its message kind, if it has one — precomputed once per race so `waitForRace` never calls `inboxKindOf` per poll tick. */
 interface ArmedInterrupt {
   id: NodeId;
   waitable: Waitable<unknown>;

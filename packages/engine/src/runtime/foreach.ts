@@ -33,6 +33,7 @@ import type { CommittedEnvelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
 import { unreachable } from "./errors.js";
 import { inboxMessageOf } from "./extension.js";
+import { inboxKindOf } from "../graph/waitable.js";
 import { commitInvalidation } from "./drive.js";
 import { route } from "./routing.js";
 import { type ExecutionContext, ExecutionScope } from "./step-runner.js";
@@ -222,7 +223,10 @@ export function replayForEachBranch(
       return;
     }
 
-    if (node.kind === "waitFor" && node.waitable.provider !== "userInput") {
+    // A waitable that declares no `inboxKind` (a signal-based one) is resolved
+    // right here off its own `match()` against the committed log, rather than
+    // off this branch's next unapplied event below.
+    if (node.kind === "waitFor" && inboxKindOf(node.waitable) === undefined) {
       const matched = node.waitable.match(runtime.store.events());
       if (matched === undefined) {
         branch.scope = scope;

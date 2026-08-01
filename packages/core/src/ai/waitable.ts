@@ -1,8 +1,8 @@
 // The ai extension's two built-in Waitable constructors — physically
-// relocated out of graph/waitable.ts (B2.7). `messageKindOf`/`tryMessageKindOf`
+// relocated out of graph/waitable.ts (B2.7). `requireInboxKind`/`inboxKindOf`
 // (the engine-internal bridge to the pending inbox) stay in graph/waitable.ts:
-// they only ever check a Waitable's own `provider`/`label` strings, no
-// message-shaped data, so they don't need to move with these two.
+// they only read the neutral `inboxKind` field this file's `userInput()` sets,
+// no message-shaped data, so they don't need to move with these two.
 
 // Side-effect import: registers ai/event.ts's declaration-merge augmentation
 // of the core Event registry, so this file's `envelope.type !== "message"`/
@@ -11,11 +11,18 @@ import "./event.js";
 import type { Envelope, Waitable } from "@behalf-js/engine";
 import type { MessageKind, UserMessage } from "./message.js";
 
-/** The built-in Waitable: parks until a message of the given kind arrives. @public */
+/**
+ * The built-in Waitable: parks until a message of the given kind arrives. Declares its
+ * `inboxKind`, which is what actually opts it into the engine's pending-inbox waiting — the
+ * engine used to recognize this waitable by its `provider` name instead, which put ai's own
+ * vocabulary inside generic engine dispatch (B3.2).
+ * @public
+ */
 export function userInput(kind: MessageKind): Waitable<UserMessage> {
   return {
     provider: "userInput",
     label: kind,
+    inboxKind: kind,
     match: (events: readonly Envelope[]) => {
       for (const envelope of events) {
         if (envelope.form !== "committed" || envelope.type !== "message") continue;

@@ -1,4 +1,4 @@
-// The counterpart to `commitInboxMessage`, and the coupling B3.1 removed.
+// The counterpart to `commitInboxMessage`, and the couplings B3.1 and B3.2 removed.
 //
 // Replay has to recognize, from the log alone, that a `waitFor` node was
 // already satisfied by a consumed inbox entry. Until B3.1 it did that by
@@ -14,6 +14,10 @@
 // word the engine has never heard of — `"note"` — and restarting mid-flow, so
 // the resumption goes through a cold replay of the log rather than any live
 // in-memory position.
+//
+// It proves the same thing one level up for B3.2: the `Waitable` it parks on
+// declares a provider the engine has never heard of either (`"notes"`, not ai's
+// `"userInput"`), and still gets inbox-waiting — see `jot()` below.
 
 import { describe, it, expect } from "vitest";
 import {
@@ -53,12 +57,17 @@ function notes(): EngineExtension {
 }
 
 /**
- * Parks on an inbox entry of kind `"jot"`. The `userInput` provider name is
- * what the engine's arming path reads to know a `Waitable` waits on a message
- * kind at all (`tryMessageKindOf`) — it names the shape, not the ai package.
+ * Parks on an inbox entry of kind `"jot"`, under a provider name the engine has never heard
+ * of. What actually opts it into inbox-waiting is its own `inboxKind` — a neutral, structural
+ * self-description any waitable factory can set.
+ *
+ * Until B3.2 this had to claim `provider: "userInput"` to get inbox-waiting at all, because
+ * that literal string was what the engine's arming path read (`tryMessageKindOf`). An
+ * engine-only extension had to borrow ai's vocabulary to use an engine primitive; naming the
+ * provider `"notes"` here is the proof that it no longer does.
  */
 function jot(): Waitable<{ text: string }> {
-  return { provider: "userInput", label: "jot", match: () => undefined };
+  return { provider: "notes", label: "jot", inboxKind: "jot", match: () => undefined };
 }
 
 describe("replay recognizes a consumed inbox entry under any extension's event type", () => {

@@ -150,6 +150,42 @@ export default defineConfig([
     },
   },
 
+  // ai/ sits ON TOP of the engine and must reach it only through the package's
+  // public surface. The B3.1 extraction narrowed the runtime-submodule lockdown
+  // from `packages/core/src/**` to `packages/engine/src/**`, which silently left
+  // `core/src/ai/**` unguarded (acceptance tests kept their own block, ai/ did
+  // not). Restored here: whatever ai needs from the engine arrives via
+  // `@behalf-js/engine`, not by reaching into its internals.
+  {
+    files: ["packages/core/src/ai/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: [
+                "**/runtime/tick.js",
+                "**/runtime/drive.js",
+                "**/runtime/step-runner.js",
+                "**/runtime/routing.js",
+                "**/runtime/fan-out.js",
+                "**/runtime/foreach.js",
+                "**/runtime/ids.js",
+                "**/runtime/execution.js",
+                "**/runtime/extension.js",
+                "**/runtime/coverage.js",
+                "@behalf-js/engine/dist/**",
+              ],
+              message:
+                "Import from @behalf-js/engine (the public surface), not the engine's internal sub-modules.",
+            },
+          ],
+        },
+      ],
+    },
+  },
+
   // @behalf-js/testing's own layering, mirroring core's: the root subpath is
   // the pure engine stepping vocabulary and must never reach into ai/ — a
   // test helper that needs a model fake belongs on the ./ai subpath. ai/ and

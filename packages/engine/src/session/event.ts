@@ -65,3 +65,30 @@ export interface Event {
 
 /** Union of all event type keys. @public */
 export type EventType = keyof Event;
+
+/**
+ * The six event types core itself owns. Kept as a runtime value, not just a type, because the
+ * `Event` registry is open: `keyof Event` grows with every extension that declaration-merges
+ * into it, so "is this one of core's own?" cannot be answered from the type alone.
+ */
+const CORE_EVENT_TYPES: ReadonlySet<string> = new Set([
+  "input",
+  "output",
+  "signal",
+  "stateChange",
+  "invalidation",
+  "error",
+]);
+
+/**
+ * Whether `type` is one of core's own six execution events, as opposed to a key some extension
+ * merged into the open `Event` registry.
+ *
+ * Used to enforce, in code, that core events are never offered to an extension hook that is only
+ * ever meant to see extension-owned events (`EngineExtension.inboxMessageOf`). That invariant was
+ * previously only asserted in a doc comment while the call sites offered core events anyway —
+ * harmless only for as long as every extension happened to type-guard defensively.
+ */
+export function isCoreEventType(type: string): boolean {
+  return CORE_EVENT_TYPES.has(type);
+}

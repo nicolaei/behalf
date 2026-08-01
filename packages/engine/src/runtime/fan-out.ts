@@ -3,7 +3,7 @@
 
 import type { Graph, NodeId, EdgeDefinition } from "../graph/graph.js";
 import type { ScopeId } from "../graph/thread.js";
-import { tryMessageKindOf } from "../graph/waitable.js";
+import { inboxKindOf } from "../graph/waitable.js";
 import type { Emit, StepContext, WaitForResult } from "../graph/step.js";
 import { isCommittedEnvelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
@@ -358,8 +358,7 @@ export function replayBranchSignal(
     branch = group.branches.find((candidate) => {
       if (candidate.done || candidate.started) return false;
       const nodeDef = flow.nodes.get(candidate.current);
-      if (nodeDef?.kind !== "waitFor" || tryMessageKindOf(nodeDef.waitable) !== undefined)
-        return false;
+      if (nodeDef?.kind !== "waitFor" || inboxKindOf(nodeDef.waitable) !== undefined) return false;
       return nodeDef.waitable.match(runtime.store.events()) !== undefined;
     });
     if (!branch) return; // not a node this fan-out group owns
@@ -368,7 +367,7 @@ export function replayBranchSignal(
   }
 
   const nodeDef = flow.nodes.get(branch.current);
-  if (nodeDef?.kind !== "waitFor" || tryMessageKindOf(nodeDef.waitable) !== undefined) return;
+  if (nodeDef?.kind !== "waitFor" || inboxKindOf(nodeDef.waitable) !== undefined) return;
   const matched = nodeDef.waitable.match(runtime.store.events());
   if (matched === undefined) return;
 

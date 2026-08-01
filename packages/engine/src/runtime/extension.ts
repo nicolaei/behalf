@@ -1,7 +1,7 @@
 // Systems running flows — the extension seam. See docs/reference.md.
 
 import type { ScopeId, ScopeAction } from "../graph/thread.js";
-import type { Event, EventType } from "../session/event.js";
+import { type Event, type EventType, isCoreEventType } from "../session/event.js";
 import type { CommittedEnvelope, Stream } from "../session/envelope.js";
 import type { InboxMessage } from "../session/session-store.js";
 import type { WaitableSource } from "./waitable-source.js";
@@ -139,7 +139,9 @@ export interface EngineExtension {
    * Given a committed envelope, an extension answers "yes, that is one of MINE, and here
    * is the message it carries" (the value replay then routes downstream, exactly as the
    * live `waitFor` routed it) or `undefined` for anything it does not own. The first
-   * extension to claim an envelope wins; core's own six event types are never offered.
+   * extension to claim an envelope wins. Core's own six event types are never offered —
+   * `inboxMessageOf`'s dispatcher filters them out via `isCoreEventType` before asking
+   * anyone, so an extension's hook only ever sees a type some extension registered.
    *
    * Until B3.1 the engine simply hardcoded `envelope.type === "message"` in three replay
    * sites — a private agreement with ai's vocabulary living inside the engine, invisible
@@ -229,11 +231,17 @@ export function commitInboxMessage(
  * extension owns it — which is the answer for every core event type and for an engine
  * running with no extensions at all, and tells replay this envelope never satisfied a
  * `waitFor`.
+ *
+ * Core's own six event types are rejected here rather than at each call site: the call sites
+ * offer envelopes unconditionally (`applyFanOutEvent`) or nearly so, and the guarantee that an
+ * extension hook only ever sees extension-owned events should not depend on every extension
+ * type-guarding defensively enough to make it true by accident.
  */
 export function inboxMessageOf(
   extensions: readonly EngineExtension[],
   envelope: CommittedEnvelope,
 ): InboxMessage | undefined {
+  if (isCoreEventType(envelope.type)) return undefined;
   for (const extension of extensions) {
     const message = extension.inboxMessageOf?.(envelope);
     if (message !== undefined) return message;

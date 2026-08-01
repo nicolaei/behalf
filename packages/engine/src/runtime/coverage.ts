@@ -4,6 +4,7 @@
 
 import type { Graph, NodeKind } from "../graph/graph.js";
 import type { WaitableSource } from "./waitable-source.js";
+import { type Waitable, inboxKindOf } from "../graph/waitable.js";
 
 /** Everything a persona or flow needs that is not provided. Empty means ready. @public */
 export type Missing =
@@ -50,15 +51,16 @@ export function walkGraph<T>(
   }
 }
 
-/** What `satisfiesFlows` collects from a single walk over a flow's structure: every distinct Waitable provider. */
+/** What `satisfiesFlows` collects from a single walk over a flow's structure: one representative `Waitable` per distinct provider. The waitable itself is kept, not just its provider string, because whether a provider needs a registered source depends on whether that waitable declares an `inboxKind`. */
 interface FlowCoverage {
-  providers: Set<string>;
+  waitables: Map<string, Waitable<unknown>>;
 }
 
 /** Gathers one node's own contribution to a `FlowCoverage`, recursing into a `use` node's subgraph via `walkGraph`. */
 function gatherProvidersFromNode(node: NodeKind, acc: FlowCoverage, seen: Set<Graph>): void {
   if (node.kind === "waitFor" || node.kind === "interrupt") {
-    acc.providers.add(node.waitable.provider);
+    if (!acc.waitables.has(node.waitable.provider))
+      acc.waitables.set(node.waitable.provider, node.waitable);
   }
   if (node.kind === "use") {
     walkGraph(node.subgraph, seen, gatherProvidersFromNode, acc);
@@ -67,9 +69,10 @@ function gatherProvidersFromNode(node: NodeKind, acc: FlowCoverage, seen: Set<Gr
 
 /**
  * Finds every `Waitable` provider a set of flows could use, by walking their graphs' structure
- * statically — no execution involved. `"userInput"` is always satisfied (no source is ever
- * required for it — it's resolved by whatever surfaces messages to a human, not a registered
- * `WaitableSource`); every other provider must resolve via `waitableSources(provider)` or it's
+ * statically — no execution involved. A waitable that declares an `inboxKind` is always
+ * satisfied (no source is ever required for it — it's resolved by whatever surfaces messages
+ * to a human, not a registered `WaitableSource`); every other provider must resolve via
+ * `waitableSources(provider)` or it's
  * reported missing. Graph-shape coverage only — no model/binding awareness; see ai/coverage.ts's
  * `satisfiesPersonas` for that half.
  * @public
@@ -78,7 +81,7 @@ export function satisfiesFlows(
   flows: Graph[],
   waitableSources: (provider: string) => WaitableSource | undefined = () => undefined,
 ): Missing[] {
-  const acc: FlowCoverage = { providers: new Set<string>() };
+  const acc: FlowCoverage = { waitables: new Map<string, Waitable<unknown>>() };
   const seen = new Set<Graph>();
 
   for (const flow of flows) {
@@ -86,8 +89,8 @@ export function satisfiesFlows(
   }
 
   const missing: Missing[] = [];
-  for (const provider of acc.providers) {
-    if (provider === "userInput") continue;
+  for (const [provider, waitable] of acc.waitables) {
+    if (inboxKindOf(waitable) !== undefined) continue;
     if (!waitableSources(provider)) missing.push({ kind: "waitable", provider });
   }
 
