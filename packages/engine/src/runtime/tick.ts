@@ -49,10 +49,11 @@ import { buildForEachGroup, replayForEachBranch, advanceForEachGroup } from "./f
 export interface CursorState {
   node: NodeId;
   status: "active" | "parked" | "done";
-  // Present only when status is "parked". A known overload: for a userInput-based
-  // wait, these are message kinds a real message could carry; for a signal-based
+  // Present only when status is "parked". A known overload: for an inbox-based
+  // wait (one whose `Waitable` declares an `inboxKind`), these are the inbox entry
+  // kinds a real entry could carry; for a signal-based
   // wait, this instead holds the Waitable's own `label` (its display identifier),
-  // not a message kind at all. Deliberately deferred: distinguishing them for real
+  // not an inbox entry kind at all. Deliberately deferred: distinguishing them for real
   // would need a breaking change to this public shape, out of scope for this pass.
   waitingFor?: string[];
   result?: unknown; // present only when status is "done" (root cursor only)
