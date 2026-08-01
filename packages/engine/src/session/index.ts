@@ -10,4 +10,10 @@ export type {
   SessionId,
 } from "./envelope.js";
 export { isCommittedEnvelope } from "./envelope.js";
-export type { SessionStore, PendingEntry, InboxMessage } from "./session-store.js";
+export type {
+  SessionStore,
+  PendingEntry,
+  InboxMessage,
+  AppendMeta,
+  StreamMeta,
+} from "./session-store.js";

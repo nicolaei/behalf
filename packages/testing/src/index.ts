@@ -134,3 +134,4 @@ export async function runToCompletion(
 }
 
 export { StepUntilError } from "./errors.js";
+export { sessionStoreConformance } from "./session-store-conformance.js";

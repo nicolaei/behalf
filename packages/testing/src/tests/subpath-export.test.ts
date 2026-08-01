@@ -14,6 +14,7 @@ const ROOT_SYMBOLS = [
   "atNode",
   "StepUntilError",
   "runToCompletion",
+  "sessionStoreConformance",
 ];
 
 const AI_SYMBOLS = ["fakePort"];

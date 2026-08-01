@@ -32,6 +32,39 @@ export type PendingEntry =
   { kind: "message"; message: InboxMessage } | { kind: "signal"; name: string; payload?: unknown };
 
 /**
+ * The metadata `append` commits alongside an event — everything about *where in the flow*
+ * the event happened, as opposed to what it says. Named (rather than inlined on
+ * `SessionStore.append`) so a store implementation, and the conformance suite that checks
+ * one, can both spell the exact same shape: `Required<AppendMeta>` is what forces a suite to
+ * be updated the day a new field lands here.
+ * @public
+ */
+export interface AppendMeta {
+  type: EventType;
+  stepId?: string;
+  stepName?: string;
+  threadId?: ScopeId;
+  // Which dynamic branch committed this, when one did. The ONLY discriminator between a
+  // `forEach` branch's events and the outer graph's: branches run on the parent scope, so
+  // `threadId` cannot separate them, and branch-graph node ids collide with outer-graph ones.
+  branchId?: string;
+}
+
+/**
+ * The metadata `open` carries for the lifetime of one streaming event. Unlike `AppendMeta`
+ * it also names a `correlationId`, which every delta broadcast on the stream repeats so a
+ * subscriber can stitch fragments back onto the event they belong to.
+ * @public
+ */
+export interface StreamMeta {
+  correlationId: string;
+  type: EventType;
+  stepId: string;
+  stepName?: string;
+  threadId: ScopeId;
+}
+
+/**
  * The log, the pending queue, and the delta stream. `receive` adds an entry
  * (a message or a signal) to the pending queue; `consume` finds and removes a
  * pending entry in one call — how the engine drains it at a `waitFor` node;
@@ -54,22 +87,7 @@ export interface SessionStore {
   receive(entry: PendingEntry): void;
   awaitReceive(): Promise<void>; // resolves once, on the next receive() call or append() call
   consume(matches: (entry: PendingEntry) => boolean): PendingEntry | undefined; // find-and-remove a pending entry in one call
-  append(
-    event: Event[EventType],
-    meta: {
-      type: EventType;
-      stepId?: string;
-      stepName?: string;
-      threadId?: ScopeId;
-      branchId?: string;
-    },
-  ): void;
-  open(meta: {
-    correlationId: string;
-    type: EventType;
-    stepId: string;
-    stepName?: string;
-    threadId: ScopeId;
-  }): Stream;
+  append(event: Event[EventType], meta: AppendMeta): void;
+  open(meta: StreamMeta): Stream;
   changes(): AsyncIterable<Envelope>;
 }
