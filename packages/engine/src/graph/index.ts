@@ -3,7 +3,9 @@
 export type { ScopeId, ScopeAction } from "./thread.js";
 export type {
   NodeId,
+  NodeKind,
   Graph,
+  EdgeDefinition,
   EdgeOptions,
   EdgeFn,
   EdgeContext,

@@ -188,7 +188,7 @@ function buildEdgeContext(
       scope.appendEvent(payload, type);
     },
   };
-  return Object.assign(context, extensionFields) as unknown as EdgeContext;
+  return Object.assign(context, extensionFields);
 }
 
 /**

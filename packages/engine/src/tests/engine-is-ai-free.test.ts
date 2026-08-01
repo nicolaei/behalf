@@ -1,32 +1,32 @@
-// The B3.0 boundary test: graph/, session/, gateway/, and runtime/ — the four
-// directories B3.1 extracts into `@behalf-js/engine` — must not import from
-// `ai/` at all. Not as a type, not as a value, not behind an
+// The engine boundary test, kept from B3.0 as a cheap guard — not as the
+// proof. graph/, session/, gateway/, and runtime/ must not import from `ai/`
+// at all. Not as a type, not as a value, not behind an
 // eslint-disable-next-line.
 //
 // This is stricter than the eslint rule it backstops, deliberately. The lint
 // rule can be silenced per line, and during B2 it was: eleven call sites
 // carried a `TODO(B2 step N)` disable comment recording a deferred decision.
 // That made the layering claim ("ai depends on the engine, never the reverse")
-// true only by convention. A physically separate package makes it structural,
-// and a value import like `runtime/drive.ts`'s `runModelCall` would simply
-// fail to resolve once the packages split.
+// true only by convention. So this test reads the source, not the lint config:
+// it counts every import specifier crossing into `ai/` and requires zero.
 //
-// So this test reads the source, not the lint config: it counts every import
-// specifier crossing into `ai/` from the four engine directories and requires
-// zero. An eslint-disable comment has no effect on it.
+// Since B3.1 the four directories live in their own package, which does not
+// depend on `@behalf-js/core` — so a crossing import mostly cannot even
+// resolve. What this scan still buys is an early, specific failure naming the
+// offending file, and coverage of type-only imports.
 //
-// GREEN as of B3.0: `modelCall`/`callTool`/`compact` are contributed through
-// the `stepContext` extension seam, the inbox deals in a structural
-// `InboxMessage`, and a consumed message is committed by whichever extension
-// owns its vocabulary (`EngineExtension.commitInboxMessage`). B3.1's package
-// extraction depends on this staying at zero.
+// What it does NOT prove, and never could: it is a source-text scan, blind to
+// a coupling expressed as a string literal. It missed exactly one of those
+// (the hardcoded `"message"` event type in the replay path, generalized in
+// B3.1 to `EngineExtension.inboxMessageOf`). The real proof is its neighbour,
+// `engine-runs-a-graph.test.ts`, which builds and runs the thing.
 
 import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const SRC = fileURLToPath(new URL("../..", import.meta.url));
+const SRC = fileURLToPath(new URL("..", import.meta.url));
 const ENGINE_DIRS = ["graph", "session", "gateway", "runtime"];
 
 /** Every `.ts` file under `dir`, recursively. */

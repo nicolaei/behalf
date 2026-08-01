@@ -9,6 +9,8 @@ import type { StepContext, WaitForResult } from "../graph/step.js";
 import { StepAbortedError } from "./errors.js";
 import type { Event } from "../session/event.js";
 import type { CommittedEnvelope, Envelope } from "../session/envelope.js";
+import type { InboxMessage } from "../session/session-store.js";
+import { inboxMessageOf } from "./extension.js";
 import type { Runtime } from "./runtime.js";
 import { freshScopeId } from "./ids.js";
 import { notImplemented, unreachable } from "./errors.js";
@@ -192,9 +194,9 @@ function applyFanOutEvent(
       replayBranchOutput(group, envelope.threadId, stepId, value, ownerFlow);
     }
   }
-  if (envelope.type === "message") {
-    const { message } = envelope.event as Event["message"];
-    replayBranchMessage(group, envelope.threadId, message, ownerFlow);
+  const inboxMessage = inboxMessageOf(runtime.extensions, envelope);
+  if (inboxMessage !== undefined) {
+    replayBranchMessage(group, envelope.threadId, inboxMessage, ownerFlow);
   }
   if (envelope.type === "signal") {
     replayBranchSignal(group, envelope.threadId, ownerFlow, runtime);
@@ -267,14 +269,21 @@ function applyOutputEvent(
   });
 }
 
-/** `replayPosition`'s handling of a committed `message` event: a `waitFor` node that consumed it routes off the message, same as `advance`; a `use` node being seeded descends a level into its subgraph; any other current node's own content is left entirely to whichever extension owns "message" (ai's own `state("ai")` fold, read on demand) — content-folding is no longer core's concern at all; this only ever moves a level's position, when the message is what a `waitFor`/`use` node was expecting. */
-function applyMessageEvent(
-  envelope: CommittedEnvelope,
+/**
+ * `replayPosition`'s handling of a committed inbox entry — an event some extension claimed
+ * through `inboxMessageOf`, i.e. the durable record of a message a `waitFor`/`interrupt`
+ * consumed live (see `EngineExtension.commitInboxMessage` for the write side). A `waitFor`
+ * node that consumed it routes off the message, same as `advance`; a `use` node being seeded
+ * descends a level into its subgraph; for any other current node this is a no-op, because the
+ * event's CONTENT is not core's concern at all — the owning extension folds that on demand
+ * through `state()`. Position is the only thing moved here.
+ */
+function applyInboxMessageEvent(
+  message: InboxMessage,
   path: PathLevel<ReplayFrame>[],
   leaf: PathLevel<ReplayFrame>,
   state: ReplayState,
 ): void {
-  const { message } = envelope.event as Event["message"];
   if (leaf.node.kind !== "step") unreachable("replayPosition: innermost position is not a step");
   const topFrame = leaf.node.frame;
   const node = leaf.flow.nodes.get(topFrame.current);
@@ -311,8 +320,8 @@ function applyMessageEvent(
   }
   // Belongs to a node this replay isn't tracking as any level's `current` —
   // never needs to move a level's position. Its content (if any) is folded
-  // by whichever extension owns "message", read on demand via `state()` —
-  // nothing for core to do here.
+  // by whichever extension owns the event type, read on demand via `state()`
+  // — nothing for core to do here.
 }
 
 /** `replayPosition`'s handling of a committed `signal` event: only ever moves the position when the innermost node is a non-message `waitFor` whose `Waitable` now matches the log up to and including this event — mirrors `applyMessageEvent`'s `waitFor` case, but the value routed downstream is `match()`'s own result rather than the raw event. */
@@ -554,11 +563,6 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
       continue;
     }
 
-    if (envelope.type === "message") {
-      applyMessageEvent(envelope, path, leaf, state);
-      continue;
-    }
-
     if (envelope.type === "signal") {
       applySignalEvent(path, leaf, runtime, state);
       continue;
@@ -569,13 +573,21 @@ function replayPosition(flow: Graph, runtime: Runtime): ReplayResult {
       continue;
     }
 
-    // Any event type that isn't one of core's own six (input/output/signal/stateChange/
-    // invalidation/error — every one handled inline above) and isn't `message` (handled
-    // inline above too, since a waitFor/use node consuming one also moves position) is
-    // never structural to replay's own position tracking — no core action needed. An
-    // extension's own `state()` fold reads it back on demand (today that's ai's
-    // compaction/threadGenesis reducers); `toolCall`/`toolResult`/`error` remain no-ops,
-    // same as before this generalized, since nothing registers a reducer for them.
+    // Not one of core's own six. Offer it to the extensions: whichever one
+    // committed a consumed inbox entry under its own event type claims it back
+    // here (`inboxMessageOf`, the counterpart to `commitInboxMessage`), and a
+    // waitFor/use node that consumed that message moves position accordingly.
+    const inboxMessage = inboxMessageOf(runtime.extensions, envelope);
+    if (inboxMessage !== undefined) {
+      applyInboxMessageEvent(inboxMessage, path, leaf, state);
+      continue;
+    }
+
+    // Anything left is never structural to replay's own position tracking — no
+    // core action needed. An extension's own `state()` fold reads it back on
+    // demand (today that's ai's compaction/threadGenesis reducers);
+    // `toolCall`/`toolResult`/`error` remain no-ops, since nothing registers a
+    // reducer for them.
   }
 
   // A `waitFor` entry already parks safely with `currentInput: undefined`

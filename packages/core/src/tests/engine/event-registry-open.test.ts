@@ -1,7 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { memoryStore } from "@behalf-js/stores";
-import type { Event, EventType } from "../../session/event.js";
-import type { ScopeId } from "../../graph/thread.js";
+import type { Event, EventType, ScopeId } from "../../index.js";
 // Side-effect import: this is where B2.5 puts the ai extension's own
 // declaration-merge augmentation of `Event` (message/toolCall/toolResult/
 // compaction). Its mere existence — a module OTHER than session/event.ts
@@ -21,7 +20,7 @@ import "../../ai/event.js";
 // `SessionStore` contract. Nothing about this event type is known to core;
 // if the store or `Event` still hardcoded a closed set of keys, this
 // wouldn't compile (an unknown key) or wouldn't round-trip.
-declare module "../../session/event.js" {
+declare module "@behalf-js/core" {
   interface Event {
     customPing: { note: string };
   }

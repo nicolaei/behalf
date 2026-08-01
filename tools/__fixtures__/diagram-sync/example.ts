@@ -1,7 +1,7 @@
 // Fixture for tools/diagram-sync.test.ts — a tiny real Graph to import and
 // render, so the sync-check mechanism has something concrete to check
 // against without depending on docs/examples/ content that doesn't exist yet.
-import { defineGraph } from "../../../packages/core/src/graph/graph.js";
+import { defineGraph } from "@behalf-js/engine";
 
 export const example = defineGraph("example", (flow) => {
   const step = flow.step((c) => Promise.resolve(c.output(1)), { label: "step" });

@@ -4,10 +4,8 @@
 // Physically relocated out of runtime/execution.ts (B2.7) — the model-call
 // half lives alongside this in model-call.ts.
 
-import type { NodeId } from "../graph/graph.js";
-import type { ScopeId } from "../graph/thread.js";
-import type { Runtime, StepIdentity } from "../runtime/index.js";
-import { stepIdentity, freshCorrelationId } from "../runtime/index.js";
+import type { NodeId, Runtime, ScopeId, StepIdentity } from "@behalf-js/engine";
+import { stepIdentity, freshCorrelationId } from "@behalf-js/engine";
 import type { AgentSpawner } from "./agent-spawner.js";
 import type { Tool, ToolContext, ToolHandler, Binding } from "./tool.js";
 import type { Model } from "./model.js";

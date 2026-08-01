@@ -1,9 +1,8 @@
-// Internal entry point — engine primitives `@behalf-js/testing` wraps in its
-// own vocabulary (`stepOnce`, `stepUntilBlocked`, `atNode`). Not part of the
-// main package entry (`.`), and not a stability-guaranteed public surface:
-// a test author should depend on `@behalf-js/testing` instead of importing
-// this directly. See docs/reference.md § "tick()" for why these stay out of
-// the main barrel.
+// Internal entry point — a straight re-export of `@behalf-js/engine/internal`,
+// kept here so `@behalf-js/testing` (and anything else already importing
+// `@behalf-js/core/internal`) sees the same unstable stepping surface after
+// B3.1's package split. See that module for what these are and why they stay
+// out of the main barrel.
 
-export type { CursorState, TickOutcome } from "./runtime/runtime.js";
-export { tick, tickUntilSuspended } from "./runtime/runtime.js";
+export type { CursorState, TickOutcome } from "@behalf-js/engine/internal";
+export { tick, tickUntilSuspended } from "@behalf-js/engine/internal";

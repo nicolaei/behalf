@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { withMessage, withCompaction, deriveCompactedMessages } from "../../ai/thread.js";
 import type { Thread } from "../../ai/thread.js";
 import type { Message } from "../../ai/message.js";
-import type { ScopeId } from "../../graph/thread.js";
+import type { ScopeId } from "../../index.js";
 
 // Direct unit tests against deriveCompactedMessages/withCompaction themselves —
 // these two pure functions are the ONE place `thread.messages` gets computed

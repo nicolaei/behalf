@@ -4,14 +4,13 @@ import type {
   SessionStore,
   PendingEntry,
   Stream,
-  Message,
   Envelope,
   Event,
   EventType,
   SessionId,
   Delta,
   ScopeId,
-} from "@behalf-js/core";
+} from "@behalf-js/engine";
 
 // The dev-only store never resolves a real session — every envelope carries this placeholder instead.
 const UNSET_SESSION_ID = "" as SessionId;
@@ -194,14 +193,22 @@ export function memoryStore(): SessionStore {
           // a real provider's API (Anthropic confirmed) rejects an empty
           // text content block outright, which would otherwise poison the
           // very next turn.
-          const message: Message = {
+          //
+          // The shape below is the ai extension's `"message"` payload, and this
+          // store deliberately does not import it: `@behalf-js/stores` depends
+          // on `@behalf-js/engine` alone (B3.1), and the engine's `Event`
+          // registry is open — a store cannot name any extension's entry
+          // without dragging that extension back in. It reconstructs a
+          // best-effort payload for whatever stream type it was opened with,
+          // which for a streaming model reply is exactly this.
+          const message = {
             role: "assistant",
             content: text ? [{ type: "text", text }] : [],
             provider: "",
             model: "",
             usage: { input: 0, output: 0 },
           };
-          commit({ message }, true);
+          commit({ message } as unknown as Event[EventType], true);
         },
       };
     },

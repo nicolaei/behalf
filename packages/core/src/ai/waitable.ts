@@ -8,8 +8,7 @@
 // of the core Event registry, so this file's `envelope.type !== "message"`/
 // `"toolResult"` comparisons type-check even when compiled in isolation.
 import "./event.js";
-import type { Waitable } from "../graph/waitable.js";
-import type { Envelope } from "../session/index.js";
+import type { Envelope, Waitable } from "@behalf-js/engine";
 import type { MessageKind, UserMessage } from "./message.js";
 
 /** The built-in Waitable: parks until a message of the given kind arrives. @public */

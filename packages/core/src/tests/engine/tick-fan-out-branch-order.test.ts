@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { tickUntilSuspended, seed } from "../../runtime/runtime.js";
+import { tickUntilSuspended } from "@behalf-js/core/internal";
+import { seed } from "../../index.js";
 import { ai, defineGraph, runtime, join, outputs, userInput } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { neverCalled, submitApproval } from "../acceptance/support.js";

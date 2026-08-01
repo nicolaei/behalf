@@ -3,7 +3,7 @@
 import type { Model } from "./model.js";
 import type { Profile } from "./profile.js";
 import type { Message, AssistantMessage } from "./message.js";
-import type { DeltaSink } from "../session/envelope.js";
+import type { DeltaSink } from "@behalf-js/engine";
 
 /**
  * The adapter for one model. It only responds — compaction is a normal response

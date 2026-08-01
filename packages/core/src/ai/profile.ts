@@ -1,6 +1,6 @@
 // AI authoring — Profile and PersonaStep. See docs/reference.md § "Profile".
 
-import type { Step } from "../graph/step.js";
+import type { Step } from "@behalf-js/engine";
 import type { Model, ReasoningLevel } from "./model.js";
 import type { Tool, Toolset } from "./tool.js";
 

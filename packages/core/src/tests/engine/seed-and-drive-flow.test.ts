@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { seed, driveFlow, runtime } from "../../runtime/runtime.js";
+import { seed, driveFlow, runtime } from "../../index.js";
 import { ai, defineGraph, userText, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import { textOf, neverCalled } from "../acceptance/support.js";

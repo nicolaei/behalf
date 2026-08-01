@@ -1,14 +1,14 @@
 // Test-author-facing vocabulary wrapping tick()/tickUntilSuspended() — the
 // fake-timer-library idea (advanceTimersByTime/runAllTimers) applied to this
 // engine: purpose-built verbs instead of raw engine internals (`Cursor`,
-// `parent`, `FanOutGroup`). `@behalf-js/core/internal` is exactly that raw
+// `parent`, `FanOutGroup`). `@behalf-js/engine/internal` is exactly that raw
 // surface (undocumented, not part of core's main entry) — this package
 // wraps it once so a test author never imports `/internal` directly.
 
-import type { Graph, Handle, NodeId, MessageKind, Runtime } from "@behalf-js/core";
-import { seed, driveFlow } from "@behalf-js/core";
-import type { CursorState } from "@behalf-js/core/internal";
-import { tick, tickUntilSuspended } from "@behalf-js/core/internal";
+import type { Graph, Handle, NodeId, Runtime } from "@behalf-js/engine";
+import { seed, driveFlow } from "@behalf-js/engine";
+import type { CursorState } from "@behalf-js/engine/internal";
+import { tick, tickUntilSuspended } from "@behalf-js/engine/internal";
 import { StepUntilError } from "./errors.js";
 
 /** One lane's state within a `StepResult` snapshot — this module's own vocabulary for what the engine calls a `CursorState`. */
@@ -25,7 +25,10 @@ export interface StepState {
   //    absent here — there's nothing to check the inbox for.
   // A test author asking "is this lane blocked on me?" should check for
   // `waitingFor` being present, not just `status === "parked"`.
-  waitingFor?: MessageKind[]; // only when parked
+  // The kinds are plain strings here: which vocabulary they belong to is the
+  // waiting extension's business, not this package's (ai's `MessageKind` is
+  // itself just `string`).
+  waitingFor?: string[]; // only when parked
   result?: unknown; // only when done
 }
 

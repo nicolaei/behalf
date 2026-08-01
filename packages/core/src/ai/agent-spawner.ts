@@ -4,10 +4,8 @@
 // from the whole store, so two independently-driven agents on one log would
 // read each other's events as their own.
 
-import type { Graph } from "../graph/graph.js";
-import type { SessionId } from "../session/envelope.js";
-import type { Runtime } from "../runtime/index.js";
-import { seed, driveFlow } from "../runtime/index.js";
+import type { Graph, Runtime, SessionId } from "@behalf-js/engine";
+import { seed, driveFlow } from "@behalf-js/engine";
 import type { Message } from "./message.js";
 
 /** What a finished child delivers — the shape a `finish_task`-style tool sends. @public */

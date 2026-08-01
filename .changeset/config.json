@@ -4,6 +4,7 @@
   "commit": false,
   "fixed": [
     [
+      "@behalf-js/engine",
       "@behalf-js/core",
       "@behalf-js/testing",
       "@behalf-js/models-anthropic",

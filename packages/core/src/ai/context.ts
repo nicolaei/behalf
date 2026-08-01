@@ -24,7 +24,7 @@ export interface CompactionInput {
   keepLast: number;
 }
 
-declare module "../graph/step.js" {
+declare module "@behalf-js/engine" {
   interface StepContext {
     thread: ThreadContext;
     /** One request + its tools, appended to the log. */
@@ -32,9 +32,7 @@ declare module "../graph/step.js" {
     callTool<Input, Output>(tool: Tool<Input, Output>, input: Input): Promise<Output>;
     compact(input: CompactionInput): Promise<void>;
   }
-}
 
-declare module "../graph/graph.js" {
   interface EdgeContext {
     thread: ThreadContext;
   }

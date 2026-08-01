@@ -17,7 +17,7 @@ import { describe, it, expect } from "vitest";
 import { defineGraph, runtime, driveFlow, outputs, seed } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 import type { EdgeContext, EdgeFn, Graph } from "../../index.js";
-import { isCommittedEnvelope } from "../../session/envelope.js";
+import { isCommittedEnvelope } from "../../index.js";
 
 /** entry -> (edge fn fires here) -> after -> finish. `edgeFn` is the only
  * thing under test; `after` just passes through whatever the edge fn

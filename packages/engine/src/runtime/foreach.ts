@@ -32,6 +32,7 @@ import type { WaitForResult } from "../graph/step.js";
 import type { CommittedEnvelope } from "../session/envelope.js";
 import type { Runtime } from "./runtime.js";
 import { unreachable } from "./errors.js";
+import { inboxMessageOf } from "./extension.js";
 import { commitInvalidation } from "./drive.js";
 import { route } from "./routing.js";
 import { type ExecutionContext, ExecutionScope } from "./step-runner.js";
@@ -260,8 +261,11 @@ export function replayForEachBranch(
 
     if (node.kind === "waitFor") {
       index += 1;
-      if (envelope.type !== "message") continue;
-      const message = (envelope.event as { message: unknown }).message;
+      // The durable record of a message this waitFor consumed live — recognized
+      // by whichever extension committed it, never by a hardcoded event type
+      // (see `EngineExtension.inboxMessageOf`).
+      const message = inboxMessageOf(runtime.extensions, envelope);
+      if (message === undefined) continue; // not this waitFor's own event
       const routed = route(
         branch.graph.edges,
         branch.current,

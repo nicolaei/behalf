@@ -9,9 +9,9 @@
 // doesn't export, like NodeKind/EdgeDefinition) rather than importing the
 // built "behalf" package, since it's in-repo tooling, not a consumer.
 
-import type { Graph, NodeId, NodeKind, EdgeDefinition } from "../packages/core/src/graph/graph.js";
-import type { JoinStep } from "../packages/core/src/graph/step.js";
-import type { PersonaStep } from "../packages/core/src/ai/profile.js";
+import type { Graph, NodeId, NodeKind, EdgeDefinition } from "@behalf-js/engine";
+import type { JoinStep } from "@behalf-js/engine";
+import type { PersonaStep } from "@behalf-js/core";
 
 function escapeLabel(label: string): string {
   return label.replace(/"/g, "&quot;");

@@ -2,10 +2,9 @@
 // Flow-shape coverage (graph structure, waitable providers) stays in
 // runtime/coverage.ts's satisfiesFlows; this is the model/binding-aware half.
 
-import type { Graph, NodeKind } from "../graph/graph.js";
+import type { Graph, Missing, NodeKind } from "@behalf-js/engine";
+import { walkGraph } from "@behalf-js/engine";
 import type { PersonaStep } from "./profile.js";
-import type { Missing } from "../runtime/index.js";
-import { walkGraph } from "../runtime/index.js";
 import type { Profile } from "./profile.js";
 import type { Model } from "./model.js";
 import type { Binding, Tool, Toolset } from "./tool.js";

@@ -7,6 +7,7 @@
   // actually gets built to dist/ and referenced here).
   "files": [],
   "references": [
+    { "path": "packages/engine/tsconfig.build.json" },
     { "path": "packages/core/tsconfig.build.json" },
     { "path": "packages/testing/tsconfig.build.json" },
     { "path": "packages/models-anthropic/tsconfig.build.json" },

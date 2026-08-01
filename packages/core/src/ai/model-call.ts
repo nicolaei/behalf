@@ -5,9 +5,8 @@
 import type { UserMessage, AssistantMessage, ContentBlock, Usage } from "./message.js";
 import type { Profile } from "./profile.js";
 import type { ThreadContext } from "./thread.js";
-import type { StepExecutionScope } from "../runtime/index.js";
-import { StepAbortedError } from "../runtime/index.js";
-import type { SessionStore } from "../session/index.js";
+import type { SessionStore, StepExecutionScope } from "@behalf-js/engine";
+import { StepAbortedError } from "@behalf-js/engine";
 import { modelResolvers } from "./tool-executor.js";
 import "./context.js"; // side-effect: registers the StepContext/EdgeContext ai declaration merge
 

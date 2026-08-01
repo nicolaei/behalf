@@ -23,6 +23,6 @@
     "directory": "packages/stores"
   },
   "dependencies": {
-    "@behalf-js/core": "^0.0.10"
+    "@behalf-js/engine": "^0.0.10"
   }
 }

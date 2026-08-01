@@ -291,7 +291,7 @@ export function makeStepContext(config: StepContextConfig): StepContext {
       return { error };
     },
   };
-  return Object.assign(context, extensionFields) as unknown as StepContext;
+  return Object.assign(context, extensionFields);
 }
 
 /**
@@ -325,7 +325,7 @@ export function withInputs(context: StepContext, inputs: unknown[]): StepContext
     ) => context.invalidate(target, options),
     fail: (error: StepError) => context.fail(error),
   };
-  return Object.assign(derived, extensionFields) as unknown as StepContext;
+  return Object.assign(derived, extensionFields);
 }
 
 // Re-exported so callers of `context.invalidate`'s payload-seeding side effect

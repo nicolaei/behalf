@@ -8,6 +8,12 @@ export default defineConfig({
         new URL("./packages/core/src/internal.ts", import.meta.url),
       ),
       "@behalf-js/core": fileURLToPath(new URL("./packages/core/src/index.ts", import.meta.url)),
+      "@behalf-js/engine/internal": fileURLToPath(
+        new URL("./packages/engine/src/internal.ts", import.meta.url),
+      ),
+      "@behalf-js/engine": fileURLToPath(
+        new URL("./packages/engine/src/index.ts", import.meta.url),
+      ),
     },
   },
   test: {

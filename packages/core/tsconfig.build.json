@@ -5,6 +5,7 @@
     "rootDir": "src",
     "outDir": "dist"
   },
+  "references": [{ "path": "../engine/tsconfig.build.json" }],
   "include": ["src/**/*.ts"],
   "exclude": ["src/**/*.test.ts", "src/tests/**/*.ts"]
 }

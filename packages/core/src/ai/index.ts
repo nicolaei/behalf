@@ -42,5 +42,5 @@ export { localAgentSpawner } from "./agent-spawner.js";
 export { userInput, toolCall } from "./waitable.js";
 export type { Thread, ThreadApi, ThreadContext } from "./thread.js";
 export { startThread, forkThread } from "./thread.js";
-export type { Missing } from "../runtime/index.js";
+export type { Missing } from "@behalf-js/engine";
 export { satisfiesPersonas } from "./coverage.js";

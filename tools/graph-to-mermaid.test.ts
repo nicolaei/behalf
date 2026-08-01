@@ -2,17 +2,13 @@
 // diagram can be generated from (and kept honest against) the graph it
 // depicts, instead of hand-drawn and free to drift.
 import { describe, it, expect } from "vitest";
-import { defineGraph } from "../packages/core/src/graph/graph.js";
-import type { Graph, NodeId, NodeKind } from "../packages/core/src/graph/graph.js";
-import { userInput } from "../packages/core/src/ai/waitable.js";
-import { join } from "../packages/core/src/graph/step.js";
-import type { StepContext } from "../packages/core/src/graph/step.js";
-import type { Profile } from "../packages/core/src/ai/profile.js";
+import { defineGraph, join } from "@behalf-js/engine";
+import type { Graph, NodeId, NodeKind, StepContext } from "@behalf-js/engine";
+import { userInput, forkThread } from "@behalf-js/core";
+import type { Profile } from "@behalf-js/core";
 import { graphToMermaid } from "./graph-to-mermaid.js";
-import { forkThread } from "../packages/core/src/ai/thread.js";
-// Side-effect: registers ai's StepContext augmentation (thread/modelCall/…),
-// which the persona-step fixture below exercises.
-import "../packages/core/src/ai/context.js";
+// Importing `@behalf-js/core` above already registers ai's StepContext/EdgeContext
+// augmentations (thread/modelCall/…), which the persona-step fixture below exercises.
 
 /** Finds the one node of `kind` a test graph is known to have, or fails loudly. */
 function nodeIdOf(graph: Graph, kind: NodeKind["kind"]): NodeId {

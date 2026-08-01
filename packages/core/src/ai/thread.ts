@@ -6,9 +6,7 @@
 // primitive (see graph/thread.ts); everything about WHAT a thread's content
 // is, and how it's rebuilt, lives here.
 
-import type { ScopeId } from "../graph/thread.js";
-import type { ExecutionScope, ScopeStateReducer } from "../runtime/index.js";
-import type { Event } from "../session/index.js";
+import type { Event, ExecutionScope, ScopeId, ScopeStateReducer } from "@behalf-js/engine";
 import type { Message } from "./message.js";
 
 /** A thread's replayed state: the assembled view (`messages` — compaction applied, tail

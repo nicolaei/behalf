@@ -54,8 +54,8 @@ export default defineConfig([
 
   // Acceptance tests are black-box against the public surface.
   // They may only import from ../../index.js (public API) or ../../testing
-  // (future public test helpers). Internal graph/ai/session/gateway/runtime/adapter
-  // modules are off-limits.
+  // (future public test helpers). Internal ai/adapter modules are off-limits,
+  // and so is reaching past `@behalf-js/core` into `@behalf-js/engine`.
   {
     files: ["packages/core/src/tests/acceptance/**/*.ts"],
     rules: {
@@ -65,15 +65,13 @@ export default defineConfig([
           patterns: [
             {
               group: [
-                "../../graph/*",
                 "../../ai/*",
                 "../../adapters/**",
-                "../../session/*",
-                "../../gateway/*",
-                "../../runtime/*",
+                "@behalf-js/engine",
+                "@behalf-js/engine/*",
               ],
               message:
-                "Acceptance tests are black-box — import from ../../index.js or ../../testing (both public), not internal modules directly.",
+                "Acceptance tests are black-box — import from ../../index.js or ../../testing (both public), not internal modules or @behalf-js/engine directly.",
             },
           ],
         },
@@ -83,50 +81,31 @@ export default defineConfig([
 
   // Layering: graph ← session ← {gateway, runtime} ← ai (see
   // .plans/restructure-cockpit-and-behalf.md, "Refactoring Behalf" §
-  // "Core folders and their interface"). ai sits on top and may import
-  // everything below it; the enforceable, at-risk direction is the reverse —
-  // graph/session/gateway/runtime must never import from ai/. Pre-existing
-  // violations (graph/{step,graph,waitable}.ts, gateway/gateway.ts,
-  // runtime/{drive,tick,execution,…}.ts importing ai-shaped Message/UserMessage
-  // types) are exempted line-by-line via eslint-disable-next-line, each
-  // tagged with the specific B2 step that removes it — not carved out here,
-  // so this rule still catches any NEW lower-layer → ai import.
+  // "Core folders and their interface"). B3.1 made the top edge of that
+  // stack physical: graph/session/gateway/runtime now live in
+  // `@behalf-js/engine`, which does not depend on `@behalf-js/core` at all,
+  // so an engine → ai import fails to resolve rather than merely failing
+  // lint. This rule stays as the early, legible signal — and as the guard
+  // against the one import that WOULD resolve, `@behalf-js/core` itself
+  // (npm hoists it into node_modules for the other workspace packages).
   //
-  // Combined in the SAME block as the runtime submodule barrel-lockdown
-  // (below) rather than a separate one: flat config replaces a rule's whole
-  // setting per matching block instead of merging pattern arrays across
-  // blocks, so a later block matching the same files would silently drop an
-  // earlier one's patterns.
+  // Split by directory rather than by rule: flat config replaces a rule's
+  // whole setting per matching block instead of merging pattern arrays across
+  // blocks, so two blocks matching the same file would silently drop one
+  // another's patterns. runtime/ gets the ai ban only (its sub-modules import
+  // each other by design); everything else gets the ai ban plus the barrel
+  // lockdown.
   {
-    files: [
-      "packages/core/src/graph/**/*.ts",
-      "packages/core/src/session/**/*.ts",
-      "packages/core/src/gateway/**/*.ts",
-      "packages/core/src/runtime/**/*.ts",
-    ],
+    files: ["packages/engine/src/runtime/**/*.ts"],
     rules: {
       "no-restricted-imports": [
         "error",
         {
           patterns: [
             {
-              group: ["../ai/*"],
+              group: ["@behalf-js/core", "@behalf-js/core/*", "**/ai/*"],
               message:
-                "graph/session/gateway/runtime must not import from ai/ — ai is the top layer and depends on them, never the reverse. A pre-existing violation here needs an eslint-disable-next-line with a TODO(B2 step N) comment, not a rule exception.",
-            },
-            {
-              group: [
-                "**/runtime/tick.js",
-                "**/runtime/drive.js",
-                "**/runtime/step-runner.js",
-                "**/runtime/routing.js",
-                "**/runtime/fan-out.js",
-                "**/runtime/foreach.js",
-                "**/runtime/ids.js",
-                "**/runtime/execution.js",
-              ],
-              message:
-                "Import from runtime/index.js (the barrel), not its internal sub-modules directly.",
+                "The engine must not import ai — @behalf-js/core is the top layer and depends on the engine, never the reverse. Whatever the engine needs from an extension arrives through the EngineExtension seam (runtime/extension.ts).",
             },
           ],
         },
@@ -134,27 +113,23 @@ export default defineConfig([
     },
   },
 
-  // src/runtime/ sub-modules (tick.ts, drive.ts, step-runner.ts, routing.ts,
-  // fan-out.ts, foreach.ts, ids.ts, execution.ts) are necessarily exported so
-  // they can import each other, but that also makes them reachable directly
-  // from anywhere else in the codebase, bypassing the runtime/index.js
-  // barrel. This rule blocks that for every OTHER file in the package (ai/,
-  // the top-level index.ts/internal.ts, tests/) — graph/session/gateway/
-  // runtime themselves are covered by the combined block above instead, to
-  // avoid two blocks setting the same rule for the same files.
+  // Everything in the engine outside runtime/ (graph/, session/, gateway/, the
+  // barrels, tests) — same ai ban, plus the runtime sub-module lockdown: those
+  // files are exported so they can import each other, which also makes them
+  // reachable directly, bypassing runtime/index.js.
   {
-    files: ["packages/core/src/**/*.ts"],
-    ignores: [
-      "packages/core/src/runtime/**",
-      "packages/core/src/graph/**",
-      "packages/core/src/session/**",
-      "packages/core/src/gateway/**",
-    ],
+    files: ["packages/engine/src/**/*.ts"],
+    ignores: ["packages/engine/src/runtime/**"],
     rules: {
       "no-restricted-imports": [
         "error",
         {
           patterns: [
+            {
+              group: ["@behalf-js/core", "@behalf-js/core/*", "**/ai/*"],
+              message:
+                "The engine must not import ai — @behalf-js/core is the top layer and depends on the engine, never the reverse. Whatever the engine needs from an extension arrives through the EngineExtension seam (runtime/extension.ts).",
+            },
             {
               group: [
                 "**/runtime/tick.js",

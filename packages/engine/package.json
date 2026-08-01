@@ -1,7 +1,7 @@
 {
-  "name": "@behalf-js/core",
+  "name": "@behalf-js/engine",
   "version": "0.0.10",
-  "description": "Build agent workflows as typed, testable graphs — the flow-authoring DSL and the engine that runs it.",
+  "description": "The durable-execution engine behind behalf — the graph DSL, the session log, the websocket gateway, and the event-sourced runtime. No AI vocabulary: models, tools, and conversations arrive as an extension (@behalf-js/core).",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -24,14 +24,9 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/nicolaei/behalf.git",
-    "directory": "packages/core"
-  },
-  "dependencies": {
-    "@behalf-js/engine": "^0.0.10",
-    "zod": "^4.1.13"
+    "directory": "packages/engine"
   },
   "devDependencies": {
-    "@behalf-js/stores": "^0.0.10",
-    "@behalf-js/testing": "^0.0.10"
+    "@behalf-js/stores": "^0.0.10"
   }
 }

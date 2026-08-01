@@ -8,7 +8,7 @@ import { runToCompletion } from "@behalf-js/testing";
 // this extension's own events into its own per-scope state slot (ExecutionScope.state(name)),
 // isolated from another extension's slot — even one registered on the very same scope,
 // consuming the very same committed log.
-declare module "../../session/event.js" {
+declare module "@behalf-js/core" {
   interface Event {
     note: { text: string };
   }

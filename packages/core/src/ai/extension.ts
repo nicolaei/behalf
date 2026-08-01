@@ -4,7 +4,9 @@
 // runtime({ extensions: [ai({ models, bindings })] }).
 
 import "./context.js"; // side-effect: registers the StepContext/EdgeContext.thread declaration merge
-import type { EngineExtension, ExecutionScope, StepExecutionScope } from "../runtime/index.js";
+import "./event.js"; // side-effect: registers ai's own entries in the open Event registry
+import type { Event } from "@behalf-js/engine";
+import type { EngineExtension, ExecutionScope, StepExecutionScope } from "@behalf-js/engine";
 import type { Model } from "./model.js";
 import type { ModelPort } from "./model-port.js";
 import type { Binding } from "./tool.js";
@@ -96,6 +98,20 @@ export function ai(config: AiConfig): EngineExtension {
       // seam's honest shape — core hands over a bare `{ kind?: string }`,
       // and ai's `UserMessage` is what actually gets received here.
       appendEvent({ message: message as Message }, "message");
+    },
+    inboxMessageOf(envelope) {
+      // The read side of the line above. Replay asks "is this committed
+      // envelope one of yours, and what message does it carry?" instead of
+      // matching a hardcoded `"message"` — which is how the engine used to
+      // recognize a satisfied `waitFor`, and the one ai coupling a source-text
+      // import scan could never see.
+      //
+      // Every `"message"` event qualifies, not just the ones
+      // `commitInboxMessage` wrote: a model reply committed mid-flight is the
+      // same durable fact from replay's point of view, and treating it that way
+      // is exactly what the hardcoded check did before this generalized.
+      if (envelope.type !== "message") return undefined;
+      return (envelope.event as Event["message"]).message;
     },
     workers: createAiWorkers(config),
   };

@@ -130,6 +130,23 @@ export interface EngineExtension {
     message: InboxMessage,
     appendEvent: <T extends EventType>(payload: Event[T], type: T) => void,
   ): void;
+  /**
+   * `commitInboxMessage`'s read-side counterpart, and the reason it exists: replay has to
+   * recognize, from the log alone, that a `waitFor` node was already satisfied by a
+   * consumed inbox entry — and it must do so without knowing which event type the
+   * claiming extension chose to commit it under.
+   *
+   * Given a committed envelope, an extension answers "yes, that is one of MINE, and here
+   * is the message it carries" (the value replay then routes downstream, exactly as the
+   * live `waitFor` routed it) or `undefined` for anything it does not own. The first
+   * extension to claim an envelope wins; core's own six event types are never offered.
+   *
+   * Until B3.1 the engine simply hardcoded `envelope.type === "message"` in three replay
+   * sites — a private agreement with ai's vocabulary living inside the engine, invisible
+   * to any import scan. This hook is that agreement, made explicit and owned by the side
+   * that actually chose the word.
+   */
+  inboxMessageOf?(envelope: CommittedEnvelope): InboxMessage | undefined;
   /** Park conditions this extension can satisfy — each is started the same way `runtime()`
    * already starts an extension's `workers`, with no separate setup required by any caller. */
   waitables?: WaitableSource[];
@@ -204,6 +221,24 @@ export function commitInboxMessage(
   for (const extension of extensions) {
     extension.commitInboxMessage?.(message, appendEvent);
   }
+}
+
+/**
+ * Asks each registered extension whether `envelope` is a committed inbox entry of its own
+ * (see `EngineExtension.inboxMessageOf`), returning the first claim. `undefined` when no
+ * extension owns it — which is the answer for every core event type and for an engine
+ * running with no extensions at all, and tells replay this envelope never satisfied a
+ * `waitFor`.
+ */
+export function inboxMessageOf(
+  extensions: readonly EngineExtension[],
+  envelope: CommittedEnvelope,
+): InboxMessage | undefined {
+  for (const extension of extensions) {
+    const message = extension.inboxMessageOf?.(envelope);
+    if (message !== undefined) return message;
+  }
+  return undefined;
 }
 
 /** Builds a `deriveScope` implementation for a mutable "current scope" cell — shared by `step-runner.ts`'s `makeExecutionScope` and `routing.ts`'s `makeEdgeExecutionScope`, the two places an `ExecutionScope` is actually constructed. */

@@ -1,12 +1,9 @@
 // Flow authoring — tool / toolset / ToolHandler / provide / expand. See docs/reference.md.
 
-import type { ScopeId } from "../graph/thread.js";
+import type { Event, EventType, Graph, ScopeId, Stream } from "@behalf-js/engine";
 import { z } from "zod";
 import type { Message } from "./message.js";
 import type { AgentHandle } from "./agent-spawner.js";
-import type { Graph } from "../graph/graph.js";
-import type { Stream } from "../session/envelope.js";
-import type { Event, EventType } from "../session/event.js";
 
 /** One typed capability. `_input`/`_output` are phantom — never populated, used for inference. @public */
 export interface Tool<Input = unknown, Output = unknown> {

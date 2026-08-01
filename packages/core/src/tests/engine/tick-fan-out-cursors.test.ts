@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { tick, seed } from "../../runtime/runtime.js";
-import type { TickOutcome } from "../../runtime/runtime.js";
+import { tick } from "@behalf-js/core/internal";
+import type { TickOutcome } from "@behalf-js/core/internal";
+import { seed } from "../../index.js";
 import { defineGraph, runtime, join, outputs } from "../../index.js";
 import { memoryStore } from "@behalf-js/stores";
 

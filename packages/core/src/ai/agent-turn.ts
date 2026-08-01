@@ -17,10 +17,8 @@
 // file's name predates this rename — it still calls its own local fixture
 // "agentLoop", a private variable, not this exported primitive).
 
-import { defineGraph } from "../graph/graph.js";
-import type { Graph } from "../graph/graph.js";
-import { outputs } from "../graph/step.js";
-import type { WaitForResult } from "../graph/step.js";
+import { defineGraph, outputs } from "@behalf-js/engine";
+import type { Graph, WaitForResult } from "@behalf-js/engine";
 import type { ModelCallResult } from "./model-call.js";
 import { toolCall } from "./waitable.js";
 import type { Profile } from "./profile.js";

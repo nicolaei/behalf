@@ -3,10 +3,10 @@
 // The ai extension's contribution to the OPEN `Event` registry (session/event.ts):
 // message, toolCall, toolResult, compaction, threadGenesis.
 
-import type { ScopeId } from "../graph/thread.js";
+import type { ScopeId } from "@behalf-js/engine";
 import type { Message } from "./message.js";
 
-declare module "../session/event.js" {
+declare module "@behalf-js/engine" {
   interface Event {
     message: { message: Message };
     toolCall: { correlationId: string; name: string; input: unknown };
