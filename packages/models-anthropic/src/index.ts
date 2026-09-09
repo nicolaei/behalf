@@ -251,7 +251,8 @@ export function toAnthropicRequest(
   // output_config.effort") — adaptive+effort is the one shape that works
   // across current models.
   const thinking: Anthropic.ThinkingConfigParam | undefined =
-    reasoning && reasoning !== "off" ? { type: "adaptive" } : undefined;
+    // `display` defaults to "omitted" on 4.7+ models, which suppresses thinking deltas.
+    reasoning && reasoning !== "off" ? { type: "adaptive", display: "summarized" } : undefined;
   const effort: Anthropic.OutputConfig["effort"] | undefined =
     reasoning && reasoning !== "off" ? (EFFORT_BY_REASONING[reasoning] ?? "medium") : undefined;
 
