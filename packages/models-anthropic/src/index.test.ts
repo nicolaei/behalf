@@ -105,14 +105,23 @@ describe("toAnthropicRequest", () => {
     ]);
   });
 
-  it("passes thinking config when the profile enables reasoning", () => {
+  // The request ASKS FOR THE THINKING TEXT, and that is not the default.
+  //
+  // `display` decides whether a thinking block comes back with words in it. On
+  // claude-sonnet-5, claude-opus-5 and every 4.7-and-later model it defaults to
+  // `omitted`: the block arrives as `{type:"thinking", text:"", signature:…}`,
+  // and — the part that costs a watcher the most — the server emits no
+  // `thinking_delta` events at all, so nothing streams either. A caller that
+  // never says `summarized` cannot tell a model that thought hard from one that
+  // did not think at all.
+  it("asks for the thinking summary, which the newer models do not send by default", () => {
     const messages: Message[] = [
       { role: "user", intent: "standard", content: [{ type: "text", text: "hi" }] },
     ];
 
     const request = toAnthropicRequest(profile({ reasoning: "medium" }), messages);
 
-    expect(request.thinking).toEqual({ type: "adaptive" });
+    expect(request.thinking).toEqual({ type: "adaptive", display: "summarized" });
     expect(request.effort).toBe("medium");
   });
 
