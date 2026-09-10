@@ -53,9 +53,9 @@ export function buildToolContext(
   return {
     thread: scope,
     correlationId,
-    openStream: (type) =>
+    openStream: (type, streamCorrelationId) =>
       runtime.store.open({
-        correlationId: freshCorrelationId(runtime),
+        correlationId: streamCorrelationId ?? freshCorrelationId(runtime),
         type,
         threadId: scope,
         ...identity,

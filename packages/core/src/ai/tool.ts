@@ -38,7 +38,7 @@ export function toolset(name: string, describe: string): Toolset {
 export interface ToolContext {
   readonly thread: ScopeId;
   readonly correlationId: string; // this call's own correlationId, shared by its toolCall/toolResult pair
-  openStream(type: EventType): Stream; // open a fresh, logged stream scoped to this thread
+  openStream(type: EventType, correlationId?: string): Stream; // open a logged stream scoped to this thread; pass a correlationId to label its envelopes with it (defaults to a fresh one)
   appendEvent<T extends EventType>(payload: Event[T], type: T): void; // commit a standalone event scoped to this thread
   /**
    * Spawns a child agent — a session of its own, with its own log — and hands
