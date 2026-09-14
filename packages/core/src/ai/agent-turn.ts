@@ -18,7 +18,7 @@
 // "agentLoop", a private variable, not this exported primitive).
 
 import { defineGraph, outputs } from "@behalf-js/engine";
-import type { Graph, WaitForResult } from "@behalf-js/engine";
+import type { Graph, Step, WaitForResult } from "@behalf-js/engine";
 import type { ModelCallResult } from "./model-call.js";
 import { toolCall } from "./waitable.js";
 import type { Profile } from "./profile.js";
@@ -93,6 +93,25 @@ export interface AgentTurnOptions {
    * optional and falls back to its own default independently — see
    * `AgentTurnCompactOptions`. */
   compact?: AgentTurnCompactOptions;
+  /**
+   * A step to run between the rounds of one turn — after a tool round has
+   * folded, before the model is asked to respond again.
+   *
+   * Its placement is the whole of its contract: it runs on the loopback only.
+   * A turn that ends — on a final message, or early on a `finishOn` tool call —
+   * never reaches it, because there is no next model call to run it before.
+   *
+   * What it is FOR is anything the thread should carry into the next request,
+   * decided at the one moment that can still change it: a steering message the
+   * human typed while the agent was working is folded here, so the next model
+   * call sees it instead of waiting for the whole turn to end. It may
+   * `appendEvent` (that is the whole of what steering needs) and may await.
+   *
+   * Its own `output` is ignored — it is not a branch, so there is nothing to
+   * route on. `invalidate` and `error` behave as they do on any step: an
+   * invalidate reruns the target, an error fails the turn.
+   */
+  betweenRounds?: Step;
 }
 
 /** What `agentTurn` produces once its finish condition is met. @public */
@@ -291,6 +310,13 @@ export function agentTurn(profile: Profile, options?: AgentTurnOptions): Graph {
       }),
     );
 
+    // Between one round and the next, and nowhere else: this is the only point
+    // at which a decision can still change what the next request carries. Made
+    // only when a caller asked for one, so a turn without a hook is wired — and
+    // numbered — exactly as it was before this option existed.
+    const betweenRounds =
+      options?.betweenRounds === undefined ? undefined : flow.step(options.betweenRounds);
+
     flow.entry(respond);
     respond.then(each);
     each.when((results) => (results as unknown[]).length > 0, fold).otherwise(finalize);
@@ -298,7 +324,8 @@ export function agentTurn(profile: Profile, options?: AgentTurnOptions): Graph {
     maybeCompact.then(checkFinish);
     checkFinish
       .when((output) => (output as { winner?: FiredToolCall }).winner !== undefined, finishByTool)
-      .otherwise(respond);
+      .otherwise(betweenRounds ?? respond);
+    if (betweenRounds) betweenRounds.then(respond);
     finishByTool.then(flow.finish);
     finalize.then(flow.finish);
   });
