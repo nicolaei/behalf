@@ -1,6 +1,6 @@
 {
   "name": "@behalf-js/testing",
-  "version": "0.0.10",
+  "version": "0.1.0",
   "description": "Test-author vocabulary for behalf flows — stepOnce/stepUntilBlocked/stepUntil at the root, model fakes under ./ai, the evaluation harness under ./eval.",
   "type": "module",
   "main": "./dist/index.js",
@@ -31,9 +31,9 @@
     "directory": "packages/testing"
   },
   "dependencies": {
-    "@behalf-js/core": "^0.0.10",
-    "@behalf-js/engine": "^0.0.10",
-    "@behalf-js/stores": "^0.0.10"
+    "@behalf-js/core": "^0.1.0",
+    "@behalf-js/engine": "^0.1.0",
+    "@behalf-js/stores": "^0.1.0"
   },
   "peerDependencies": {
     "vitest": ">=3"

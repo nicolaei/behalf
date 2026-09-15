@@ -1,5 +1,82 @@
 # @behalf-js/core
 
+## 0.1.0
+
+### Minor Changes
+
+- 1fa42c6: Give `agentTurn` a `betweenRounds` step — a seam between the rounds of one turn.
+
+  `agentTurn(profile, { betweenRounds })` runs that step after a tool round has folded and before
+  the model is asked again, which is the one moment at which a decision can still change what the
+  next request carries.
+
+  Cockpit's use of it is steering: a message the human typed while the agent was working is folded
+  onto the thread there, so the next model call sees it instead of waiting for the whole turn to
+  end.
+
+  Where it sits is the whole of its contract, so it runs on the loopback and only there — a turn
+  that ends, on a final message or early on a `finishOn` tool call, never reaches it, because there
+  is no next model call to run it before.
+  Its own `output` is ignored, since it is not a branch; `invalidate` and `error` behave as they do
+  on any step.
+
+  The step is only created when a caller asks for one, so a turn built without the option keeps the
+  same wiring and the same node ids as before.
+
+- 7621720: Ship a reusable `SessionStore` conformance suite from `@behalf-js/testing`.
+
+  `sessionStoreConformance(name, makeStore)` registers the whole `SessionStore` contract as a vitest
+  `describe` block, so a host that writes its own store checks it against the contract owner's tests
+  instead of a hand-copied approximation. `memoryStore` runs the same suite as the reference
+  implementation.
+
+  The metadata `append` and `open` take is now named — `AppendMeta` and `StreamMeta`, exported from
+  the engine — rather than inlined on `SessionStore`.
+  The suite pins a `Required<AppendMeta>` literal, which is what makes a new contract field
+  impossible to add silently: the literal stops typechecking until it is filled in, and the
+  round-trip assertions are driven off its own keys.
+
+- d69bf1c: Extract the durable-execution engine into `@behalf-js/engine`.
+
+  `graph/`, `session/`, `gateway/`, and `runtime/` now live in their own package, with the same `.`
+  / `./internal` split core had. `@behalf-js/core` keeps `ai/` and re-exports the engine's whole
+  surface, so existing imports are unchanged; a durable workflow with no AI in it can now depend on
+  `@behalf-js/engine` alone. `@behalf-js/stores` and `@behalf-js/testing`'s root subpath do exactly
+  that.
+
+  Replay no longer recognizes a satisfied `waitFor` by matching the literal event type `"message"`.
+  The extension that claims an inbox entry (`EngineExtension.commitInboxMessage`) now also claims it
+  back out of the log (`EngineExtension.inboxMessageOf`), so the engine never names any extension's
+  vocabulary.
+
+### Patch Changes
+
+- b2cdcf9: Make stopping a run a verb the runtime answers, and give every tool a signal to honour.
+
+  `ToolContext` gains a `readonly signal: AbortSignal`. `executeToolCall` owns an `AbortController`
+  per dispatch and clears it in a `finally`, so a handler can honour cancellation in its own idiom
+  without the executor having to survive one that ignores it. `ToolHandler`'s own type is unchanged
+  — the context carries the capability.
+
+  `runtime.abort()` is the verb.
+  With no run in flight it returns, having written nothing, nowhere.
+  With a run in flight it cancels every live tool controller, preempts the model call if one is in
+  flight, and ends the turn rather than only the round — so a stop that lands mid-tool does not let
+  the agent start a fresh model call and answer anyway.
+  A caller no longer has to place a message in an inbox and hope it is consumed at the right moment,
+  which is what made surplus presses accumulate as landmines under later turns.
+
+  The stop leaves marks rather than an entry of its own: the assistant envelope and the `toolResult`
+  envelope carry `aborted: true`, and the tool's own output carries the fact inline so the model
+  cannot mistake a half-finished command for a finished one.
+
+  A stop also works more than once per session: the in-flight flag is cleared when a run ends, so
+  the second press stops the second run.
+
+- Updated dependencies [7621720]
+- Updated dependencies [d69bf1c]
+  - @behalf-js/engine@0.1.0
+
 ## 0.0.10
 
 ### Patch Changes
