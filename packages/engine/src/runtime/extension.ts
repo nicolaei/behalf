@@ -161,6 +161,23 @@ export interface EngineExtension {
    * inside the returned function's own body, before its first real work — nothing outside this
    * extension can rely on that setup having finished before the function is even called.
    */
+  /**
+   * Whether this extension currently has cancellable work in flight for `runtime` — the
+   * question `Runtime.abort()` asks before it does anything at all. A run nobody can point
+   * at is a run there is nothing to stop: the verb returns, writing nothing, rather than
+   * arming a trap under some future turn (see `Runtime.abort`). ai answers yes while a model
+   * call or a tool call is live. A no-op for an extension that registers none.
+   */
+  hasLiveWork?(runtime: Runtime): boolean;
+  /**
+   * Cancels everything this extension has in flight for `runtime` — called by
+   * `Runtime.abort()`, and only when some extension has just said it has live work. ai
+   * cancels every live tool call's `AbortController` and preempts the in-flight model call,
+   * which surfaces as a `StepAbortedError` the drive loop routes to the nearest declared
+   * `onAbort`. Writing an event of its own here is not the idea: a stop is visible on the
+   * things it interrupted, never as a row in its own right.
+   */
+  abortLiveWork?(runtime: Runtime): void;
   workers?(runtime: Runtime, signal: AbortSignal): (() => Promise<void>)[];
 }
 

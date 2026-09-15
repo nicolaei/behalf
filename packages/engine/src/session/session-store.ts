@@ -48,6 +48,12 @@ export interface AppendMeta {
   // `forEach` branch's events and the outer graph's: branches run on the parent scope, so
   // `threadId` cannot separate them, and branch-graph node ids collide with outer-graph ones.
   branchId?: string;
+  // Whether the fact being committed was cut short by `Runtime.abort()`. The same mark a
+  // `Stream`'s own `abort()` puts on an assistant envelope, available to the one commit path
+  // that never streams: a tool result. Envelope metadata only — it is not part of the event,
+  // so it never reaches a thread or a model. What a half-finished tool tells the model about
+  // being cut short belongs in its own output payload, which is the tool's business.
+  aborted?: boolean;
 }
 
 /**

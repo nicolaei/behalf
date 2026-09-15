@@ -119,7 +119,7 @@ export function memoryStore(): SessionStore {
 
     append(event: Event[EventType], meta: AppendMeta): void {
       sequence += 1;
-      const envelope = buildEnvelope(meta, event, sequence);
+      const envelope = buildEnvelope(meta, event, sequence, meta.aborted ? { aborted: true } : {});
       log.push(envelope);
       broadcast(envelope);
       wakeReceiveWaiters();

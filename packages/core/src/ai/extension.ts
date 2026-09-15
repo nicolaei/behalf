@@ -15,8 +15,8 @@ import type { Message } from "./message.js";
 import type { Profile } from "./profile.js";
 import type { Tool } from "./tool.js";
 import type { CompactionInput } from "./context.js";
-import { runModelCall } from "./model-call.js";
-import { callTool } from "./tool-executor.js";
+import { runModelCall, hasLiveModelCall, preemptLiveModelCalls } from "./model-call.js";
+import { callTool, abortLiveToolCalls, hasLiveToolCalls } from "./tool-executor.js";
 import { createAiWorkers } from "./tool-executor.js";
 import {
   messageReducer,
@@ -112,6 +112,16 @@ export function ai(config: AiConfig): EngineExtension {
       // is exactly what the hardcoded check did before this generalized.
       if (envelope.type !== "message") return undefined;
       return (envelope.event as Event["message"]).message;
+    },
+    hasLiveWork(runtime) {
+      // What `runtime.abort()` can actually reach: a model call mid-request, or a tool call
+      // mid-handler. Anything else — a parked waitFor, the gap between a committed toolResult
+      // and the next model call — is a run with nothing to stop, and the verb writes nothing.
+      return hasLiveModelCall(runtime) || hasLiveToolCalls(runtime);
+    },
+    abortLiveWork(runtime) {
+      abortLiveToolCalls(runtime);
+      preemptLiveModelCalls(runtime);
     },
     workers: createAiWorkers(config),
   };

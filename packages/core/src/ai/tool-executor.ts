@@ -67,6 +67,11 @@ export function abortLiveToolCalls(runtime: Runtime): void {
   for (const controller of live.values()) controller.abort();
 }
 
+/** Whether any tool call is in flight for this runtime — half of ai's answer to `hasLiveWork`. */
+export function hasLiveToolCalls(runtime: Runtime): boolean {
+  return (liveToolCalls.get(runtime)?.size ?? 0) > 0;
+}
+
 /** Finds the resolved handler for a named tool — direct or a toolset member — or throws if the runtime has none. */
 export function findToolBinding(runtime: Runtime, name: string): ToolHandler {
   const handler = resolvedTools.get(runtime)?.get(name);
@@ -153,9 +158,17 @@ export async function executeToolCall(
     live.delete(call.correlationId);
   }
 
+  // The mark a stop leaves on the thing it interrupted, and the reason there is no abort
+  // event: a call whose signal fired settled under a stop, whatever it chose to return.
+  // Envelope metadata, beside `isError` in spirit but outside the event — the model learns a
+  // tool was cut short from the tool's own output payload, never from core.
   runtime.store.append(
     { correlationId: call.correlationId, output, ...(isError ? { isError: true } : {}) },
-    { type: "toolResult", threadId: scope },
+    {
+      type: "toolResult",
+      threadId: scope,
+      ...(controller.signal.aborted ? { aborted: true } : {}),
+    },
   );
 
   return output;

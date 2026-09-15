@@ -64,6 +64,7 @@ const FULLY_POPULATED_APPEND_META: Required<AppendMeta> = {
   stepName: "a readable step name",
   threadId: THREAD_ID,
   branchId: "branch-7",
+  aborted: true,
 };
 
 /** The same trick for `open`'s metadata: a literal that must grow when `StreamMeta` does. */

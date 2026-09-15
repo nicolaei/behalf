@@ -30,6 +30,26 @@ export interface Runtime {
   readonly extensions: EngineExtension[]; // registered capabilities; their stepContext() is merged into every StepContext
   /** Aborts the signal handed to every extension's `workers`, then awaits each worker's own returned promise settling. Idempotent to call more than once — later calls just re-await already-settled promises. */
   stop(): Promise<void>;
+  /**
+   * Stops the run in flight, if there is one. A verb the runtime answers, not a message a
+   * caller places in the inbox: the caller no longer has to know whether pressing stop is
+   * appropriate, because the runtime does.
+   *
+   * - No run in flight: returns, writing nothing, nowhere. There is nothing to mark and no
+   *   trap is armed under the next turn.
+   * - Already stopping: returns. "Stopping" is an in-memory flag — a fact about this
+   *   process, not about the conversation — so it is never a log entry, and N presses
+   *   during one run produce one aborted turn.
+   * - Otherwise: asks every extension to cancel its live work (`abortLiveWork`), which for
+   *   ai means every live tool call's signal fires and the in-flight model call is
+   *   preempted. The aborted step is then routed to the nearest declared `onAbort`, exactly
+   *   as it always was.
+   *
+   * A stop can land where there is nothing to cancel — between a committed `toolResult` and
+   * the start of the next model call — and that window marks nothing. Accepted by design:
+   * the run stopped, it just stopped silently.
+   */
+  abort(): void;
 }
 
 /**
@@ -49,6 +69,11 @@ export function runtime(config: {
   const abortController = new AbortController();
   const workerPromises: Promise<void>[] = [];
 
+  // In-memory only, deliberately: whether this process is already stopping says nothing
+  // about the conversation, so it must never become a log entry. Self-healing — cleared the
+  // next time abort() finds nothing in flight, which is what lets a later run be stopped.
+  let stopping = false;
+
   const ready: Runtime = {
     store: config.store,
     errorHandlers: [...(config.errorHandlers ?? []), defaultErrorHandler],
@@ -56,6 +81,15 @@ export function runtime(config: {
     stop: async () => {
       abortController.abort();
       await Promise.allSettled(workerPromises);
+    },
+    abort: () => {
+      if (!extensions.some((extension) => extension.hasLiveWork?.(ready))) {
+        stopping = false;
+        return;
+      }
+      if (stopping) return;
+      stopping = true;
+      for (const extension of extensions) extension.abortLiveWork?.(ready);
     },
   };
 

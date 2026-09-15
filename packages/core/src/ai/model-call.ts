@@ -5,7 +5,7 @@
 import type { UserMessage, AssistantMessage, ContentBlock, Usage } from "./message.js";
 import type { Profile } from "./profile.js";
 import type { ThreadContext } from "./thread.js";
-import type { SessionStore, StepExecutionScope } from "@behalf-js/engine";
+import type { SessionStore, StepExecutionScope, Runtime } from "@behalf-js/engine";
 import { StepAbortedError } from "@behalf-js/engine";
 import { modelResolvers } from "./tool-executor.js";
 import "./context.js"; // side-effect: registers the StepContext/EdgeContext ai declaration merge
@@ -55,6 +55,26 @@ async function waitForAbort(
   }
 }
 
+/**
+ * Every in-flight model call's own preempt function, per Runtime — the model-half counterpart
+ * to `liveToolCalls`. Calling one ends that call's race exactly as an abort message would,
+ * without anything ever being placed in the inbox: with no pending entry there is no race
+ * between the model half and the tool half over who consumes it, and no leftover entry to
+ * detonate under the next turn.
+ */
+const liveModelCalls = new WeakMap<Runtime, Set<() => void>>();
+
+/** Whether a model call is in flight for this runtime — half of ai's answer to `hasLiveWork`. */
+export function hasLiveModelCall(runtime: Runtime): boolean {
+  return (liveModelCalls.get(runtime)?.size ?? 0) > 0;
+}
+
+/** Preempts every in-flight model call for this runtime. Each throws `ModelCallAbortedError`,
+ * commits what streamed marked aborted, and is routed to the nearest declared `onAbort`. */
+export function preemptLiveModelCalls(runtime: Runtime): void {
+  for (const preempt of liveModelCalls.get(runtime)?.values() ?? []) preempt();
+}
+
 function isToolCall(block: ContentBlock): block is Extract<ContentBlock, { type: "toolCall" }> {
   return block.type === "toolCall";
 }
@@ -101,12 +121,34 @@ export async function runModelCall(
       return { kind: "reply", message };
     });
 
-  const outcome = await Promise.race([
-    replyPromise,
-    waitForAbort(runtime.store, () => modelSettled).then(
-      (message): { kind: "abort" } | undefined => (message ? { kind: "abort" } : undefined),
-    ),
-  ]);
+  // Registered for the whole race, so `runtime.abort()` can end this call as a verb rather
+  // than by leaving a message in the inbox. `waitForAbort` stays alongside it as internal
+  // plumbing for the older inbox convention.
+  let preempt!: () => void;
+  const preempted = new Promise<{ kind: "abort" }>((resolve) => {
+    preempt = () => {
+      resolve({ kind: "abort" });
+    };
+  });
+  let live = liveModelCalls.get(runtime);
+  if (!live) {
+    live = new Set();
+    liveModelCalls.set(runtime, live);
+  }
+  live.add(preempt);
+
+  let outcome: { kind: "reply"; message: AssistantMessage } | { kind: "abort" } | undefined;
+  try {
+    outcome = await Promise.race([
+      replyPromise,
+      preempted,
+      waitForAbort(runtime.store, () => modelSettled).then(
+        (message): { kind: "abort" } | undefined => (message ? { kind: "abort" } : undefined),
+      ),
+    ]);
+  } finally {
+    live.delete(preempt);
+  }
 
   if (!outcome || outcome.kind === "abort") {
     controller.abort();
