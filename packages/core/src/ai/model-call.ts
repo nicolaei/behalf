@@ -80,6 +80,39 @@ function isToolCall(block: ContentBlock): block is Extract<ContentBlock, { type:
 }
 
 /**
+ * Whether the round this model call would continue was itself cut short by a stop.
+ *
+ * This is the answer to a question the design never asked: a stop preempts the in-flight
+ * model call, and `onAbort` is reached by the `ModelCallAbortedError` that preemption
+ * throws — so when only a TOOL was live there was nothing to preempt, nothing routed to
+ * `onAbort`, and the agent loop happily opened a fresh model call and wrote a whole reply
+ * as if nothing had happened. The stop killed the command but not the turn.
+ *
+ * Rather than arm an in-memory "a stop happened" flag (the exact kind of state that can go
+ * stale — see `runtime.abort()`), the refusal is derived from the log, which already carries
+ * the fact: the toolResult the stop interrupted is committed with `aborted: true` on its
+ * envelope. Scanning this scope's own slice backwards, the most recent `toolResult` decides;
+ * a user message stops the scan first, because a fresh prompt is exactly what re-arms the
+ * turn after it parked at `onAbort`.
+ *
+ * Being log-derived, it survives replay and needs no clearing: the same events read the same
+ * way on a fresh process.
+ */
+function continuesAnAbortedRound(scope: StepExecutionScope): boolean {
+  const events = scope.events();
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const envelope = events[index];
+    if (!envelope) continue;
+    if (envelope.type === "toolResult") return envelope.aborted === true;
+    if (envelope.type === "message") {
+      const { message } = envelope.event as { message: { role: string } };
+      if (message.role === "user") return false;
+    }
+  }
+  return false;
+}
+
+/**
  * Makes one model request and commits it to the log: the reply, and one `toolCall` event per
  * tool the reply asks for. Returns as soon as that's committed — it never runs or waits on a
  * tool call itself; the decoupled tool executor (`ai()`'s `workers` hook) resolves each
@@ -102,6 +135,13 @@ export async function runModelCall(
   // message when it isn't. The identity itself is unused — runModelCall no
   // longer runs a tool call inline, so it has nothing to attribute.
   scope.identity("modelCall called outside a running node");
+
+  // A stop that landed while only a tool was live has no model call to preempt, so this is
+  // where the turn actually ends: the call refuses to start, throws the same error a
+  // preempted one throws, and is routed to the nearest declared `onAbort` by the machinery
+  // that already existed. Nothing is written here — the mark is the aborted `toolResult`
+  // already on the log.
+  if (continuesAnAbortedRound(scope)) throw new ModelCallAbortedError();
   const runtime = scope.runtime;
   const resolveModel = modelResolvers.get(runtime);
   if (!resolveModel) {

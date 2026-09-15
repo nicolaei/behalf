@@ -37,13 +37,17 @@ export interface Runtime {
    *
    * - No run in flight: returns, writing nothing, nowhere. There is nothing to mark and no
    *   trap is armed under the next turn.
-   * - Already stopping: returns. "Stopping" is an in-memory flag — a fact about this
-   *   process, not about the conversation — so it is never a log entry, and N presses
-   *   during one run produce one aborted turn.
    * - Otherwise: asks every extension to cancel its live work (`abortLiveWork`), which for
    *   ai means every live tool call's signal fires and the in-flight model call is
    *   preempted. The aborted step is then routed to the nearest declared `onAbort`, exactly
    *   as it always was.
+   *
+   * N presses during one run still produce one aborted turn, with no "stopping" flag to say
+   * so: cancelling an already-cancelled `AbortController` and preempting an already-preempted
+   * model call are both no-ops, so the dedupe falls out of idempotence instead of out of
+   * in-memory state. That flag used to be cleared only by a LATER press that happened to find
+   * nothing live, so a run ending normally left it stuck true and the next press did nothing
+   * at all — stop worked exactly once per session.
    *
    * A stop can land where there is nothing to cancel — between a committed `toolResult` and
    * the start of the next model call — and that window marks nothing. Accepted by design:
@@ -69,11 +73,6 @@ export function runtime(config: {
   const abortController = new AbortController();
   const workerPromises: Promise<void>[] = [];
 
-  // In-memory only, deliberately: whether this process is already stopping says nothing
-  // about the conversation, so it must never become a log entry. Self-healing — cleared the
-  // next time abort() finds nothing in flight, which is what lets a later run be stopped.
-  let stopping = false;
-
   const ready: Runtime = {
     store: config.store,
     errorHandlers: [...(config.errorHandlers ?? []), defaultErrorHandler],
@@ -83,12 +82,11 @@ export function runtime(config: {
       await Promise.allSettled(workerPromises);
     },
     abort: () => {
-      if (!extensions.some((extension) => extension.hasLiveWork?.(ready))) {
-        stopping = false;
-        return;
-      }
-      if (stopping) return;
-      stopping = true;
+      // No bookkeeping of its own. `hasLiveWork` is asked only so a press at idle is a
+      // visibly deliberate no-op; the dedupe of repeated presses during one run comes from
+      // each extension's cancellation being idempotent, not from a flag that has to be
+      // cleared again afterwards.
+      if (!extensions.some((extension) => extension.hasLiveWork?.(ready))) return;
       for (const extension of extensions) extension.abortLiveWork?.(ready);
     },
   };
