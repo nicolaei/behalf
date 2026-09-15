@@ -41,6 +41,18 @@ export interface ToolContext {
   openStream(type: EventType, correlationId?: string): Stream; // open a logged stream scoped to this thread; pass a correlationId to label its envelopes with it (defaults to a fresh one)
   appendEvent<T extends EventType>(payload: Event[T], type: T): void; // commit a standalone event scoped to this thread
   /**
+   * Cancellation for THIS call — a capability, not a command. The runtime
+   * aborts it when something asks the run to stop; what stopping *means* is
+   * the tool's own decision: a shell kills its process group, a fetch aborts
+   * its request, a cheap in-memory tool may simply finish anyway.
+   *
+   * Honouring it does not change how a call settles. A handler that returns
+   * after cancellation still commits an ordinary `toolResult`; one that throws
+   * still commits `isError`. Returning is usually what a tool wants, since
+   * only a returned value keeps the thread answerable.
+   */
+  readonly signal: AbortSignal;
+  /**
    * Spawns a child agent — a session of its own, with its own log — and hands
    * back a durable handle to its result. Idempotent by THIS call's own
    * `correlationId`: a tool executor re-dispatching a still-pending call after

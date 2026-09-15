@@ -36,6 +36,37 @@ export const modelResolvers = new WeakMap<Runtime, (model: Model) => ModelPort>(
 /** The `AgentSpawner` `ai({ spawner })` was given for a given Runtime, if any — same WeakMap-keyed-by-Runtime shape as `resolvedTools`. Absent when the host registered none, which is what makes `context.spawnAgent` fail loudly rather than silently doing something else. */
 export const agentSpawners = new WeakMap<Runtime, AgentSpawner>();
 
+/**
+ * Every in-flight tool call's `AbortController` for a given Runtime, keyed by the call's own
+ * correlationId — same WeakMap-keyed-by-Runtime shape as `resolvedTools`. `executeToolCall`
+ * registers one per dispatch and clears it in a `finally`, so a settled call leaks nothing and
+ * a later cancellation reaches only calls that are genuinely still running.
+ */
+const liveToolCalls = new WeakMap<Runtime, Map<string, AbortController>>();
+
+/** The live-call map for a runtime, created on first use. */
+function liveCallsFor(runtime: Runtime): Map<string, AbortController> {
+  let live = liveToolCalls.get(runtime);
+  if (!live) {
+    live = new Map();
+    liveToolCalls.set(runtime, live);
+  }
+  return live;
+}
+
+/**
+ * Cancels every tool call still in flight for a runtime. A signal is a capability, not a command:
+ * this only tells each running handler that someone asked the run to stop — whether that kills a
+ * process, aborts a request, or is ignored is the tool's own decision, and either way the call
+ * still settles the way it would have (a returned value commits an ordinary `toolResult`, a throw
+ * commits `isError`). Internal for now: the public `runtime.abort()` verb calls it.
+ */
+export function abortLiveToolCalls(runtime: Runtime): void {
+  const live = liveToolCalls.get(runtime);
+  if (!live) return;
+  for (const controller of live.values()) controller.abort();
+}
+
 /** Finds the resolved handler for a named tool — direct or a toolset member — or throws if the runtime has none. */
 export function findToolBinding(runtime: Runtime, name: string): ToolHandler {
   const handler = resolvedTools.get(runtime)?.get(name);
@@ -49,10 +80,12 @@ export function buildToolContext(
   runtime: Runtime,
   identity: StepIdentity,
   correlationId: string,
+  signal: AbortSignal,
 ): ToolContext {
   return {
     thread: scope,
     correlationId,
+    signal,
     openStream: (type, streamCorrelationId) =>
       runtime.store.open({
         correlationId: streamCorrelationId ?? freshCorrelationId(runtime),
@@ -96,7 +129,16 @@ export async function executeToolCall(
   identity: StepIdentity,
 ): Promise<unknown> {
   const handler = findToolBinding(runtime, call.name);
-  const toolContext = buildToolContext(scope, runtime, identity, call.correlationId);
+  const controller = new AbortController();
+  const live = liveCallsFor(runtime);
+  live.set(call.correlationId, controller);
+  const toolContext = buildToolContext(
+    scope,
+    runtime,
+    identity,
+    call.correlationId,
+    controller.signal,
+  );
 
   let output: unknown;
   let isError = false;
@@ -105,6 +147,10 @@ export async function executeToolCall(
   } catch (error) {
     isError = true;
     output = { error: error instanceof Error ? error.message : String(error) };
+  } finally {
+    // However the call settled, it is no longer cancellable — dropping it here
+    // is what keeps `abortLiveToolCalls` about live work only.
+    live.delete(call.correlationId);
   }
 
   runtime.store.append(
@@ -191,8 +237,16 @@ export async function callTool<Input, Output>(
   identity: StepIdentity,
 ): Promise<Output> {
   const handler = findToolBinding(runtime, tool.name);
-  const toolContext = buildToolContext(scope, runtime, identity, freshCorrelationId(runtime));
-  return handler(input, toolContext) as Promise<Output>;
+  const correlationId = freshCorrelationId(runtime);
+  const controller = new AbortController();
+  const live = liveCallsFor(runtime);
+  live.set(correlationId, controller);
+  const toolContext = buildToolContext(scope, runtime, identity, correlationId, controller.signal);
+  try {
+    return (await handler(input, toolContext)) as Output;
+  } finally {
+    live.delete(correlationId);
+  }
 }
 
 /**

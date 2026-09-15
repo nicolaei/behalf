@@ -13,8 +13,9 @@ onto the thread there, so the next model call sees it instead of waiting for the
 
 Where it sits is the whole of its contract, so it runs on the loopback and only there — a turn that
 ends, on a final message or early on a `finishOn` tool call, never reaches it, because there is no
-next model call to run it before. Its own `output` is ignored, since it is not a branch; `invalidate`
-and `error` behave as they do on any step.
+next model call to run it before.
+Its own `output` is ignored, since it is not a branch; `invalidate` and `error` behave as they do on
+any step.
 
 The step is only created when a caller asks for one, so a turn built without the option keeps the
 same wiring and the same node ids as before.
