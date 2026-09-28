@@ -1,0 +1,24 @@
+{
+  // Regression check for the extension seam: engine source type-checked in the
+  // SAME program as core's `declare module "@behalf-js/engine"` augmentation
+  // (packages/core/src/ai/context.ts). The normal `tsc -b` build never sees
+  // this case — engine and core are separate composite projects, so engine is
+  // checked without the augmentation and core is checked against engine's
+  // emitted .d.ts. Here both barrels resolve to SOURCE (the `paths` below), so
+  // the augmentation is live while packages/engine/src/runtime/*.ts is checked.
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "..",
+    "noEmit": true,
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "paths": {
+      "@behalf-js/engine": ["../packages/engine/src/index.ts"],
+      "@behalf-js/engine/internal": ["../packages/engine/src/internal.ts"],
+      "@behalf-js/core": ["../packages/core/src/index.ts"],
+      "@behalf-js/core/internal": ["../packages/core/src/internal.ts"]
+    }
+  },
+  "include": ["engine-with-core.ts"]
+}
