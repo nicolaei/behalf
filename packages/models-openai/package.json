@@ -3,17 +3,16 @@
   "version": "0.1.0",
   "description": "OpenAI ModelPort adapter for behalf. Stub — not yet implemented.",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    }
+    ".": "./src/index.ts"
   },
   "files": [
     "dist"
   ],
+  "scripts": {
+    "prepack": "node ../../tools/pack-manifest.mjs dist",
+    "postpack": "node ../../tools/pack-manifest.mjs src"
+  },
   "publishConfig": {
     "access": "public"
   },

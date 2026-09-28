@@ -3,21 +3,17 @@
   "version": "0.1.0",
   "description": "Build agent workflows as typed, testable graphs — the flow-authoring DSL and the engine that runs it.",
   "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./internal": {
-      "types": "./dist/internal.d.ts",
-      "default": "./dist/internal.js"
-    }
+    ".": "./src/index.ts",
+    "./internal": "./src/internal.ts"
   },
   "files": [
     "dist"
   ],
+  "scripts": {
+    "prepack": "node ../../tools/pack-manifest.mjs dist",
+    "postpack": "node ../../tools/pack-manifest.mjs src"
+  },
   "publishConfig": {
     "access": "public"
   },

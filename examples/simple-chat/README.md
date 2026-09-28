@@ -8,12 +8,12 @@ streaming) into an actual terminal UI.
 
 ## Running it
 
-`behalf` is linked into this example via `file:../..`, so build the library first.
+`behalf` is linked into this example via `file:../../packages/*`, whose entry points resolve to
+source — no build needed.
 
 ```sh
 # from the repo root
-npm install
-npm run build
+npm ci
 
 # from examples/simple-chat/
 cd examples/simple-chat

@@ -188,7 +188,9 @@ function buildEdgeContext(
       scope.appendEvent(payload, type);
     },
   };
-  return Object.assign(context, extensionFields);
+  // Extensions fill in the fields module augmentation adds (e.g. ai's `thread`).
+  const merged: object = Object.assign(context, extensionFields);
+  return merged as EdgeContext;
 }
 
 /**
