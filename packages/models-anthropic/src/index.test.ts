@@ -146,6 +146,39 @@ describe("toAnthropicRequest", () => {
     ]);
   });
 
+  // A session can change model mid-history — a persona now names its own. A
+  // thinking block another provider wrote carries no Anthropic signature (or
+  // one Anthropic cannot verify), and replaying it as `thinking` gets a 400:
+  // "Invalid `signature` in `thinking` block". Its words still matter to the
+  // conversation, so they travel as plain text instead.
+  it("sends another provider's thinking as text, since Anthropic cannot verify it", () => {
+    const messages: Message[] = [
+      {
+        role: "assistant",
+        provider: "openrouter",
+        model: "deepseek/deepseek-v4.1-flash",
+        usage: { input: 1, output: 1 },
+        content: [
+          { type: "thinking", text: "reasoning...", signature: "not-anthropic" },
+          { type: "thinking", text: "" },
+          { type: "text", text: "done" },
+        ],
+      },
+    ];
+
+    const request = toAnthropicRequest(profile(), messages);
+
+    expect(request.messages).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "reasoning..." },
+          { type: "text", text: "done" },
+        ],
+      },
+    ]);
+  });
+
   it("sends system as an array whose first block is exactly the Claude Code identity when isOAuth is true", () => {
     // Anthropic's OAuth endpoint verifies the FIRST system block equals the
     // identity string exactly — concatenating it into one string gets rejected

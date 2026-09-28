@@ -203,11 +203,26 @@ function toAnthropicMessage(message: Message, isOAuth = false): Anthropic.Messag
     case "assistant":
       return {
         role: "assistant",
-        content: message.content.map((b) => toAnthropicBlock(b, isOAuth)),
+        content:
+          message.provider === "anthropic"
+            ? message.content.map((b) => toAnthropicBlock(b, isOAuth))
+            : message.content.flatMap((b) => foreignBlock(b, isOAuth)),
       };
     case "tool":
       return { role: "user", content: message.content.map((b) => toAnthropicBlock(b, isOAuth)) };
   }
+}
+
+/**
+ * Maps a block from an assistant turn another provider wrote. Its thinking
+ * carries no signature Anthropic can verify — replayed as `thinking` it is a
+ * 400 — so its words go as plain text, and a block with no words (or only an
+ * opaque redacted payload) is dropped. Everything else maps as usual.
+ */
+function foreignBlock(block: ContentBlock, isOAuth: boolean): Anthropic.ContentBlockParam[] {
+  if (block.type !== "thinking") return [toAnthropicBlock(block, isOAuth)];
+  if (block.redacted || block.text === "") return [];
+  return [{ type: "text", text: block.text }];
 }
 
 function systemText(block: ContentBlock): string {
