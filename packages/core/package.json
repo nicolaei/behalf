@@ -1,6 +1,6 @@
 {
   "name": "@behalf-js/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Build agent workflows as typed, testable graphs — the flow-authoring DSL and the engine that runs it.",
   "type": "module",
   "exports": {
@@ -23,11 +23,11 @@
     "directory": "packages/core"
   },
   "dependencies": {
-    "@behalf-js/engine": "^0.1.0",
+    "@behalf-js/engine": "^0.1.1",
     "zod": "^4.1.13"
   },
   "devDependencies": {
-    "@behalf-js/stores": "^0.1.0",
-    "@behalf-js/testing": "^0.1.0"
+    "@behalf-js/stores": "^0.1.1",
+    "@behalf-js/testing": "^0.1.1"
   }
 }

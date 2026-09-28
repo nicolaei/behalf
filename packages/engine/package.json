@@ -1,6 +1,6 @@
 {
   "name": "@behalf-js/engine",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The durable-execution engine behind behalf — the graph DSL, the session log, the websocket gateway, and the event-sourced runtime. No AI vocabulary: models, tools, and conversations arrive as an extension (@behalf-js/core).",
   "type": "module",
   "exports": {
@@ -23,6 +23,6 @@
     "directory": "packages/engine"
   },
   "devDependencies": {
-    "@behalf-js/stores": "^0.1.0"
+    "@behalf-js/stores": "^0.1.1"
   }
 }

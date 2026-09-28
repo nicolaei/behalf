@@ -1,5 +1,20 @@
 # @behalf-js/core
 
+## 0.1.1
+
+### Patch Changes
+
+- b85c7b5: Resolve package entry points to source in the workspace, dist in the tarball.
+
+  Every package's `exports` now points at `./src/*.ts` in the checkout, so in-repo consumers — this
+  workspace's tests and cockpit's `file:` dependencies — need no build step. `prepack`/`postpack`
+  run a new `tools/pack-manifest.mjs` to swap those entries to `{ types, default }` dist objects
+  while packing, and back to source afterward, so published tarballs still ship compiled `./dist`
+  output.
+
+- Updated dependencies [b85c7b5]
+  - @behalf-js/engine@0.1.1
+
 ## 0.1.0
 
 ### Minor Changes

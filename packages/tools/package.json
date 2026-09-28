@@ -1,6 +1,6 @@
 {
   "name": "@behalf-js/tools",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Standard tool bindings for behalf — read, write, edit, bash.",
   "type": "module",
   "exports": {
@@ -22,7 +22,7 @@
     "directory": "packages/tools"
   },
   "dependencies": {
-    "@behalf-js/core": "^0.1.0",
+    "@behalf-js/core": "^0.1.1",
     "zod": "^4.1.13"
   }
 }
