@@ -3,9 +3,16 @@
 ## Development
 
 ```bash
-npm install
-npm run verify
+npm ci
 ```
+
+Setup is `npm ci` in this checkout and `npm ci` in the sibling `cockpit` checkout.
+Neither needs a build: in-repo consumers — this workspace's tests, and cockpit through its `file:`
+links — resolve each package's `src` directly.
+Never copy one checkout's files, `node_modules` or `dist` over another, and never run `git restore`
+or `git checkout` while unsure which worktree `.git` points at: a session's worktree belongs only to
+it.
+If setup is missing, run `npm ci` in your own checkout.
 
 `npm run verify` is the one command that has to pass before a change is done: build, format, lint,
 typecheck (including `docs/examples/` and both `examples/*` apps), and test.
