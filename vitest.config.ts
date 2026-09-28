@@ -1,21 +1,6 @@
-import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
-  resolve: {
-    alias: {
-      "@behalf-js/core/internal": fileURLToPath(
-        new URL("./packages/core/src/internal.ts", import.meta.url),
-      ),
-      "@behalf-js/core": fileURLToPath(new URL("./packages/core/src/index.ts", import.meta.url)),
-      "@behalf-js/engine/internal": fileURLToPath(
-        new URL("./packages/engine/src/internal.ts", import.meta.url),
-      ),
-      "@behalf-js/engine": fileURLToPath(
-        new URL("./packages/engine/src/index.ts", import.meta.url),
-      ),
-    },
-  },
   test: {
     include: ["packages/*/src/**/*.test.ts", "tools/**/*.test.ts", "docs/examples/**/*.test.ts"],
     maxConcurrency: 30,

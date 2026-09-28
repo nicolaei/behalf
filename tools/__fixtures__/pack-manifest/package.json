@@ -1,0 +1,13 @@
+{
+  "name": "@behalf-js/fixture",
+  "version": "0.0.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./internal": "./src/internal.ts",
+    "./ai": "./src/ai/index.ts"
+  },
+  "files": [
+    "dist"
+  ]
+}
