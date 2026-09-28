@@ -291,7 +291,9 @@ export function makeStepContext(config: StepContextConfig): StepContext {
       return { error };
     },
   };
-  return Object.assign(context, extensionFields);
+  // Extensions fill in the fields module augmentation adds (e.g. ai's `thread`, `modelCall`).
+  const merged: object = Object.assign(context, extensionFields);
+  return merged as StepContext;
 }
 
 /**
@@ -325,7 +327,9 @@ export function withInputs(context: StepContext, inputs: unknown[]): StepContext
     ) => context.invalidate(target, options),
     fail: (error: StepError) => context.fail(error),
   };
-  return Object.assign(derived, extensionFields);
+  // Extensions fill in the fields module augmentation adds (e.g. ai's `thread`, `modelCall`).
+  const merged: object = Object.assign(derived, extensionFields);
+  return merged as StepContext;
 }
 
 // Re-exported so callers of `context.invalidate`'s payload-seeding side effect
