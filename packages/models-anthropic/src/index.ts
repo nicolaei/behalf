@@ -49,7 +49,13 @@ export function resolveAuth(env: Record<string, string | undefined>): AnthropicA
 // OAuth-authenticated call. The SDK's `authToken` option alone only sends the
 // bearer token; it does NOT add these headers itself — verified against a real
 // implementation: https://github.com/earendil-works/pi/blob/main/packages/ai/src/api/anthropic-messages.ts
-const CLAUDE_CODE_VERSION = "2.1.75";
+// Do not lower this. The API gates OAuth traffic per model by the version in the
+// user-agent: `claude-opus-5-5` rejects anything below 2.1.280 with
+// 400 invalid_request_error / error_code "claude_code_version_too_old"
+// ("Claude Code 2.1.75 does not support this model; version 2.1.280 or newer is
+// required."). 2.1.280 is both the minimum the API names and the version pi — the
+// working client on this machine — announces as `claudeCodeVersion`.
+const CLAUDE_CODE_VERSION = "2.1.280";
 export const CLAUDE_CODE_IDENTITY = "You are Claude Code, Anthropic's official CLI for Claude.";
 
 /** The headers an OAuth-mode request must carry so Anthropic accepts it as a Claude Code client. Pure, so it's unit tested with no network. @public */
